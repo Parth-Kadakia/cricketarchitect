@@ -1,0 +1,114 @@
+import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import pool from '../config/db.js';
+import asyncHandler from '../utils/asyncHandler.js';
+import { signToken } from '../utils/jwt.js';
+import { requireAuth } from '../middleware/auth.js';
+
+const router = Router();
+
+router.post(
+  '/register',
+  asyncHandler(async (req, res) => {
+    const { email, password, displayName } = req.body;
+
+    if (!email || !password || !displayName) {
+      return res.status(400).json({ message: 'email, password and displayName are required.' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+
+    if (existing.rows.length) {
+      return res.status(409).json({ message: 'Email is already registered.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const inserted = await pool.query(
+      `INSERT INTO users (email, password_hash, display_name, role)
+       VALUES ($1, $2, $3, 'user')
+       RETURNING id, email, display_name, role, last_active_at`,
+      [normalizedEmail, passwordHash, String(displayName).trim()]
+    );
+
+    const user = inserted.rows[0];
+    const token = signToken(user);
+
+    return res.status(201).json({ user, token });
+  })
+);
+
+router.post(
+  '/login',
+  asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: 'email and password are required.' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    const userResult = await pool.query(
+      `SELECT id, email, password_hash, display_name, role, last_active_at
+       FROM users
+       WHERE email = $1`,
+      [normalizedEmail]
+    );
+
+    if (!userResult.rows.length) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
+
+    const userRow = userResult.rows[0];
+    const validPassword = await bcrypt.compare(password, userRow.password_hash);
+
+    if (!validPassword) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
+
+    await pool.query('UPDATE users SET last_active_at = NOW() WHERE id = $1', [userRow.id]);
+
+    const user = {
+      id: userRow.id,
+      email: userRow.email,
+      display_name: userRow.display_name,
+      role: userRow.role,
+      last_active_at: new Date().toISOString()
+    };
+
+    const token = signToken(user);
+
+    return res.json({ user, token });
+  })
+);
+
+router.get(
+  '/me',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const franchiseResult = await pool.query(
+      `SELECT f.id, f.franchise_name, f.status, f.total_valuation, f.prospect_points, f.growth_points, f.academy_name,
+              f.wins, f.losses, f.win_streak, f.best_win_streak, f.current_league_tier, f.promotions, f.relegations,
+              c.name AS city_name, c.country,
+              st.league_position,
+              st.movement AS season_movement
+       FROM franchises f
+       JOIN cities c ON c.id = f.city_id
+       LEFT JOIN seasons s ON s.status = 'ACTIVE'
+       LEFT JOIN season_teams st ON st.season_id = s.id AND st.franchise_id = f.id
+       WHERE f.owner_user_id = $1
+       ORDER BY s.season_number DESC NULLS LAST
+       LIMIT 1`,
+      [req.user.id]
+    );
+
+    return res.json({
+      user: req.user,
+      franchise: franchiseResult.rows[0] || null
+    });
+  })
+);
+
+export default router;

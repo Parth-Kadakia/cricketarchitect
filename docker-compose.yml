@@ -1,0 +1,18 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: global-t20-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: global_t20
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - '5432:5432'
+    volumes:
+      - global_t20_pgdata:/var/lib/postgresql/data
+
+volumes:
+  global_t20_pgdata:
