@@ -34,8 +34,15 @@ const env = {
     .map((item) => item.trim())
     .filter(Boolean),
   streetCricketBallApiEnabled: parseBoolean(process.env.STREET_CRICKET_BALL_API_ENABLED, true),
+  streetCricketFullMatchApiEnabled: parseBoolean(process.env.STREET_CRICKET_FULL_MATCH_API_ENABLED, true),
   streetCricketRequestTimeoutMs: Math.max(350, Number(process.env.STREET_CRICKET_TIMEOUT_MS || 1800)),
-  streetCricketUseForBatchSims: parseBoolean(process.env.STREET_CRICKET_USE_FOR_BATCH_SIMS, false)
+  streetCricketUseForBatchSims: parseBoolean(process.env.STREET_CRICKET_USE_FOR_BATCH_SIMS, true),
+  streetCricketBatchChunkSize: Math.max(1, Number(process.env.STREET_CRICKET_BATCH_CHUNK_SIZE || 10)),
+  streetCricketBatchChunkPauseMs: Math.max(1000, Number(process.env.STREET_CRICKET_BATCH_CHUNK_PAUSE_MS || 60000)),
+  cityVerificationEnabled: parseBoolean(process.env.CITY_VERIFICATION_ENABLED, true),
+  cityVerificationBaseUrl: process.env.CITY_VERIFICATION_BASE_URL || 'https://nominatim.openstreetmap.org',
+  cityVerificationUserAgent: process.env.CITY_VERIFICATION_USER_AGENT || 'CricketArchitect/1.0',
+  cityVerificationTimeoutMs: Math.max(800, Number(process.env.CITY_VERIFICATION_TIMEOUT_MS || 4000))
 };
 
 export default env;

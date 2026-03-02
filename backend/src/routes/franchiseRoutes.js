@@ -40,7 +40,8 @@ router.get(
     const recentResults = await pool.query(
       `SELECT id, stage, round_no, home_franchise_id, away_franchise_id, winner_franchise_id, result_summary, created_at
        FROM matches
-       WHERE home_franchise_id = $1 OR away_franchise_id = $1
+       WHERE (home_franchise_id = $1 OR away_franchise_id = $1)
+         AND status = 'COMPLETED'
        ORDER BY id DESC
        LIMIT 10`,
       [franchise.id]

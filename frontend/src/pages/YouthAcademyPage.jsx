@@ -1,46 +1,65 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
-import BarChart from '../components/BarChart';
-import LineChart from '../components/LineChart';
-import Panel from '../components/Panel';
-import SimpleTable from '../components/SimpleTable';
 import { useAuth } from '../context/AuthContext';
 
-function clubControlLabel(row, userFranchiseId) {
-  if (Number(row.id) === Number(userFranchiseId)) {
-    return 'You';
-  }
+/* ── Helpers ── */
+const money = (v) => `$${Number(v || 0).toFixed(2)}`;
+const academyUpgradeCost = (level) => 10 + Number(level || 1) * 5;
+const youthRatingUpgradeCost = (rating) => 20 + Math.floor(Number(rating || 0) / 10) * 5;
+const overall = (p) => ((Number(p.batting||0)+Number(p.bowling||0)+Number(p.fielding||0)+Number(p.fitness||0)+Number(p.temperament||0))/5).toFixed(0);
 
-  if (row.control_type === 'CPU') {
-    return 'CPU';
-  }
+const ROLE_EMOJI = { BATTER: '🏏', BOWLER: '🎯', ALL_ROUNDER: '⚡', WICKET_KEEPER: '🧤' };
+const ROLE_SHORT = { BATTER: 'BAT', BOWLER: 'BWL', ALL_ROUNDER: 'AR', WICKET_KEEPER: 'WK' };
 
-  if (row.status === 'FOR_SALE') {
-    return 'For Sale';
-  }
-
-  if (row.status === 'AVAILABLE') {
-    return 'Available';
-  }
-
-  return row.owner_username || 'Managed';
+function StatMini({ label, value, max = 100 }) {
+  const pct = Math.max(0, Math.min(100, (Number(value) / max) * 100));
+  const color = pct >= 70 ? 'var(--leaf)' : pct >= 45 ? '#daa520' : 'var(--danger)';
+  return (
+    <div className="tm-stat-mini">
+      <div className="tm-stat-mini-header">
+        <span className="tm-stat-mini-label">{label}</span>
+        <span className="tm-stat-mini-val" style={{ color }}>{value}</span>
+      </div>
+      <div className="tm-stat-mini-track"><div className="tm-stat-mini-fill" style={{ width: `${pct}%`, background: color }} /></div>
+    </div>
+  );
 }
 
-function money(value) {
-  return `$${Number(value || 0).toFixed(2)}`;
+function OvrRing({ value, size = 38 }) {
+  const v = Number(value || 0);
+  const r = (size - 4) / 2;
+  const c = 2 * Math.PI * r;
+  const offset = c * (1 - Math.max(0, Math.min(100, v)) / 100);
+  const color = v >= 70 ? 'var(--leaf)' : v >= 45 ? '#daa520' : 'var(--danger)';
+  return (
+    <svg width={size} height={size} className="tm-ovr-ring">
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--border)" strokeWidth={3} />
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={3} strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round" transform={`rotate(-90 ${size/2} ${size/2})`} />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize={size*0.32} fontWeight="700" fontFamily="'Space Grotesk', sans-serif" fill={color}>{v}</text>
+    </svg>
+  );
 }
 
-function academyUpgradeCost(level) {
-  return 10 + Number(level || 1) * 5;
-}
-
-function youthRatingUpgradeCost(rating) {
-  return 20 + Math.floor(Number(rating || 0) / 10) * 5;
+function GrowthSparkline({ data }) {
+  if (!data || data.length < 2) return <span className="ya-spark-empty">No history</span>;
+  const vals = data.map((d) => Number(d.batting_delta||0) + Number(d.bowling_delta||0) + Number(d.fielding_delta||0));
+  const max = Math.max(...vals, 1);
+  const min = Math.min(...vals, 0);
+  const range = max - min || 1;
+  const w = 80;
+  const h = 24;
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * w},${h - ((v - min) / range) * h}`).join(' ');
+  return (
+    <svg width={w} height={h} className="ya-sparkline">
+      <polyline points={pts} fill="none" stroke="var(--leaf)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 export default function YouthAcademyPage() {
   const { token, franchise } = useAuth();
 
+  const [tab, setTab] = useState('overview');
   const [academyData, setAcademyData] = useState(null);
   const [prospects, setProspects] = useState([]);
   const [globalClubs, setGlobalClubs] = useState([]);
@@ -48,209 +67,315 @@ export default function YouthAcademyPage() {
   const [growthHistory, setGrowthHistory] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [acting, setActing] = useState(null);
+  const [prospectSearch, setProspectSearch] = useState('');
+  const [prospectRole, setProspectRole] = useState('ALL');
+  const [clubSearch, setClubSearch] = useState('');
 
   async function load() {
     setError('');
-
     try {
-      const [academyResponse, prospectsResponse, clubsResponse] = await Promise.all([
+      const [aResp, pResp, cResp] = await Promise.all([
         api.youth.academy(token),
         api.youth.prospects(token),
         api.marketplace.franchises()
       ]);
-
-      setAcademyData(academyResponse);
-      setProspects(prospectsResponse.prospects || []);
-      setGlobalClubs(clubsResponse.franchises || []);
-
-      if (!selectedPlayerId && prospectsResponse.prospects?.length) {
-        setSelectedPlayerId(prospectsResponse.prospects[0].id);
-      }
-    } catch (loadError) {
-      setError(loadError.message);
-    } finally {
-      setLoading(false);
-    }
+      setAcademyData(aResp);
+      setProspects(pResp.prospects || []);
+      setGlobalClubs(cResp.franchises || []);
+      if (!selectedPlayerId && pResp.prospects?.length) setSelectedPlayerId(pResp.prospects[0].id);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
   }
 
-  useEffect(() => {
-    load();
-  }, [token]);
+  useEffect(() => { load(); }, [token]);
 
   useEffect(() => {
-    async function loadHistory() {
-      if (!selectedPlayerId) {
-        setGrowthHistory([]);
-        return;
-      }
-
+    if (!selectedPlayerId) { setGrowthHistory([]); return; }
+    (async () => {
       try {
-        const history = await api.youth.growthHistory(token, selectedPlayerId);
-        setGrowthHistory(history.history || []);
-      } catch (historyError) {
-        setGrowthHistory([]);
-      }
-    }
-
-    loadHistory();
+        const h = await api.youth.growthHistory(token, selectedPlayerId);
+        setGrowthHistory(h.history || []);
+      } catch { setGrowthHistory([]); }
+    })();
   }, [selectedPlayerId, token]);
 
-  async function generateProspects() {
-    try {
-      await api.youth.generate(token);
-      await load();
-    } catch (actionError) {
-      setError(actionError.message);
-    }
-  }
-
-  async function runGrowth() {
-    try {
-      await api.youth.grow(token);
-      await load();
-    } catch (actionError) {
-      setError(actionError.message);
-    }
-  }
-
-  async function upgrade(mode) {
-    try {
-      await api.youth.upgrade(token, mode);
-      await load();
-    } catch (actionError) {
-      setError(actionError.message);
-    }
-  }
-
-  const regionChart = useMemo(() => {
-    if (!academyData?.regions?.length) {
-      return [];
-    }
-
-    return academyData.regions.map((region) => ({
-      label: region.name.split(' ').slice(-1)[0],
-      value: Number(region.quality_rating)
-    }));
-  }, [academyData]);
-
-  const growthChart = useMemo(
-    () =>
-      growthHistory.map((item, index) => ({
-        label: `${index + 1}`,
-        value: Number(item.batting_delta) + Number(item.bowling_delta) + Number(item.fielding_delta)
-      })),
-    [growthHistory]
-  );
-
-  if (loading) {
-    return <div className="loading-state">Loading academy systems...</div>;
+  async function act(fn, label) {
+    setActing(label);
+    try { await fn(); await load(); }
+    catch (e) { setError(e.message); }
+    finally { setActing(null); }
   }
 
   const franchiseData = academyData?.franchise;
+  const regions = academyData?.regions || [];
   const academyCost = academyUpgradeCost(franchiseData?.academy_level);
   const youthCost = youthRatingUpgradeCost(franchiseData?.youth_development_rating);
 
+  const filteredProspects = useMemo(() => {
+    let list = [...prospects];
+    if (prospectRole !== 'ALL') list = list.filter((p) => p.role === prospectRole);
+    if (prospectSearch.trim()) {
+      const q = prospectSearch.toLowerCase();
+      list = list.filter((p) => `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) || (p.country_origin||'').toLowerCase().includes(q));
+    }
+    return list;
+  }, [prospects, prospectRole, prospectSearch]);
+
+  const filteredClubs = useMemo(() => {
+    if (!clubSearch.trim()) return globalClubs;
+    const q = clubSearch.toLowerCase();
+    return globalClubs.filter((c) => (c.franchise_name||'').toLowerCase().includes(q) || (c.city_name||'').toLowerCase().includes(q) || (c.country||'').toLowerCase().includes(q));
+  }, [globalClubs, clubSearch]);
+
+  const selectedProspect = useMemo(() => prospects.find((p) => p.id === selectedPlayerId) || null, [prospects, selectedPlayerId]);
+
+  if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading academy...</span></div>;
+
   return (
-    <div className="page-grid">
-      {error ? <p className="error-text full-width">{error}</p> : null}
+    <div className="ya-page">
+      {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
 
-      <Panel title={franchiseData ? `${franchiseData.academy_name}` : 'Academy'} className="full-width">
-        <div className="inline-metrics">
-          <p>
-            Academy Level: <strong>{franchiseData?.academy_level}</strong>
-          </p>
-          <p>
-            Youth Rating: <strong>{Number(franchiseData?.youth_development_rating || 0).toFixed(1)}</strong>
-          </p>
-          <p>
-            Prospect Points: <strong>{franchiseData?.prospect_points}</strong>
-          </p>
-          <p>
-            Growth Points: <strong>{franchiseData?.growth_points}</strong>
-          </p>
+      {/* ── Header ── */}
+      <div className="ya-header">
+        <div>
+          <h2 className="ya-title">{franchiseData?.academy_name || 'Youth Academy'}</h2>
+          <span className="ya-subtitle">{prospects.length} prospects &middot; {regions.length} scouting regions</span>
         </div>
-      </Panel>
+      </div>
 
-      <Panel
-        title="Point-Based Academy Upgrades"
-        actions={
-          <div className="row-actions">
-            <button className="button" type="button" onClick={() => upgrade('ACADEMY_LEVEL')}>
-              Upgrade Academy ({academyCost} Prospect)
-            </button>
-            <button className="button secondary" type="button" onClick={() => upgrade('YOUTH_RATING')}>
-              Upgrade Youth Rating ({youthCost} Growth)
-            </button>
+      {/* ── Stats strip ── */}
+      <div className="ya-stats-strip">
+        <div className="ya-stat-card">
+          <span className="ya-stat-label">Academy Level</span>
+          <span className="ya-stat-value">{franchiseData?.academy_level || 1}</span>
+        </div>
+        <div className="ya-stat-card">
+          <span className="ya-stat-label">Youth Rating</span>
+          <span className="ya-stat-value">{Number(franchiseData?.youth_development_rating || 0).toFixed(1)}</span>
+        </div>
+        <div className="ya-stat-card ya-stat-card--accent">
+          <span className="ya-stat-label">Prospect Pts</span>
+          <span className="ya-stat-value">{franchiseData?.prospect_points || 0}</span>
+        </div>
+        <div className="ya-stat-card ya-stat-card--accent">
+          <span className="ya-stat-label">Growth Pts</span>
+          <span className="ya-stat-value">{franchiseData?.growth_points || 0}</span>
+        </div>
+      </div>
+
+      {/* ── Actions bar ── */}
+      <div className="ya-actions-bar">
+        <button type="button" className="sq-btn sq-btn--primary" disabled={!!acting} onClick={() => act(() => api.youth.generate(token), 'gen')}>
+          {acting === 'gen' ? 'Generating...' : '🔍 Generate Prospects'}<span className="ya-cost-tag">50 PP</span>
+        </button>
+        <button type="button" className="sq-btn sq-btn--primary" disabled={!!acting} onClick={() => act(() => api.youth.grow(token), 'grow')}>
+          {acting === 'grow' ? 'Growing...' : '📈 Growth Cycle'}<span className="ya-cost-tag">5 GP</span>
+        </button>
+        <button type="button" className="sq-btn" disabled={!!acting} onClick={() => act(() => api.youth.upgrade(token, 'ACADEMY_LEVEL'), 'acad')}>
+          {acting === 'acad' ? 'Upgrading...' : '🏗️ Upgrade Academy'}<span className="ya-cost-tag">{academyCost} PP</span>
+        </button>
+        <button type="button" className="sq-btn" disabled={!!acting} onClick={() => act(() => api.youth.upgrade(token, 'YOUTH_RATING'), 'yr')}>
+          {acting === 'yr' ? 'Upgrading...' : '⭐ Upgrade Youth Rating'}<span className="ya-cost-tag">{youthCost} GP</span>
+        </button>
+      </div>
+
+      {/* ── Tabs ── */}
+      <nav className="sq-tabs">
+        <button type="button" className={`sq-tab ${tab === 'overview' ? 'active' : ''}`} onClick={() => setTab('overview')}>
+          <span className="sq-tab-icon">🎓</span>Academy &amp; Regions
+        </button>
+        <button type="button" className={`sq-tab ${tab === 'prospects' ? 'active' : ''}`} onClick={() => setTab('prospects')}>
+          <span className="sq-tab-icon">🌱</span>Prospects<span className="tm-tab-count">{prospects.length}</span>
+        </button>
+        <button type="button" className={`sq-tab ${tab === 'global' ? 'active' : ''}`} onClick={() => setTab('global')}>
+          <span className="sq-tab-icon">🌍</span>Global Board
+        </button>
+      </nav>
+
+      {/* ═══ OVERVIEW TAB ═══ */}
+      {tab === 'overview' && (
+        <div className="sq-tab-content">
+          {/* Regions */}
+          <h3 className="ya-section-title">Scouting Regions</h3>
+          <div className="ya-region-grid">
+            {regions.map((region) => {
+              const quality = Number(region.quality_rating || 0);
+              const pct = Math.min(100, quality);
+              const color = quality >= 60 ? 'var(--leaf)' : quality >= 35 ? '#daa520' : 'var(--danger)';
+              return (
+                <div key={region.id} className="ya-region-card">
+                  <div className="ya-region-header">
+                    <strong className="ya-region-name">{region.name}</strong>
+                    <span className="ya-region-country">{region.region_country}</span>
+                  </div>
+                  <div className="ya-region-quality">
+                    <span className="ya-region-q-label">Quality</span>
+                    <div className="ya-region-bar"><div className="ya-region-bar-fill" style={{ width: `${pct}%`, background: color }} /></div>
+                    <span className="ya-region-q-val" style={{ color }}>{quality.toFixed(1)}</span>
+                  </div>
+                  <div className="ya-region-footer">
+                    <span>🌱 {region.youth_count || 0} prospects</span>
+                    <span>💰 {money(region.coaching_investment)} invested</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        }
-      >
-        <p className="muted">Academy improvement is strictly point-based in this mode. Money does not upgrade youth systems.</p>
-      </Panel>
 
-      <Panel
-        title="Prospect Pipeline Actions"
-        actions={
-          <div className="row-actions">
-            <button className="button" type="button" onClick={generateProspects}>
-              Generate Prospects (50 Prospect)
-            </button>
-            <button className="button secondary" type="button" onClick={runGrowth}>
-              Apply Growth Cycle (5 Growth)
-            </button>
+          {/* How it works */}
+          <div className="ya-how-it-works">
+            <h3 className="ya-section-title">How It Works</h3>
+            <div className="ya-how-grid">
+              <div className="ya-how-card"><span className="ya-how-icon">🏆</span><strong>Match Reward</strong><span>Win: +5 PP &amp; +5 GP · Loss: +2 PP &amp; +2 GP</span></div>
+              <div className="ya-how-card"><span className="ya-how-icon">🔍</span><strong>Generate Prospects</strong><span>50 PP — creates youth players from your regions</span></div>
+              <div className="ya-how-card"><span className="ya-how-icon">📈</span><strong>Growth Cycle</strong><span>5 GP — boosts attributes, morale &amp; value</span></div>
+              <div className="ya-how-card"><span className="ya-how-icon">🏗️</span><strong>Academy Upgrade</strong><span>10 + (Level × 5) PP — improves generation quality</span></div>
+              <div className="ya-how-card"><span className="ya-how-icon">⭐</span><strong>Youth Rating</strong><span>20 + floor(Rating/10) × 5 GP — boosts growth rates</span></div>
+            </div>
           </div>
-        }
-      >
-        <p className="muted">Every win grants +5 prospect points and +5 growth points.</p>
-      </Panel>
+        </div>
+      )}
 
-      <Panel title="Regional Quality Chart">
-        <BarChart data={regionChart} color="var(--moss)" />
-      </Panel>
-
-      <Panel title="Selected Player Growth Trend">
-        <LineChart data={growthChart} valueFormatter={(value) => `${Math.round(value)} growth`} />
-      </Panel>
-
-      <Panel title="Global Academy + Valuation Board" className="full-width">
-        <SimpleTable
-          columns={[
-            { key: 'franchise_name', label: 'Franchise' },
-            { key: 'city_name', label: 'City' },
-            { key: 'country', label: 'Country' },
-            { key: 'control', label: 'Control', render: (_, row) => clubControlLabel(row, franchise?.id) },
-            { key: 'academy_level', label: 'Academy' },
-            { key: 'youth_development_rating', label: 'Youth' },
-            { key: 'prospect_points', label: 'Prospect' },
-            { key: 'growth_points', label: 'Growth' },
-            { key: 'total_valuation', label: 'Value', render: (value) => money(value) }
-          ]}
-          rows={globalClubs}
-          emptyMessage="No club academy/valuation data available."
-        />
-      </Panel>
-
-      <Panel title="Youth Prospects" className="full-width">
-        <SimpleTable
-          columns={[
-            { key: 'name', label: 'Player', render: (_, row) => `${row.first_name} ${row.last_name}` },
-            { key: 'region_name', label: 'Region' },
-            { key: 'country_origin', label: 'Country' },
-            { key: 'role', label: 'Role' },
-            { key: 'potential', label: 'Potential' },
-            { key: 'age', label: 'Age' },
-            {
-              key: 'detail',
-              label: 'Growth',
-              render: (_, row) => (
-                <button type="button" onClick={() => setSelectedPlayerId(row.id)}>
-                  View
+      {/* ═══ PROSPECTS TAB ═══ */}
+      {tab === 'prospects' && (
+        <div className="sq-tab-content">
+          <div className="tm-controls">
+            <input type="text" className="sq-search" placeholder="Search by name or country..." value={prospectSearch} onChange={(e) => setProspectSearch(e.target.value)} />
+            <div className="tm-filters">
+              {['ALL', 'BATTER', 'BOWLER', 'ALL_ROUNDER', 'WICKET_KEEPER'].map((r) => (
+                <button key={r} type="button" className={`sq-filter-btn ${prospectRole === r ? 'active' : ''}`} onClick={() => setProspectRole(r)}>
+                  {r === 'ALL' ? 'All' : `${ROLE_EMOJI[r]||''} ${ROLE_SHORT[r]||r}`}
                 </button>
-              )
-            }
-          ]}
-          rows={prospects}
-        />
-      </Panel>
+              ))}
+            </div>
+          </div>
+
+          {filteredProspects.length === 0 ? (
+            <div className="sq-empty">No prospects match your filters. Generate some!</div>
+          ) : (
+            <div className="ya-prospect-layout">
+              {/* Prospect cards */}
+              <div className="ya-prospect-grid">
+                {filteredProspects.map((p) => {
+                  const ovr = overall(p);
+                  const isSelected = p.id === selectedPlayerId;
+                  return (
+                    <div key={p.id} className={`ya-prospect-card ${isSelected ? 'ya-prospect-card--selected' : ''}`} onClick={() => setSelectedPlayerId(p.id)}>
+                      <div className="ya-prospect-top">
+                        <OvrRing value={ovr} size={34} />
+                        <div className="ya-prospect-identity">
+                          <strong className="ya-prospect-name">{p.first_name} {p.last_name}</strong>
+                          <span className="ya-prospect-meta">{p.country_origin} &middot; Age {p.age}</span>
+                        </div>
+                        <span className={`sq-role-pill sq-role-pill--${(p.role||'').toLowerCase()}`}>
+                          {ROLE_EMOJI[p.role]||''} {ROLE_SHORT[p.role]||p.role}
+                        </span>
+                      </div>
+                      <div className="tm-card-stats">
+                        <StatMini label="BAT" value={p.batting} />
+                        <StatMini label="BWL" value={p.bowling} />
+                        <StatMini label="FLD" value={p.fielding} />
+                        <StatMini label="FIT" value={p.fitness} />
+                        <StatMini label="TMP" value={p.temperament} />
+                      </div>
+                      <div className="ya-prospect-bottom">
+                        <span className="ya-prospect-pot">⭐ {p.potential} POT</span>
+                        {p.region_name && <span className="ya-prospect-region">📍 {p.region_name}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Detail sidebar */}
+              {selectedProspect && (
+                <div className="ya-detail-panel">
+                  <div className="ya-detail-header">
+                    <OvrRing value={overall(selectedProspect)} size={48} />
+                    <div>
+                      <strong className="ya-detail-name">{selectedProspect.first_name} {selectedProspect.last_name}</strong>
+                      <span className="ya-detail-info">{selectedProspect.country_origin} &middot; {selectedProspect.role?.replace(/_/g, ' ')} &middot; Age {selectedProspect.age}</span>
+                    </div>
+                  </div>
+                  <div className="ya-detail-stats">
+                    <StatMini label="Batting" value={selectedProspect.batting} />
+                    <StatMini label="Bowling" value={selectedProspect.bowling} />
+                    <StatMini label="Fielding" value={selectedProspect.fielding} />
+                    <StatMini label="Fitness" value={selectedProspect.fitness} />
+                    <StatMini label="Temperament" value={selectedProspect.temperament} />
+                  </div>
+                  <div className="ya-detail-row"><span>Potential</span><strong>{selectedProspect.potential}</strong></div>
+                  <div className="ya-detail-row"><span>Morale</span><strong>{Number(selectedProspect.morale||0).toFixed(0)}</strong></div>
+                  <div className="ya-detail-row"><span>Form</span><strong>{Number(selectedProspect.form||0).toFixed(0)}</strong></div>
+                  <div className="ya-detail-row"><span>Market Value</span><strong>{money(selectedProspect.market_value)}</strong></div>
+                  <div className="ya-detail-growth">
+                    <span className="ya-detail-growth-label">Growth Trend</span>
+                    <GrowthSparkline data={growthHistory} />
+                  </div>
+                  {growthHistory.length > 0 && (
+                    <div className="ya-growth-log">
+                      {growthHistory.slice(0, 8).map((g, i) => {
+                        const total = Number(g.batting_delta||0) + Number(g.bowling_delta||0) + Number(g.fielding_delta||0);
+                        return (
+                          <div key={i} className="ya-growth-entry">
+                            <span className="ya-growth-season">{g.season_name || `#${i + 1}`}</span>
+                            <span className={`ya-growth-delta ${total >= 0 ? 'ya-growth-delta--pos' : 'ya-growth-delta--neg'}`}>
+                              {total >= 0 ? '+' : ''}{total.toFixed(0)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ GLOBAL BOARD TAB ═══ */}
+      {tab === 'global' && (
+        <div className="sq-tab-content">
+          <input type="text" className="sq-search" placeholder="Search franchises..." value={clubSearch} onChange={(e) => setClubSearch(e.target.value)} style={{ maxWidth: 320, marginBottom: '0.75rem' }} />
+          <div className="ya-club-table">
+            <div className="ya-club-row ya-club-row--header">
+              <span className="ya-club-col ya-club-col--name">Franchise</span>
+              <span className="ya-club-col">Control</span>
+              <span className="ya-club-col">League</span>
+              <span className="ya-club-col">Academy</span>
+              <span className="ya-club-col">Youth</span>
+              <span className="ya-club-col">PP</span>
+              <span className="ya-club-col">GP</span>
+              <span className="ya-club-col">Value</span>
+            </div>
+            {filteredClubs.length === 0 ? (
+              <div className="sq-empty">No clubs match your search.</div>
+            ) : (
+              filteredClubs.map((club) => {
+                const isMe = Number(club.id) === Number(franchise?.id);
+                const ctrl = isMe ? 'You' : club.control_type === 'CPU' ? 'CPU' : club.status === 'FOR_SALE' ? 'Sale' : club.status === 'AVAILABLE' ? 'Open' : club.owner_username || 'User';
+                return (
+                  <div key={club.id} className={`ya-club-row ${isMe ? 'ya-club-row--mine' : ''}`}>
+                    <span className="ya-club-col ya-club-col--name">
+                      <strong>{club.franchise_name}</strong>
+                      <span className="ya-club-sub">{club.city_name}, {club.country}</span>
+                    </span>
+                    <span className={`ya-club-col ya-club-ctrl ya-club-ctrl--${ctrl.toLowerCase()}`}>{ctrl}</span>
+                    <span className="ya-club-col"><span className={`lg-tier-badge lg-tier-badge--${club.current_league_tier}`} style={{ width: 20, height: 20, fontSize: '0.65rem' }}>{club.current_league_tier}</span></span>
+                    <span className="ya-club-col ya-club-num">{club.academy_level}</span>
+                    <span className="ya-club-col ya-club-num">{Number(club.youth_development_rating||0).toFixed(1)}</span>
+                    <span className="ya-club-col ya-club-num">{club.prospect_points}</span>
+                    <span className="ya-club-col ya-club-num">{club.growth_points}</span>
+                    <span className="ya-club-col ya-club-num">{money(club.total_valuation)}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

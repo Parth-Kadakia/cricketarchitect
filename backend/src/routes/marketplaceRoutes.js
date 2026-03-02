@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import pool from '../config/db.js';
+import pool, { withTransaction } from '../config/db.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getMarketplaceData, getFranchiseByOwner } from '../services/franchiseService.js';
 import { getTransferFeed } from '../services/cpuManagerService.js';
+import { calculateFranchiseValuation } from '../services/valuationService.js';
 
 const router = Router();
 
@@ -109,52 +110,88 @@ router.post(
   '/auction-pool/:playerId/buy',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id);
-    if (!franchise) {
-      return res.status(404).json({ message: 'No active franchise found.' });
-    }
+    const result = await withTransaction(async (client) => {
+      const franchise = await getFranchiseByOwner(req.user.id, client);
+      if (!franchise) {
+        const error = new Error('No active franchise found.');
+        error.status = 404;
+        throw error;
+      }
 
-    const player = await pool.query(
-      `SELECT id, first_name, last_name, market_value
-       FROM players
-       WHERE id = $1
-         AND squad_status = 'AUCTION'`,
-      [req.params.playerId]
-    );
+      const player = await client.query(
+        `SELECT id, first_name, last_name, market_value
+         FROM players
+         WHERE id = $1
+           AND squad_status = 'AUCTION'
+         FOR UPDATE`,
+        [req.params.playerId]
+      );
 
-    if (!player.rows.length) {
-      return res.status(404).json({ message: 'Player is no longer in the auction pool.' });
-    }
+      if (!player.rows.length) {
+        const error = new Error('Player is no longer in the auction pool.');
+        error.status = 404;
+        throw error;
+      }
 
-    const squadCount = await pool.query(
-      `SELECT COUNT(*)::int AS count
-       FROM players
-       WHERE franchise_id = $1
-         AND squad_status = 'MAIN_SQUAD'`,
-      [franchise.id]
-    );
+      const price = Number(player.rows[0].market_value || 0);
+      const currentBalance = Number(franchise.financial_balance || 0);
+      if (currentBalance < price) {
+        const error = new Error(
+          `Insufficient balance. Need $${price.toFixed(2)}, available cash $${currentBalance.toFixed(2)}. Franchise value $${Number(franchise.total_valuation || 0).toFixed(2)} is not spendable cash.`
+        );
+        error.status = 400;
+        throw error;
+      }
 
-    const targetStatus = Number(squadCount.rows[0].count) < 15 ? 'MAIN_SQUAD' : 'YOUTH';
+      const squadCount = await client.query(
+        `SELECT COUNT(*)::int AS count
+         FROM players
+         WHERE franchise_id = $1
+           AND squad_status = 'MAIN_SQUAD'`,
+        [franchise.id]
+      );
 
-    const updated = await pool.query(
-      `UPDATE players
-       SET franchise_id = $2,
-           squad_status = $3,
-           is_youth = CASE WHEN $3 = 'YOUTH' THEN TRUE ELSE FALSE END,
-           morale = LEAST(100, morale + 5),
-           form = LEAST(100, form + 4)
-       WHERE id = $1
-       RETURNING *`,
-      [req.params.playerId, franchise.id, targetStatus]
-    );
+      const targetStatus = Number(squadCount.rows[0].count) < 15 ? 'MAIN_SQUAD' : 'YOUTH';
 
-    await pool.query(
-      `INSERT INTO transfer_feed (action_type, source_franchise_id, player_id, message)
-       VALUES ('TRANSFER', $1, $2, $3)`,
-      [franchise.id, req.params.playerId, `${player.rows[0].first_name} ${player.rows[0].last_name} joined your squad from auction.`]
-    );
+      const updated = await client.query(
+        `UPDATE players
+         SET franchise_id = $2,
+             squad_status = $3,
+             is_youth = CASE WHEN $3 = 'YOUTH' THEN TRUE ELSE FALSE END,
+             starting_xi = FALSE,
+             lineup_slot = NULL,
+             morale = LEAST(100, morale + 5),
+             form = LEAST(100, form + 4)
+         WHERE id = $1
+         RETURNING *`,
+        [req.params.playerId, franchise.id, targetStatus]
+      );
 
-    return res.json({ player: updated.rows[0] });
+      await client.query(
+        `UPDATE franchises
+         SET financial_balance = financial_balance - $2
+         WHERE id = $1`,
+        [franchise.id, price]
+      );
+
+      await client.query(
+        `INSERT INTO transactions (franchise_id, transaction_type, amount, description, related_player_id)
+         VALUES ($1, 'PURCHASE', $2, $3, $4)`,
+        [franchise.id, -price, `Auction purchase: ${player.rows[0].first_name} ${player.rows[0].last_name}`, req.params.playerId]
+      );
+
+      await client.query(
+        `INSERT INTO transfer_feed (action_type, source_franchise_id, player_id, message)
+         VALUES ('TRANSFER', $1, $2, $3)`,
+        [franchise.id, req.params.playerId, `${player.rows[0].first_name} ${player.rows[0].last_name} joined your squad from auction.`]
+      );
+
+      await calculateFranchiseValuation(franchise.id, null, client);
+
+      return { player: updated.rows[0], price };
+    });
+
+    return res.json(result);
   })
 );
 

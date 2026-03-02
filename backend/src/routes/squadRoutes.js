@@ -3,7 +3,7 @@ import pool from '../config/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { getFranchiseByOwner } from '../services/franchiseService.js';
-import { loanPlayer, promoteYouthPlayer, releasePlayer } from '../services/youthService.js';
+import { demoteMainSquadPlayer, loanPlayer, promoteYouthPlayer, releasePlayer } from '../services/youthService.js';
 
 const router = Router();
 const SALARY_CAP = 120;
@@ -21,7 +21,7 @@ router.get(
       `SELECT *, ROUND((batting + bowling + fielding + fitness + temperament) / 5.0, 1) AS overall
        FROM players
        WHERE franchise_id = $1
-       ORDER BY squad_status, overall DESC, potential DESC`,
+       ORDER BY squad_status, starting_xi DESC, lineup_slot ASC NULLS LAST, overall DESC, potential DESC`,
       [franchise.id]
     );
 
@@ -106,11 +106,11 @@ router.get(
     }
 
     const lineup = await pool.query(
-      `SELECT id, first_name, last_name, role, batting, bowling, fielding, form, morale
+      `SELECT id, first_name, last_name, role, batting, bowling, fielding, form, morale, lineup_slot
        FROM players
        WHERE franchise_id = $1
          AND starting_xi = TRUE
-       ORDER BY id ASC`,
+       ORDER BY lineup_slot ASC NULLS LAST, id ASC`,
       [franchise.id]
     );
 
@@ -128,6 +128,11 @@ router.put(
       return res.status(400).json({ message: 'Starting XI must include exactly 11 players.' });
     }
 
+    const uniqueIds = new Set(playerIds.map((id) => Number(id)));
+    if (uniqueIds.size !== 11) {
+      return res.status(400).json({ message: 'Starting XI cannot include duplicate players.' });
+    }
+
     const franchise = await getFranchiseByOwner(req.user.id);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
@@ -137,7 +142,7 @@ router.put(
       `SELECT id
        FROM players
        WHERE franchise_id = $1
-         AND squad_status IN ('MAIN_SQUAD', 'YOUTH', 'LOANED')`,
+         AND squad_status IN ('MAIN_SQUAD', 'YOUTH')`,
       [franchise.id]
     );
 
@@ -148,18 +153,37 @@ router.put(
       return res.status(400).json({ message: 'One or more lineup players are not eligible.' });
     }
 
-    await pool.query('UPDATE players SET starting_xi = FALSE WHERE franchise_id = $1', [franchise.id]);
+    await pool.query('UPDATE players SET starting_xi = FALSE, lineup_slot = NULL WHERE franchise_id = $1', [franchise.id]);
 
     await pool.query(
       `UPDATE players
        SET starting_xi = TRUE,
+           lineup_slot = ordered.slot::int,
            squad_status = CASE WHEN squad_status = 'YOUTH' THEN 'MAIN_SQUAD' ELSE squad_status END
-       WHERE id = ANY($1::bigint[])
-         AND franchise_id = $2`,
-      [playerIds, franchise.id]
+       FROM (
+         SELECT player_id::bigint, slot::int
+         FROM unnest($1::bigint[]) WITH ORDINALITY AS t(player_id, slot)
+       ) AS ordered
+       WHERE players.id = ordered.player_id
+         AND players.franchise_id = $2`,
+      [playerIds.map((id) => Number(id)), franchise.id]
     );
 
     return res.json({ lineup: playerIds });
+  })
+);
+
+router.post(
+  '/demote/:playerId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const franchise = await getFranchiseByOwner(req.user.id);
+    if (!franchise) {
+      return res.status(404).json({ message: 'No active franchise found.' });
+    }
+
+    const player = await demoteMainSquadPlayer(franchise.id, req.params.playerId, pool);
+    return res.json({ player });
   })
 );
 

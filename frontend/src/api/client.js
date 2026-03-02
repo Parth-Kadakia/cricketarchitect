@@ -59,7 +59,13 @@ export const api = {
   },
   cities: {
     list: (availableOnly = false, q = '', limit = 600) =>
-      request(`/cities?available=${availableOnly}&q=${encodeURIComponent(q)}&limit=${limit}`)
+      request(`/cities?available=${availableOnly}&q=${encodeURIComponent(q)}&limit=${limit}`),
+    add: (token, payload) =>
+      request('/cities', {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload)
+      })
   },
   franchise: {
     me: (token) => request('/franchises/me', { headers: buildHeaders(token, false) }),
@@ -118,6 +124,11 @@ export const api = {
       request(`/squad/release/${playerId}`, {
         method: 'POST',
         headers: buildHeaders(token)
+      }),
+    demote: (token, playerId) =>
+      request(`/squad/demote/${playerId}`, {
+        method: 'POST',
+        headers: buildHeaders(token)
       })
   },
   youth: {
@@ -153,26 +164,52 @@ export const api = {
       request(`/league/fixtures${seasonId || roundNo ? `?${[seasonId ? `seasonId=${seasonId}` : null, roundNo ? `roundNo=${roundNo}` : null].filter(Boolean).join('&')}` : ''}`),
     events: (matchId) => request(`/league/matches/${matchId}/events`),
     scorecard: (matchId) => request(`/league/matches/${matchId}/scorecard`),
-    simulateLive: (token, matchId, ballDelayMs = 120) =>
+    simulateLive: (token, matchId, ballDelayMs = 120, operationId = null) =>
       request(`/league/matches/${matchId}/simulate-live`, {
         method: 'POST',
         headers: buildHeaders(token),
-        body: JSON.stringify({ ballDelayMs })
+        body: JSON.stringify({ ballDelayMs, ...(operationId ? { operationId } : {}) })
       }),
-    simulateInstant: (token, matchId) =>
+    simulateInstant: (token, matchId, payload = {}) =>
       request(`/league/matches/${matchId}/simulate-instant`, {
         method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload || {})
+      }),
+    resetMatch: (token, matchId) =>
+      request(`/league/matches/${matchId}/reset`, {
+        method: 'POST',
         headers: buildHeaders(token)
       }),
-    simulateNextRound: (token) =>
+    simulateNextRound: (token, payload = {}) =>
       request('/league/simulate-next-round', {
         method: 'POST',
-        headers: buildHeaders(token)
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload || {})
       }),
-    simulateSeason: (token) =>
+    simulateLeagueRound: (token, payload) =>
+      request('/league/simulate-league-round', {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload)
+      }),
+    simulateMyLeagueRound: (token, payload = {}) =>
+      request('/league/simulate-my-league-round', {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload || {})
+      }),
+    simulateSeason: (token, payload = {}) =>
       request('/league/simulate-season', {
         method: 'POST',
-        headers: buildHeaders(token)
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload || {})
+      }),
+    simulateHalfSeason: (token, payload = {}) =>
+      request('/league/simulate-half-season', {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload || {})
       })
   },
   marketplace: {

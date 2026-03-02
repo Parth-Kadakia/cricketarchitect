@@ -31,6 +31,25 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
   await dbClient.query("ALTER TABLE season_teams ADD COLUMN IF NOT EXISTS league_position INTEGER");
 
   await dbClient.query("ALTER TABLE matches ADD COLUMN IF NOT EXISTS league_tier INTEGER");
+  await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS lineup_slot INTEGER");
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF NOT EXISTS (
+         SELECT 1
+         FROM pg_constraint
+         WHERE conname = 'players_lineup_slot_check'
+       ) THEN
+         ALTER TABLE players
+         ADD CONSTRAINT players_lineup_slot_check CHECK (lineup_slot BETWEEN 1 AND 11);
+       END IF;
+     END $$;`
+  );
+  await dbClient.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS players_franchise_lineup_slot_uidx
+     ON players(franchise_id, lineup_slot)
+     WHERE lineup_slot IS NOT NULL`
+  );
 
   await dbClient.query(
     `UPDATE franchises
@@ -63,5 +82,32 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
        AND m.league_tier IS NULL
        AND st.season_id = m.season_id
        AND st.franchise_id = m.home_franchise_id`
+  );
+
+  // Clear all lineup slots first to avoid unique-constraint conflicts during reassignment
+  await dbClient.query(
+    `UPDATE players SET lineup_slot = NULL WHERE lineup_slot IS NOT NULL`
+  );
+
+  await dbClient.query(
+    `WITH ordered AS (
+       SELECT id,
+              franchise_id,
+              ROW_NUMBER() OVER (PARTITION BY franchise_id ORDER BY id ASC) AS slot
+       FROM players
+       WHERE starting_xi = TRUE
+     )
+     UPDATE players p
+     SET lineup_slot = o.slot::int
+     FROM ordered o
+     WHERE p.id = o.id
+       AND o.slot <= 11`
+  );
+
+  await dbClient.query(
+    `UPDATE players
+     SET starting_xi = FALSE
+     WHERE starting_xi = TRUE
+       AND lineup_slot IS NULL`
   );
 }

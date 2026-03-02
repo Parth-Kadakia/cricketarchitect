@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import pool from '../config/db.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
@@ -12,11 +13,34 @@ import {
   getSeasonSummary,
   listSeasons
 } from '../services/leagueService.js';
-import { getMatchScorecard, isMatchSimulationRunning, simulateMatchLive, simulateRound, simulateSeasonToEnd } from '../services/matchEngine.js';
+import {
+  getMatchScorecard,
+  isMatchSimulationRunning,
+  simulateLeagueRound,
+  simulateMatchLive,
+  simulateMatchOutsideCenter,
+  simulateHalfSeason,
+  simulateMyLeagueRound,
+  simulateRound,
+  simulateSeasonToEnd
+} from '../services/matchEngine.js';
 import { runCpuMarketCycle } from '../services/cpuManagerService.js';
 import { broadcast } from '../ws/realtime.js';
 
 const router = Router();
+
+function resolveOperationId(req, prefix = 'sim') {
+  const fromBody = String(req.body?.operationId || '').trim();
+  if (fromBody) {
+    return fromBody.slice(0, 96);
+  }
+
+  return `${prefix}-${randomUUID()}`;
+}
+
+function pushSimulationProgress(payload) {
+  broadcast('league:simulation_progress', payload, 'league');
+}
 
 router.get(
   '/seasons',
@@ -173,7 +197,9 @@ router.get(
          af.id AS away_franchise_id,
          af.franchise_name AS away_franchise_name,
          ac.name AS away_city_name,
-         ac.country AS away_country
+         ac.country AS away_country,
+         COALESCE((SELECT ROUND(AVG((p.batting + p.bowling + p.fielding + p.fitness + p.temperament) / 5.0), 1) FROM players p WHERE p.franchise_id = hf.id AND p.squad_status = 'MAIN_SQUAD'), 0) AS home_avg_overall,
+         COALESCE((SELECT ROUND(AVG((p.batting + p.bowling + p.fielding + p.fitness + p.temperament) / 5.0), 1) FROM players p WHERE p.franchise_id = af.id AND p.squad_status = 'MAIN_SQUAD'), 0) AS away_avg_overall
        FROM matches m
        JOIN franchises hf ON hf.id = m.home_franchise_id
        JOIN cities hc ON hc.id = hf.city_id
@@ -218,11 +244,62 @@ router.get(
 );
 
 router.post(
+  '/matches/:matchId/reset',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const matchId = Number(req.params.matchId);
+    if (!matchId) {
+      return res.status(400).json({ message: 'Invalid match id.' });
+    }
+
+    if (isMatchSimulationRunning(matchId)) {
+      return res.status(409).json({ message: 'Cannot reset a match while its simulation is actively running.' });
+    }
+
+    const current = await pool.query('SELECT status FROM matches WHERE id = $1', [matchId]);
+    if (!current.rows.length) {
+      return res.status(404).json({ message: 'Match not found.' });
+    }
+
+    const status = String(current.rows[0].status || '').toUpperCase();
+    if (status === 'COMPLETED') {
+      return res.status(409).json({ message: 'Cannot reset a completed match.' });
+    }
+
+    if (status !== 'LIVE') {
+      return res.json({ message: 'Match is already in SCHEDULED state.', matchId, status });
+    }
+
+    await pool.query('DELETE FROM match_events WHERE match_id = $1', [matchId]);
+    await pool.query('DELETE FROM player_match_stats WHERE match_id = $1', [matchId]);
+    await pool.query(
+      `UPDATE matches
+       SET status = 'SCHEDULED',
+           home_score = NULL,
+           home_wickets = NULL,
+           home_balls = NULL,
+           away_score = NULL,
+           away_wickets = NULL,
+           away_balls = NULL,
+           winner_franchise_id = NULL,
+           result_summary = NULL,
+           player_of_match_id = NULL
+       WHERE id = $1`,
+      [matchId]
+    );
+
+    broadcast('match:reset', { matchId }, `match:${matchId}`);
+    return res.json({ message: 'Match reset to SCHEDULED.', matchId });
+  })
+);
+
+router.post(
   '/matches/:matchId/simulate-live',
   requireAuth,
   asyncHandler(async (req, res) => {
     const matchId = Number(req.params.matchId);
     const ballDelayMs = Number(req.body.ballDelayMs ?? 120);
+    const operationId = resolveOperationId(req, 'match-live');
 
     if (!matchId) {
       return res.status(400).json({ message: 'Invalid match id.' });
@@ -234,12 +311,13 @@ router.post(
 
     simulateMatchLive(matchId, {
       ballDelayMs: Math.max(0, Math.min(500, ballDelayMs)),
-      broadcast
+      broadcast,
+      simulationOperationId: operationId
     }).catch((error) => {
-      broadcast('match:error', { matchId, message: error.message }, `match:${matchId}`);
+      broadcast('match:error', { matchId, simulationOperationId: operationId, message: error.message }, `match:${matchId}`);
     });
 
-    return res.status(202).json({ message: 'Match simulation started.', matchId });
+    return res.status(202).json({ message: 'Match simulation started.', matchId, operationId });
   })
 );
 
@@ -248,7 +326,18 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const matchId = Number(req.params.matchId);
-    const result = await simulateMatchLive(matchId, { ballDelayMs: 0, broadcast });
+    const operationId = resolveOperationId(req, 'match-instant');
+    const useExternalFullMatchApi = Boolean(req.body?.useExternalFullMatchApi);
+
+    const result = useExternalFullMatchApi
+      ? await simulateMatchOutsideCenter(matchId, {
+        broadcast,
+        useExternalBallApi: false,
+        useExternalFullMatchApi: true,
+        strictExternalFullMatchApi: true,
+        simulationOperationId: operationId
+      })
+      : await simulateMatchLive(matchId, { ballDelayMs: 0, broadcast, simulationOperationId: operationId });
     return res.json(result);
   })
 );
@@ -257,13 +346,108 @@ router.post(
   '/simulate-next-round',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const result = await simulateRound(null, { broadcast });
+    const operationId = resolveOperationId(req, 'round');
+    const result = await simulateRound(null, {
+      broadcast,
+      useExternalBallApi: false,
+      useExternalFullMatchApi: true,
+      strictExternalFullMatchApi: true,
+      simulationOperationId: operationId,
+      onSimulationProgress: async (payload) => {
+        pushSimulationProgress({ action: 'SIMULATE_NEXT_ROUND', ...payload });
+      }
+    });
 
     if (result.seasonId) {
       await runCpuMarketCycle(result.seasonId, pool);
     }
 
-    return res.json(result);
+    return res.json({ ...result, operationId });
+  })
+);
+
+router.post(
+  '/simulate-league-round',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const seasonId = Number(req.body?.seasonId || 0) || null;
+    const roundNo = Number(req.body?.roundNo || 0) || null;
+    const leagueTier = Number(req.body?.leagueTier || 0);
+    const operationId = resolveOperationId(req, 'league-round');
+
+    if (!leagueTier) {
+      return res.status(400).json({ message: 'leagueTier is required.' });
+    }
+
+    const result = await simulateLeagueRound(
+      { seasonId, roundNo, leagueTier },
+      {
+        broadcast,
+        autoCreateNextSeason: false,
+        useExternalBallApi: false,
+        useExternalFullMatchApi: true,
+        strictExternalFullMatchApi: true,
+        simulationOperationId: operationId,
+        onSimulationProgress: async (payload) => {
+          pushSimulationProgress({ action: 'SIMULATE_LEAGUE_ROUND', ...payload });
+        }
+      }
+    );
+
+    if (result.seasonId) {
+      await runCpuMarketCycle(result.seasonId, pool);
+    }
+
+    return res.json({ ...result, operationId });
+  })
+);
+
+router.post(
+  '/simulate-my-league-round',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const operationId = resolveOperationId(req, 'my-league');
+    const result = await simulateMyLeagueRound(req.user.id, {
+      broadcast,
+      autoCreateNextSeason: false,
+      useExternalBallApi: false,
+      useExternalFullMatchApi: true,
+      strictExternalFullMatchApi: true,
+      simulationOperationId: operationId,
+      onSimulationProgress: async (payload) => {
+        pushSimulationProgress({ action: 'SIMULATE_MY_LEAGUE_ROUND', ...payload });
+      }
+    });
+
+    if (result.seasonId) {
+      await runCpuMarketCycle(result.seasonId, pool);
+    }
+
+    return res.json({ ...result, operationId });
+  })
+);
+
+router.post(
+  '/simulate-half-season',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const operationId = resolveOperationId(req, 'half-season');
+    const result = await simulateHalfSeason({
+      broadcast,
+      useExternalBallApi: false,
+      useExternalFullMatchApi: true,
+      strictExternalFullMatchApi: true,
+      simulationOperationId: operationId,
+      onSimulationProgress: async (payload) => {
+        pushSimulationProgress({ action: 'SIMULATE_HALF_SEASON', ...payload });
+      }
+    });
+
+    if (result.seasonId) {
+      await runCpuMarketCycle(result.seasonId, pool);
+    }
+
+    return res.json({ ...result, operationId });
   })
 );
 
@@ -271,14 +455,24 @@ router.post(
   '/simulate-season',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const result = await simulateSeasonToEnd({ broadcast });
+    const operationId = resolveOperationId(req, 'season');
+    const result = await simulateSeasonToEnd({
+      broadcast,
+      useExternalBallApi: false,
+      useExternalFullMatchApi: true,
+      strictExternalFullMatchApi: true,
+      simulationOperationId: operationId,
+      onSimulationProgress: async (payload) => {
+        pushSimulationProgress({ action: 'SIMULATE_SEASON', ...payload });
+      }
+    });
 
     const cpuCycleSeasonId = result.nextSeasonId || result.seasonId;
     if (cpuCycleSeasonId) {
       await runCpuMarketCycle(cpuCycleSeasonId, pool);
     }
 
-    return res.json(result);
+    return res.json({ ...result, operationId });
   })
 );
 

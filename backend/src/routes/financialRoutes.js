@@ -34,6 +34,7 @@ router.get(
 
     return res.json({
       franchise,
+      cashBalance: Number(franchise.financial_balance),
       payroll: Number(payroll.rows[0].payroll),
       playerMarketValue: Number(playerValue.rows[0].total_market),
       cashFlowHealth: Number((Number(franchise.financial_balance) - Number(payroll.rows[0].payroll)).toFixed(2))

@@ -21,6 +21,22 @@ const VALID_BOWLER_STYLE = [
   'Spin Bowler (Mystery Spin)'
 ];
 const VALID_BOWLER_MENTALITY = ['Wicket Taker', 'Economy', 'Balanced', 'Aggressive', 'Defensive'];
+const VALID_MATCH_PITCH = ['good', 'average', 'poor'];
+const VALID_MATCH_WEATHER = ['clear', 'overcast'];
+const VALID_MATCH_WIND = ['calm', 'moderate', 'windy'];
+const VALID_MATCH_GROUND = ['Short', 'Long'];
+const VALID_MATCH_FORMAT = ['T10', 'Five5', 'T20', 'ODI', 'Test'];
+const VALID_MATCH_BATSMAN_TYPE = ['Aggressive', 'Balanced', 'Defensive', 'Accumulator', 'Tail ender'];
+const VALID_MATCH_BOWLER_STYLE = [
+  'Fast Bowler (Express Pace)',
+  'Fast-Medium Bowler',
+  'Swing Bowler',
+  'Medium Pace Bowler (Seam Bowler)',
+  'Off-Spin Bowler',
+  'Leg-Spin Bowler (including Chinaman)',
+  'Slow Left-Arm Orthodox'
+];
+const VALID_MATCH_BOWLER_MENTALITY = ['Wicket Taker', 'Economical', 'Powerplay Specialist', 'Death Over Specialist'];
 
 function clampInt(value, min, max, fallback) {
   const parsed = Number(value);
@@ -116,6 +132,110 @@ function bowlerMentality(player, phase) {
   return 'Balanced';
 }
 
+function mapPitchForMatch(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) {
+    return 'good';
+  }
+  if (['good', 'green', 'flat', 'bouncy'].includes(normalized)) {
+    return 'good';
+  }
+  if (['average', 'dusty', 'dry', 'damp'].includes(normalized)) {
+    return 'average';
+  }
+  return 'poor';
+}
+
+function mapWeatherForMatch(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['overcast', 'cloudy', 'drizzle', 'rainy'].includes(normalized)) {
+    return 'overcast';
+  }
+  return 'clear';
+}
+
+function mapWindForMatch(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['windy', 'strong', 'gusting'].includes(normalized)) {
+    return 'windy';
+  }
+  if (normalized === 'none' || normalized === 'calm') {
+    return 'calm';
+  }
+  return 'moderate';
+}
+
+function mapGroundForMatch(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'large' || normalized === 'long') {
+    return 'Long';
+  }
+  return 'Short';
+}
+
+function deriveMatchBatsmanType(player) {
+  const role = String(player.role || '').toUpperCase();
+  const batting = Number(player.batting || 0);
+  const temperament = Number(player.temperament || 50);
+
+  if (role === 'BOWLER' && batting < 40) {
+    return 'Tail ender';
+  }
+  if (batting >= 78 && temperament <= 58) {
+    return 'Aggressive';
+  }
+  if (temperament >= 72) {
+    return 'Accumulator';
+  }
+  if (batting <= 45) {
+    return 'Defensive';
+  }
+  return 'Balanced';
+}
+
+function deriveMatchBowlerStyle(player) {
+  const role = String(player.role || '').toUpperCase();
+  const bowling = Number(player.bowling || 0);
+  const fitness = Number(player.fitness || 50);
+  const hand = deriveHandFromId(player.id);
+
+  if (role !== 'BOWLER' && role !== 'ALL_ROUNDER' && bowling < 52) {
+    return 'Medium Pace Bowler (Seam Bowler)';
+  }
+  if (bowling >= 80 && fitness >= 70) {
+    return 'Fast Bowler (Express Pace)';
+  }
+  if (bowling >= 72 && fitness >= 65) {
+    return 'Fast-Medium Bowler';
+  }
+  if (bowling >= 67) {
+    return 'Swing Bowler';
+  }
+  if (bowling >= 62) {
+    return hand === 'Left' ? 'Slow Left-Arm Orthodox' : 'Off-Spin Bowler';
+  }
+  if (bowling >= 56) {
+    return hand === 'Left' ? 'Slow Left-Arm Orthodox' : 'Leg-Spin Bowler (including Chinaman)';
+  }
+  return 'Medium Pace Bowler (Seam Bowler)';
+}
+
+function deriveMatchBowlerMentality(player) {
+  const bowling = Number(player.bowling || 0);
+  const temperament = Number(player.temperament || 50);
+  const fitness = Number(player.fitness || 50);
+  if (bowling >= 78) {
+    return 'Wicket Taker';
+  }
+  if (fitness >= 72 && bowling >= 64) {
+    return 'Death Over Specialist';
+  }
+  if (temperament >= 70) {
+    return 'Economical';
+  }
+  return 'Powerplay Specialist';
+}
+
 function mapDismissal(wicketTypeRaw = '') {
   const wicketType = String(wicketTypeRaw || '').trim().toLowerCase();
   if (wicketType.includes('lbw')) {
@@ -205,6 +325,87 @@ function normalizeResponse({ response }) {
     dismissalType,
     eventType: isExtra ? 'EXTRA' : wicket ? 'WICKET' : 'RUN',
     commentary
+  };
+}
+
+function normalizePlayerName(player, fallbackPrefix = 'Player') {
+  return sanitizeName(`${player.first_name || ''} ${player.last_name || ''}`.trim(), fallbackPrefix);
+}
+
+function deriveTeamStrengthLabel(teamPlayers = []) {
+  if (!Array.isArray(teamPlayers) || !teamPlayers.length) {
+    return 'Batting';
+  }
+
+  const totals = teamPlayers.reduce(
+    (acc, player) => {
+      acc.batting += Number(player.batting || 0);
+      acc.bowling += Number(player.bowling || 0);
+      return acc;
+    },
+    { batting: 0, bowling: 0 }
+  );
+
+  return totals.batting >= totals.bowling ? 'Batting' : 'Bowling';
+}
+
+function buildMatchPlayerPayload(player, index = 0) {
+  const batting = clampInt(Number(player.batting || 0), 0, 100, 50);
+  const bowling = clampInt(Number(player.bowling || 0), 0, 100, 50);
+  const hand = normalizeAllowed(deriveHandFromId(Number(player.id || index + 1)), VALID_HAND, 'Right');
+
+  return {
+    name: normalizePlayerName(player, `Player ${index + 1}`),
+    batsman_rating: batting,
+    bowler_rating: bowling,
+    batsman_type: normalizeAllowed(deriveMatchBatsmanType(player), VALID_MATCH_BATSMAN_TYPE, 'Balanced'),
+    batsman_hand: hand,
+    bowler_style: normalizeAllowed(deriveMatchBowlerStyle(player), VALID_MATCH_BOWLER_STYLE, 'Medium Pace Bowler (Seam Bowler)'),
+    bowler_hand: hand,
+    bowler_mentality: normalizeAllowed(deriveMatchBowlerMentality(player), VALID_MATCH_BOWLER_MENTALITY, 'Wicket Taker')
+  };
+}
+
+function buildSimulateMatchPayload({ team1Name, team2Name, team1Players, team2Players, context = {} }) {
+  const pitchConditions = normalizeAllowed(mapPitchForMatch(context.pitchConditions), VALID_MATCH_PITCH, 'good');
+  const weatherConditions = normalizeAllowed(mapWeatherForMatch(context.weatherConditions), VALID_MATCH_WEATHER, 'clear');
+  const windConditions = normalizeAllowed(mapWindForMatch(context.windConditions), VALID_MATCH_WIND, 'moderate');
+  const groundSize = normalizeAllowed(mapGroundForMatch(context.groundSize), VALID_MATCH_GROUND, 'Short');
+  const formatType = normalizeAllowed(context.formatType || 'T20', VALID_MATCH_FORMAT, 'T20');
+  const overs = clampInt(context.totalOvers ?? context.overs ?? 20, 1, 100, 20);
+  const maxSpell = clampInt(context.maxSpell ?? (overs >= 20 ? 4 : 2), 1, 10, overs >= 20 ? 4 : 2);
+
+  const homePlayers = (team1Players || []).map((player, index) => buildMatchPlayerPayload(player, index)).slice(0, 11);
+  const awayPlayers = (team2Players || []).map((player, index) => buildMatchPlayerPayload(player, index)).slice(0, 11);
+
+  return {
+    team1: {
+      name: sanitizeName(team1Name, 'Team 1'),
+      players: homePlayers
+    },
+    team2: {
+      name: sanitizeName(team2Name, 'Team 2'),
+      players: awayPlayers
+    },
+    match_settings: {
+      overs,
+      format_type: formatType,
+      pitch_conditions: pitchConditions,
+      weather_conditions: weatherConditions,
+      wind_conditions: windConditions,
+      time_of_day: normalizeAllowed(context.timeOfDay === 'night' ? 'night' : 'day', ['day', 'night'], 'day'),
+      ground_size: groundSize,
+      max_spell: maxSpell
+    },
+    toss: {
+      // Runtime currently expects strength labels for toss logic (.lower() is called server-side).
+      team1_strength: deriveTeamStrengthLabel(team1Players),
+      team2_strength: deriveTeamStrengthLabel(team2Players),
+      boundaries: groundSize,
+      dew_factor: context.timeOfDay === 'night' || context.timeOfDay === 'day_night' ? 'Moderate' : 'None',
+      pitch_condition: pitchConditions,
+      weather_condition: weatherConditions
+    }
   };
 }
 
@@ -303,6 +504,79 @@ export async function simulateTossViaStreetApi({ team1Name, team2Name, context }
       tossDecision: decision,
       tossCommentary: String(data?.TossCommentary || '').trim() || null
     };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function simulateMatchViaStreetApi({
+  team1Name,
+  team2Name,
+  team1Players = [],
+  team2Players = [],
+  context = {}
+}) {
+  if (!env.streetCricketFullMatchApiEnabled) {
+    return null;
+  }
+
+  if (!env.streetCricketApiBaseUrl || !env.streetCricketApiKeys.length) {
+    return null;
+  }
+
+  if (!team1Players.length || !team2Players.length) {
+    return null;
+  }
+
+  const apiKey = env.streetCricketApiKeys[Number(context.roundSeed || 0) % env.streetCricketApiKeys.length] || env.streetCricketApiKeys[0];
+  if (!apiKey) {
+    return null;
+  }
+
+  const payload = buildSimulateMatchPayload({
+    team1Name,
+    team2Name,
+    team1Players,
+    team2Players,
+    context
+  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(env.streetCricketRequestTimeoutMs, 12000));
+
+  try {
+    const endpoint = `${env.streetCricketApiBaseUrl.replace(/\/+$/, '')}/simulate_match`;
+    console.log('[StreetCricket] /simulate_match payload\n', JSON.stringify(payload, null, 2));
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      let errorBody = '';
+      try {
+        errorBody = await response.text();
+      } catch {
+        errorBody = '';
+      }
+      console.error(`[StreetCricket] /simulate_match failed (${response.status}) ${response.statusText}${errorBody ? `: ${errorBody}` : ''}`);
+      return null;
+    }
+
+    const data = await response.json();
+    if (!data || !data.first_innings || !data.second_innings || !data.match_summary) {
+      return null;
+    }
+
+    return data;
   } catch {
     return null;
   } finally {

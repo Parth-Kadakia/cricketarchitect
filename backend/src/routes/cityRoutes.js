@@ -1,8 +1,88 @@
 import { Router } from 'express';
-import pool from '../config/db.js';
+import pool, { withTransaction } from '../config/db.js';
+import env from '../config/env.js';
+import { requireAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 const router = Router();
+
+function normalizeText(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function parseCoordinate(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function isValidCoordinate(lat, lon) {
+  return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+}
+
+async function verifyCityViaGeocoding(name, country) {
+  const baseUrl = String(env.cityVerificationBaseUrl || '').replace(/\/$/, '');
+  const requestUrl = new URL(`${baseUrl}/search`);
+  requestUrl.searchParams.set('city', name);
+  requestUrl.searchParams.set('country', country);
+  requestUrl.searchParams.set('format', 'json');
+  requestUrl.searchParams.set('limit', '5');
+  requestUrl.searchParams.set('addressdetails', '1');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(env.cityVerificationTimeoutMs || 4000));
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': env.cityVerificationUserAgent,
+        Accept: 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const error = new Error(`City verification failed (${response.status}).`);
+      error.status = 502;
+      throw error;
+    }
+
+    const payload = await response.json();
+    const candidates = Array.isArray(payload) ? payload : [];
+
+    for (const candidate of candidates) {
+      const address = candidate?.address || {};
+      const candidateCountry = normalizeText(address.country || country);
+      const resolvedName = normalizeText(address.city || address.town || address.village || address.municipality || name);
+      const latitude = parseCoordinate(candidate?.lat);
+      const longitude = parseCoordinate(candidate?.lon);
+
+      if (!resolvedName || !candidateCountry || !isValidCoordinate(latitude, longitude)) {
+        continue;
+      }
+
+      return {
+        name: resolvedName,
+        country: candidateCountry,
+        latitude,
+        longitude,
+        provider: 'nominatim'
+      };
+    }
+
+    return null;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      const timeoutError = new Error('City verification timed out. Please try again.');
+      timeoutError.status = 504;
+      throw timeoutError;
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 router.get(
   '/',
@@ -48,6 +128,92 @@ router.get(
     const cities = await pool.query(query, params);
 
     return res.json({ cities: cities.rows });
+  })
+);
+
+router.post(
+  '/',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const inputName = normalizeText(req.body?.name);
+    const inputCountry = normalizeText(req.body?.country);
+    const verifyRequested = req.body?.verify !== false;
+
+    if (!inputName || !inputCountry) {
+      return res.status(400).json({ message: 'name and country are required.' });
+    }
+
+    if (inputName.length > 120 || inputCountry.length > 120) {
+      return res.status(400).json({ message: 'name and country must be 120 characters or less.' });
+    }
+
+    const franchiseCount = Number((await pool.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
+    if (franchiseCount > 0) {
+      return res.status(409).json({
+        message: 'Custom city add is available before career kickoff only. Start a new save to add cities, then select one.'
+      });
+    }
+
+    let cityData = {
+      name: inputName,
+      country: inputCountry,
+      latitude: parseCoordinate(req.body?.latitude),
+      longitude: parseCoordinate(req.body?.longitude),
+      provider: 'manual'
+    };
+
+    if (verifyRequested) {
+      if (!env.cityVerificationEnabled) {
+        return res.status(400).json({ message: 'City verification is currently disabled by the server.' });
+      }
+
+      const verified = await verifyCityViaGeocoding(inputName, inputCountry);
+      if (!verified) {
+        return res.status(400).json({ message: 'We could not verify this city. Please check spelling or add coordinates manually.' });
+      }
+
+      cityData = verified;
+    } else if (!isValidCoordinate(cityData.latitude, cityData.longitude)) {
+      return res.status(400).json({ message: 'Manual city add requires valid latitude and longitude.' });
+    }
+
+    const result = await withTransaction(async (client) => {
+      const existing = await client.query(
+        `SELECT id, name, country, latitude, longitude
+         FROM cities
+         WHERE LOWER(name) = LOWER($1)
+           AND LOWER(country) = LOWER($2)
+         LIMIT 1`,
+        [cityData.name, cityData.country]
+      );
+
+      if (existing.rows.length) {
+        return {
+          city: existing.rows[0],
+          created: false,
+          verified: verifyRequested,
+          provider: cityData.provider,
+          franchiseCreated: false
+        };
+      }
+
+      const inserted = await client.query(
+        `INSERT INTO cities (name, country, latitude, longitude)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, name, country, latitude, longitude`,
+        [cityData.name, cityData.country, cityData.latitude, cityData.longitude]
+      );
+
+      return {
+        city: inserted.rows[0],
+        created: true,
+        verified: verifyRequested,
+        provider: cityData.provider,
+        franchiseCreated: false
+      };
+    });
+
+    return res.status(result.created ? 201 : 200).json(result);
   })
 );
 

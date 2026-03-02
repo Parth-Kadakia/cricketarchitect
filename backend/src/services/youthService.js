@@ -377,6 +377,8 @@ export async function loanPlayer(franchiseId, playerId, targetFranchiseId, dbCli
   const updated = await dbClient.query(
     `UPDATE players
      SET squad_status = 'LOANED',
+         starting_xi = FALSE,
+         lineup_slot = NULL,
          on_loan_to_franchise_id = $3,
          morale = GREATEST(20, morale - 2)
      WHERE id = $1
@@ -407,6 +409,7 @@ export async function releasePlayer(franchiseId, playerId, dbClient = pool) {
      SET franchise_id = NULL,
          squad_status = 'AUCTION',
          starting_xi = FALSE,
+         lineup_slot = NULL,
          on_loan_to_franchise_id = NULL,
          morale = 28
      WHERE id = $1
@@ -426,6 +429,30 @@ export async function releasePlayer(franchiseId, playerId, dbClient = pool) {
      VALUES ('CPU_SELL', $1, $2, $3)`,
     [franchiseId, playerId, 'Player moved to auction pool.']
   );
+
+  return updated.rows[0];
+}
+
+export async function demoteMainSquadPlayer(franchiseId, playerId, dbClient = pool) {
+  const updated = await dbClient.query(
+    `UPDATE players
+     SET squad_status = 'YOUTH',
+         is_youth = TRUE,
+         starting_xi = FALSE,
+         lineup_slot = NULL,
+         morale = GREATEST(20, morale - 2)
+     WHERE id = $1
+       AND franchise_id = $2
+       AND squad_status = 'MAIN_SQUAD'
+     RETURNING *`,
+    [playerId, franchiseId]
+  );
+
+  if (!updated.rows.length) {
+    const error = new Error('Player is not eligible for demotion.');
+    error.status = 400;
+    throw error;
+  }
 
   return updated.rows[0];
 }

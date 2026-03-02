@@ -5,19 +5,49 @@ import {
   createNextSeasonFromCompleted,
   getActiveSeason,
   getLeagueTable,
+  getSeasonRoundOverview,
   progressSeasonStructure,
   updateSeasonTableWithMatch
 } from './leagueService.js';
-import { simulateBallViaStreetApi, simulateTossViaStreetApi } from './streetCricketService.js';
+import { simulateBallViaStreetApi, simulateMatchViaStreetApi, simulateTossViaStreetApi } from './streetCricketService.js';
 import { calculateFranchiseValuation } from './valuationService.js';
 
 const activeSimulations = new Set();
+const MATCH_WIN_CASH_REWARD = 10;
+const MATCH_LOSS_CASH_REWARD = 5;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function maybeEmitSimulationProgress(handler, payload) {
+  if (typeof handler !== 'function') {
+    return;
+  }
+
+  try {
+    await handler(payload);
+  } catch {
+    // Progress callbacks are best-effort and must never break simulation flow.
+  }
+}
+
 function sortByBatting(players) {
+  const hasOrderedLineup = players.some((player) => Number(player.starting_xi) && Number(player.lineup_slot || 0) > 0);
+  if (hasOrderedLineup) {
+    const starters = players
+      .filter((player) => Number(player.starting_xi))
+      .sort((a, b) => Number(a.lineup_slot || 99) - Number(b.lineup_slot || 99));
+    const nonStarters = players
+      .filter((player) => !Number(player.starting_xi))
+      .sort((a, b) => {
+        const aScore = Number(a.batting) * 0.55 + Number(a.form) * 0.2 + Number(a.temperament) * 0.15 + Number(a.fitness) * 0.1;
+        const bScore = Number(b.batting) * 0.55 + Number(b.form) * 0.2 + Number(b.temperament) * 0.15 + Number(b.fitness) * 0.1;
+        return bScore - aScore;
+      });
+    return [...starters, ...nonStarters];
+  }
+
   return [...players].sort((a, b) => {
     const aScore = Number(a.batting) * 0.55 + Number(a.form) * 0.2 + Number(a.temperament) * 0.15 + Number(a.fitness) * 0.1;
     const bScore = Number(b.batting) * 0.55 + Number(b.form) * 0.2 + Number(b.temperament) * 0.15 + Number(b.fitness) * 0.1;
@@ -163,6 +193,434 @@ function resolveTossWinnerId(tossWinnerName, match) {
   }
 
   return null;
+}
+
+function parseTossDecision(decisionRaw) {
+  const value = String(decisionRaw || '').trim().toLowerCase();
+  if (value.includes('bowl') || value.includes('field')) {
+    return 'BOWL';
+  }
+  return 'BAT';
+}
+
+function normalizeNameKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildPlayerNameLookup(players = []) {
+  const lookup = new Map();
+  for (const player of players) {
+    const full = normalizeNameKey(`${player.first_name || ''} ${player.last_name || ''}`);
+    if (full && !lookup.has(full)) {
+      lookup.set(full, player);
+    }
+
+    const first = normalizeNameKey(player.first_name);
+    if (first && !lookup.has(first)) {
+      lookup.set(first, player);
+    }
+
+    const last = normalizeNameKey(player.last_name);
+    if (last && !lookup.has(last)) {
+      lookup.set(last, player);
+    }
+  }
+  return lookup;
+}
+
+function resolvePlayerByName(name, players = [], lookup = null) {
+  const key = normalizeNameKey(name);
+  if (!key) {
+    return null;
+  }
+
+  const map = lookup || buildPlayerNameLookup(players);
+  if (map.has(key)) {
+    return map.get(key);
+  }
+
+  const numbered = key.match(/^player\s+(\d+)$/i);
+  if (numbered) {
+    const index = Number(numbered[1]) - 1;
+    if (players.length) {
+      const safeIndex = ((index % players.length) + players.length) % players.length;
+      return players[safeIndex];
+    }
+  }
+
+  const tokens = key.split(' ').filter(Boolean);
+  if (tokens.length >= 2) {
+    const fallback = players.find((player) => {
+      const first = normalizeNameKey(player.first_name);
+      const last = normalizeNameKey(player.last_name);
+      return first === tokens[0] && last === tokens[tokens.length - 1];
+    });
+    if (fallback) {
+      return fallback;
+    }
+  }
+
+  return players.find((player) => normalizeNameKey(`${player.first_name || ''} ${player.last_name || ''}`).includes(key)) || null;
+}
+
+function oversTextToBalls(oversValue) {
+  const raw = String(oversValue ?? '').trim();
+  if (!raw) {
+    return 0;
+  }
+  const match = raw.match(/^(\d+)(?:\.(\d+))?$/);
+  if (!match) {
+    return 0;
+  }
+  const overPart = Number(match[1] || 0);
+  const ballPart = Number(match[2] || 0);
+  return overPart * 6 + Math.max(0, Math.min(5, ballPart));
+}
+
+function toInt(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : fallback;
+}
+
+function normalizeDismissalText(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return null;
+  }
+  if (/^not\s*out$/i.test(raw)) {
+    return null;
+  }
+  if (/^dnb$/i.test(raw)) {
+    return null;
+  }
+  return raw;
+}
+
+function inferInningsBattingId(inningsPayload, homeTeam, awayTeam, homeId, awayId) {
+  const battingScorecard = inningsPayload?.batting_scorecard || {};
+  const names = Object.keys(battingScorecard);
+  if (!names.length) {
+    return null;
+  }
+
+  const homeLookup = buildPlayerNameLookup(homeTeam);
+  const awayLookup = buildPlayerNameLookup(awayTeam);
+
+  let homeHits = 0;
+  let awayHits = 0;
+  for (const name of names) {
+    if (resolvePlayerByName(name, homeTeam, homeLookup)) {
+      homeHits += 1;
+    }
+    if (resolvePlayerByName(name, awayTeam, awayLookup)) {
+      awayHits += 1;
+    }
+  }
+
+  if (homeHits === 0 && awayHits === 0) {
+    return null;
+  }
+
+  return homeHits >= awayHits ? Number(homeId) : Number(awayId);
+}
+
+function parseEventFromCommentaryLine({
+  line,
+  inningsNo,
+  battingFranchiseId,
+  bowlingFranchiseId,
+  battingTeam,
+  bowlingTeam,
+  battingLookup,
+  bowlingLookup,
+  fallbackBallCounter
+}) {
+  const text = String(line || '').trim();
+  if (!text || text.startsWith('OVER_SUMMARY:')) {
+    return null;
+  }
+
+  const withPrefix = text.match(/^Over\s+(\d+)\.(\d+):\s*Ball\s+\d+:\s*(.+)$/i);
+  const localPrefix = text.match(/^O(\d+)\.(\d+)\s+(.+)$/i);
+  const match = withPrefix || localPrefix;
+  const fallbackOver = Math.floor(fallbackBallCounter / 6) + 1;
+  const fallbackBall = (fallbackBallCounter % 6) + 1;
+
+  let overNumber = fallbackOver;
+  let ballNumber = fallbackBall;
+  let body = text;
+
+  if (match) {
+    overNumber = Number(match[1] || fallbackOver);
+    ballNumber = Number(match[2] || fallbackBall);
+    body = String(match[3] || text).trim();
+  }
+
+  const core =
+    body.match(/^(.+?)\s+to\s+(.+?)\s+\(([^)]+)\)\s*(.*)$/i) ||
+    body.match(/^(.+?)\s+to\s+(.+?)[,:]\s*(.*)$/i);
+
+  let bowlerName = null;
+  let strikerName = null;
+  let outcome = '';
+  let detail = body;
+
+  if (core) {
+    bowlerName = String(core[1] || '').trim();
+    strikerName = String(core[2] || '').trim();
+    outcome = String(core[3] || '').trim();
+    detail = String(core[4] || '').trim();
+  }
+
+  const outcomeText = `${outcome} ${detail}`.toLowerCase();
+  const isWicket =
+    /\bout\b/.test(outcomeText) ||
+    /\blbw\b/.test(outcomeText) ||
+    /\bbowled\b/.test(outcomeText) ||
+    /\bcaught\b/.test(outcomeText) ||
+    /\brun out\b/.test(outcomeText);
+
+  let runs = 0;
+  let extras = 0;
+  let eventType = 'RUN';
+
+  if (/\bwide\b/.test(outcomeText) || /\bno[- ]?ball\b/.test(outcomeText)) {
+    extras = 1;
+    runs = 1;
+    eventType = 'EXTRA';
+  } else if (/\bsix\b/.test(outcomeText)) {
+    runs = 6;
+  } else if (/\bfour\b/.test(outcomeText)) {
+    runs = 4;
+  } else if (/\bthree\b/.test(outcomeText) || /\b3 run/.test(outcomeText)) {
+    runs = 3;
+  } else if (/\btwo\b/.test(outcomeText) || /\b2 run/.test(outcomeText)) {
+    runs = 2;
+  } else if (/\bsingle\b/.test(outcomeText) || /\b1 run/.test(outcomeText) || /\bone run\b/.test(outcomeText)) {
+    runs = 1;
+  } else if (/\bdot\b/.test(outcomeText) || /\bno run\b/.test(outcomeText)) {
+    runs = 0;
+  }
+
+  if (isWicket) {
+    eventType = 'WICKET';
+    runs = 0;
+  }
+
+  const striker = strikerName ? resolvePlayerByName(strikerName, battingTeam, battingLookup) : null;
+  const bowler = bowlerName ? resolvePlayerByName(bowlerName, bowlingTeam, bowlingLookup) : null;
+
+  return {
+    innings: inningsNo,
+    overNumber,
+    ballNumber,
+    battingFranchiseId,
+    bowlingFranchiseId,
+    strikerPlayerId: striker ? Number(striker.id) : null,
+    nonStrikerPlayerId: null,
+    bowlerPlayerId: bowler ? Number(bowler.id) : null,
+    runs,
+    extras,
+    eventType,
+    isBoundary: runs === 4 || runs === 6,
+    isSix: runs === 6,
+    isWicket,
+    commentary: text
+  };
+}
+
+function summarizeOverRuns(inningsPayload = {}) {
+  const overScores = Array.isArray(inningsPayload.over_scores) ? inningsPayload.over_scores : [];
+  if (!overScores.length) {
+    return [];
+  }
+
+  const sorted = [...overScores].sort((a, b) => Number(a.over || 0) - Number(b.over || 0));
+  const cumulative = [];
+  let running = 0;
+  for (const over of sorted) {
+    const cumulativeValue = Number(over.cumulative);
+    if (Number.isFinite(cumulativeValue)) {
+      running = cumulativeValue;
+    } else {
+      running += Number(over.runs || 0);
+    }
+    cumulative.push(running);
+  }
+  return cumulative;
+}
+
+function buildInningsFromApiPayload({
+  inningsNo,
+  inningsPayload,
+  battingFranchiseId,
+  bowlingFranchiseId,
+  battingTeam,
+  bowlingTeam,
+  matchId
+}) {
+  const battingLookup = buildPlayerNameLookup(battingTeam);
+  const bowlingLookup = buildPlayerNameLookup(bowlingTeam);
+
+  const battingStats = initBattingStats(battingTeam);
+  const bowlingStats = initBowlingStats(bowlingTeam);
+  const fieldingStats = initFieldingStats(bowlingTeam);
+  const battingOrderByPlayerId = new Map();
+  for (let i = 0; i < battingTeam.length; i += 1) {
+    const playerId = Number(battingTeam[i]?.id || 0);
+    if (!playerId) {
+      continue;
+    }
+    battingOrderByPlayerId.set(playerId, i + 1);
+    const row = battingStats.get(playerId);
+    if (row) {
+      // Keep XI lineup order as the canonical batting order for external full-match sims.
+      row.battingOrder = i + 1;
+    }
+  }
+
+  const battingScorecard = inningsPayload?.batting_scorecard || {};
+  const battingEntries = Object.entries(battingScorecard);
+
+  for (const [name, line] of battingEntries) {
+    const player = resolvePlayerByName(name, battingTeam, battingLookup);
+    if (!player) {
+      continue;
+    }
+
+    const row = battingStats.get(Number(player.id));
+    row.innings = inningsNo;
+    row.battingOrder = Number(battingOrderByPlayerId.get(Number(player.id)) || row.battingOrder || null);
+    row.runs = toInt(line?.R ?? line?.runs ?? 0);
+    row.balls = toInt(line?.B ?? line?.balls ?? 0);
+    row.fours = toInt(line?.['4s'] ?? line?.fours ?? 0);
+    row.sixes = toInt(line?.['6s'] ?? line?.sixes ?? 0);
+
+    const dismissalRaw = String(line?.dismissal ?? line?.dismissal_text ?? '').trim();
+    const dismissalText = normalizeDismissalText(dismissalRaw);
+    row.dismissalText = dismissalText;
+    row.notOut = !dismissalText;
+
+    const dismissalLower = dismissalRaw.toLowerCase();
+    if (dismissalLower.includes('run out')) {
+      const runOutMatch =
+        dismissalRaw.match(/run out\s*\(([^)]+)\)/i) ||
+        dismissalRaw.match(/run out(?:\s+by\s+([A-Za-z0-9 .'-]+))?/i);
+      const fielderName = runOutMatch ? (runOutMatch[1] || runOutMatch[2] || '').split(/[,&/]/)[0].trim() : '';
+      if (fielderName) {
+        const fielder = resolvePlayerByName(fielderName, bowlingTeam, bowlingLookup);
+        if (fielder) {
+          const fieldLine = fieldingStats.get(Number(fielder.id));
+          fieldLine.runOuts += 1;
+        }
+      }
+    } else if (dismissalLower.includes('c ')) {
+      const caughtMatch = dismissalRaw.match(/\bc\s+(.+?)\s+b\b/i);
+      const fielderName = caughtMatch ? String(caughtMatch[1] || '').trim() : '';
+      if (fielderName) {
+        const fielder = resolvePlayerByName(fielderName, bowlingTeam, bowlingLookup);
+        if (fielder) {
+          const fieldLine = fieldingStats.get(Number(fielder.id));
+          fieldLine.catches += 1;
+        }
+      }
+    }
+  }
+
+  const bowlingScorecard = inningsPayload?.bowling_scorecard || {};
+  for (const [name, line] of Object.entries(bowlingScorecard)) {
+    const player = resolvePlayerByName(name, bowlingTeam, bowlingLookup);
+    if (!player) {
+      continue;
+    }
+
+    const row = bowlingStats.get(Number(player.id));
+    row.balls = toInt(line?.B ?? line?.balls ?? oversTextToBalls(line?.O ?? line?.overs ?? 0));
+    row.runs = toInt(line?.R ?? line?.runs ?? 0);
+    row.wickets = toInt(line?.W ?? line?.wkts ?? line?.wickets ?? 0);
+    row.maidens = toInt(line?.M ?? line?.maidens ?? 0);
+    row.currentOverRuns = 0;
+  }
+
+  const commentaryLines = Array.isArray(inningsPayload?.commentary) ? inningsPayload.commentary : [];
+  const events = [];
+  for (let i = 0; i < commentaryLines.length; i += 1) {
+    const parsed = parseEventFromCommentaryLine({
+      line: commentaryLines[i],
+      inningsNo,
+      battingFranchiseId,
+      bowlingFranchiseId,
+      battingTeam,
+      bowlingTeam,
+      battingLookup,
+      bowlingLookup,
+      fallbackBallCounter: i
+    });
+
+    if (parsed) {
+      events.push({
+        ...parsed,
+        matchId,
+        sortIndex: i
+      });
+    }
+  }
+
+  const overRuns = summarizeOverRuns(inningsPayload);
+
+  if (!events.length && overRuns.length) {
+    let previous = 0;
+    for (let i = 0; i < overRuns.length; i += 1) {
+      const cumulative = Number(overRuns[i] || 0);
+      const overRunsDelta = Math.max(0, cumulative - previous);
+      previous = cumulative;
+      events.push({
+        matchId,
+        innings: inningsNo,
+        overNumber: i + 1,
+        ballNumber: 6,
+        battingFranchiseId,
+        bowlingFranchiseId,
+        strikerPlayerId: null,
+        nonStrikerPlayerId: null,
+        bowlerPlayerId: null,
+        runs: overRunsDelta,
+        extras: 0,
+        eventType: 'RUN',
+        isBoundary: false,
+        isSix: false,
+        isWicket: false,
+        commentary: `Over ${i + 1}.6: End of over, ${overRunsDelta} run${overRunsDelta === 1 ? '' : 's'}.`,
+        sortIndex: i
+      });
+    }
+  }
+
+  const runs = toInt(inningsPayload?.total_runs, 0);
+  const wickets = Math.min(10, toInt(inningsPayload?.wickets, 0));
+  let balls = toInt(inningsPayload?.legal_balls, 0);
+  if (!balls && overRuns.length) {
+    balls = Math.min(120, overRuns.length * 6);
+  }
+
+  return {
+    runs,
+    wickets,
+    balls,
+    overRuns,
+    battingStats,
+    bowlingStats,
+    fieldingStats,
+    battingOrder: battingTeam,
+    bowlers: bowlingTeam,
+    events,
+    battingId: battingFranchiseId,
+    bowlingId: bowlingFranchiseId
+  };
 }
 
 function pickDismissalType() {
@@ -407,23 +865,51 @@ function initFieldingStats(players) {
 }
 
 async function loadMatchTeams(match, dbClient = pool) {
+  // Primary query: active squad players
   const query = `SELECT *
                  FROM players
                  WHERE franchise_id = $1
                    AND squad_status IN ('MAIN_SQUAD', 'YOUTH')
                    AND squad_status <> 'RETIRED'
-                 ORDER BY starting_xi DESC, squad_status = 'MAIN_SQUAD' DESC, (batting + bowling + fielding) DESC`;
+                 ORDER BY starting_xi DESC, lineup_slot ASC NULLS LAST, squad_status = 'MAIN_SQUAD' DESC, (batting + bowling + fielding) DESC`;
 
-  const homePlayers = (await dbClient.query(query, [match.home_franchise_id])).rows;
-  const awayPlayers = (await dbClient.query(query, [match.away_franchise_id])).rows;
+  let homePlayers = (await dbClient.query(query, [match.home_franchise_id])).rows;
+  let awayPlayers = (await dbClient.query(query, [match.away_franchise_id])).rows;
+
+  // If a team has fewer than 11 active players, pull ANY non-retired player from the franchise
+  // so the simulation doesn't break. This covers edge cases after retirements/transfers.
+  if (homePlayers.length < 11) {
+    const fallback = await dbClient.query(
+      `SELECT * FROM players
+       WHERE franchise_id = $1 AND squad_status <> 'RETIRED'
+       ORDER BY starting_xi DESC, lineup_slot ASC NULLS LAST, (batting + bowling + fielding) DESC`,
+      [match.home_franchise_id]
+    );
+    homePlayers = fallback.rows;
+  }
+  if (awayPlayers.length < 11) {
+    const fallback = await dbClient.query(
+      `SELECT * FROM players
+       WHERE franchise_id = $1 AND squad_status <> 'RETIRED'
+       ORDER BY starting_xi DESC, lineup_slot ASC NULLS LAST, (batting + bowling + fielding) DESC`,
+      [match.away_franchise_id]
+    );
+    awayPlayers = fallback.rows;
+  }
 
   const resolvedHome = homePlayers.slice(0, 11);
   const resolvedAway = awayPlayers.slice(0, 11);
 
-  if (resolvedHome.length < 11 || resolvedAway.length < 11) {
-    const error = new Error('One or both teams do not have enough players to simulate this match.');
+  if (resolvedHome.length < 1 || resolvedAway.length < 1) {
+    const error = new Error('One or both teams have no players available to simulate this match.');
     error.status = 400;
     throw error;
+  }
+
+  if (resolvedHome.length < 11 || resolvedAway.length < 11) {
+    console.warn(
+      `[MatchEngine] loadMatchTeams matchId=${match.id}: home=${resolvedHome.length} away=${resolvedAway.length} (< 11). Proceeding with available players.`
+    );
   }
 
   return {
@@ -453,8 +939,8 @@ async function saveBallEvent(matchId, innings, overNumber, ballNumber, battingId
       commentary
     ) VALUES (
       $1, $2, $3, $4, $5, $6,
-      $7, $8, $9, $10, 0, $11,
-      $12, $13, $14, $15
+      $7, $8, $9, $10, $11, $12,
+      $13, $14, $15, $16
     )`,
     [
       matchId,
@@ -467,6 +953,7 @@ async function saveBallEvent(matchId, innings, overNumber, ballNumber, battingId
       nonStrikerId,
       bowlerId,
       ballOutcome.runs,
+      Number(ballOutcome.extras || 0),
       ballOutcome.eventType,
       ballOutcome.runs === 4 || ballOutcome.runs === 6,
       ballOutcome.runs === 6,
@@ -491,6 +978,7 @@ async function simulateInnings({
   target,
   ballDelayMs,
   broadcast,
+  simulationOperationId = null,
   ballOptions = {}
 }) {
   const battingOrder = sortByBatting(battingTeam);
@@ -687,11 +1175,21 @@ async function simulateInnings({
       'match:tick',
       {
         matchId,
+        simulationOperationId,
         innings,
         over: overNumber,
         ball: ballNumber,
         battingFranchiseId,
         bowlingFranchiseId,
+        strikerPlayerId: Number(striker.id),
+        nonStrikerPlayerId: nonStriker?.id ? Number(nonStriker.id) : null,
+        bowlerPlayerId: Number(bowler.id),
+        runs: Number(ball.runs || 0),
+        extras: 0,
+        isBoundary: Number(ball.runs || 0) === 4 || Number(ball.runs || 0) === 6,
+        isSix: Number(ball.runs || 0) === 6,
+        isWicket: Boolean(ball.wicket),
+        eventType: ball.eventType || eventType,
         score: runs,
         wickets,
         overs: toOverNotation(balls + 1),
@@ -719,10 +1217,24 @@ async function simulateInnings({
       strikerIndex = nonStrikerIndex;
       nonStrikerIndex = swap;
 
+      // Persist running scores so API re-fetches during live sim return accurate data.
+      await pool.query(
+        `UPDATE matches
+         SET home_score   = CASE WHEN home_franchise_id = $2 THEN $3 ELSE home_score END,
+             home_wickets = CASE WHEN home_franchise_id = $2 THEN $4 ELSE home_wickets END,
+             home_balls   = CASE WHEN home_franchise_id = $2 THEN $5 ELSE home_balls END,
+             away_score   = CASE WHEN away_franchise_id = $2 THEN $3 ELSE away_score END,
+             away_wickets = CASE WHEN away_franchise_id = $2 THEN $4 ELSE away_wickets END,
+             away_balls   = CASE WHEN away_franchise_id = $2 THEN $5 ELSE away_balls END
+         WHERE id = $1`,
+        [matchId, battingFranchiseId, runs, wickets, balls]
+      ).catch(() => { /* best-effort; next over or match-complete will correct */ });
+
       broadcast(
         'match:over_summary',
         {
           matchId,
+          simulationOperationId,
           innings,
           over: Math.floor(balls / 6),
           score: runs,
@@ -933,9 +1445,18 @@ async function updateFranchiseResults(homeId, awayId, winnerId, dbClient = pool)
   if (!winnerId) {
     await dbClient.query(
       `UPDATE franchises
-       SET fan_rating = LEAST(100, fan_rating + 0.4)
+       SET fan_rating = LEAST(100, fan_rating + 0.4),
+           financial_balance = financial_balance + $3
        WHERE id IN ($1, $2)`,
-      [homeId, awayId]
+      [homeId, awayId, MATCH_LOSS_CASH_REWARD]
+    );
+
+    await dbClient.query(
+      `INSERT INTO transactions (franchise_id, transaction_type, amount, description)
+       VALUES
+         ($1, 'PRIZE_MONEY', $3, $4),
+         ($2, 'PRIZE_MONEY', $3, $4)`,
+      [homeId, awayId, MATCH_LOSS_CASH_REWARD, `Match reward: +$${MATCH_LOSS_CASH_REWARD.toFixed(2)} (tie/no result)`]
     );
     return;
   }
@@ -949,24 +1470,45 @@ async function updateFranchiseResults(homeId, awayId, winnerId, dbClient = pool)
          best_win_streak = GREATEST(best_win_streak, win_streak + 1),
          fan_rating = LEAST(100, fan_rating + 2),
          prospect_points = prospect_points + 5,
-         growth_points = growth_points + 5
+         growth_points = growth_points + 5,
+         financial_balance = financial_balance + $2
      WHERE id = $1`,
-    [winnerId]
+    [winnerId, MATCH_WIN_CASH_REWARD]
   );
 
   await dbClient.query(
     `UPDATE franchises
      SET losses = losses + 1,
          win_streak = 0,
-         fan_rating = GREATEST(5, fan_rating - 1.2)
+         fan_rating = GREATEST(5, fan_rating - 1.2),
+         prospect_points = prospect_points + 2,
+         growth_points = growth_points + 2,
+         financial_balance = financial_balance + $2
      WHERE id = $1`,
-    [loserId]
+    [loserId, MATCH_LOSS_CASH_REWARD]
   );
 
   await dbClient.query(
     `INSERT INTO transactions (franchise_id, transaction_type, amount, description)
-     VALUES ($1, 'POINT_REWARD', 0, 'Match win reward: +5 prospect points, +5 growth points')`,
-    [winnerId]
+     VALUES
+       ($1, 'PRIZE_MONEY', $3, $4),
+       ($2, 'PRIZE_MONEY', $5, $6)`,
+    [
+      winnerId,
+      loserId,
+      MATCH_WIN_CASH_REWARD,
+      `Match reward: +$${MATCH_WIN_CASH_REWARD.toFixed(2)} (win)`,
+      MATCH_LOSS_CASH_REWARD,
+      `Match reward: +$${MATCH_LOSS_CASH_REWARD.toFixed(2)} (loss)`
+    ]
+  );
+
+  await dbClient.query(
+    `INSERT INTO transactions (franchise_id, transaction_type, amount, description)
+     VALUES
+       ($1, 'POINT_REWARD', 0, 'Match win reward: +5 prospect points, +5 growth points'),
+       ($2, 'POINT_REWARD', 0, 'Match loss reward: +2 prospect points, +2 growth points')`,
+    [winnerId, loserId]
   );
 }
 
@@ -995,7 +1537,9 @@ export async function simulateMatchLive(matchId, options = {}) {
     ballDelayMs = 80,
     broadcast = () => {},
     autoCreateNextSeason = true,
-    useExternalBallApi = true
+    useExternalBallApi = true,
+    deferSeasonProgression = false,
+    simulationOperationId = null
   } = options;
 
   if (activeSimulations.has(matchId)) {
@@ -1028,15 +1572,37 @@ export async function simulateMatchLive(matchId, options = {}) {
       return getMatchScorecard(match.id);
     }
 
-    await pool.query('DELETE FROM match_events WHERE match_id = $1', [match.id]);
-    await pool.query('DELETE FROM player_match_stats WHERE match_id = $1', [match.id]);
+    if (String(match.stage || '').toUpperCase() === 'REGULAR' && Number(match.round_no || 0) > 1) {
+      const priorIncomplete = await pool.query(
+        `SELECT MIN(round_no)::int AS round_no
+         FROM matches
+         WHERE season_id = $1
+           AND stage = 'REGULAR'
+           AND status <> 'COMPLETED'
+           AND COALESCE(league_tier, 0) = COALESCE($2, 0)`,
+        [match.season_id, match.league_tier]
+      );
 
-    await pool.query(`UPDATE matches SET status = 'LIVE' WHERE id = $1`, [match.id]);
+      const earliestIncompleteRound = Number(priorIncomplete.rows[0]?.round_no || 0);
+      if (earliestIncompleteRound && Number(match.round_no) > earliestIncompleteRound) {
+        const error = new Error(
+          `Cannot simulate Round ${match.round_no} yet. Complete Round ${earliestIncompleteRound} first in League ${Number(match.league_tier || 1)}.`
+        );
+        error.status = 409;
+        throw error;
+      }
+    }
 
     const homeFranchiseId = Number(match.home_franchise_id);
     const awayFranchiseId = Number(match.away_franchise_id);
 
+    // Load teams BEFORE setting status to LIVE so a failure doesn't leave the match stuck.
     const { homeTeam, awayTeam } = await loadMatchTeams(match, pool);
+
+    await pool.query('DELETE FROM match_events WHERE match_id = $1', [match.id]);
+    await pool.query('DELETE FROM player_match_stats WHERE match_id = $1', [match.id]);
+
+    await pool.query(`UPDATE matches SET status = 'LIVE' WHERE id = $1`, [match.id]);
     const matchConditions = buildMatchConditions();
 
     const tossApiResult = useExternalBallApi
@@ -1076,6 +1642,7 @@ export async function simulateMatchLive(matchId, options = {}) {
       'match:start',
       {
         matchId: match.id,
+        simulationOperationId,
         homeFranchiseId,
         awayFranchiseId,
         tossWinnerFranchiseId: tossWinnerId,
@@ -1098,6 +1665,7 @@ export async function simulateMatchLive(matchId, options = {}) {
       target: null,
       ballDelayMs,
       broadcast,
+      simulationOperationId,
       ballOptions: {
         useExternalBallApi,
         matchContext: matchConditions
@@ -1110,6 +1678,7 @@ export async function simulateMatchLive(matchId, options = {}) {
       'match:innings_break',
       {
         matchId: match.id,
+        simulationOperationId,
         innings: 1,
         target: firstInnings.runs + 1,
         summary: `${firstInnings.runs}/${firstInnings.wickets} in ${inningsBallsToOvers(firstInnings.balls)} overs`
@@ -1133,6 +1702,7 @@ export async function simulateMatchLive(matchId, options = {}) {
       target: firstInnings.runs,
       ballDelayMs,
       broadcast,
+      simulationOperationId,
       ballOptions: {
         useExternalBallApi,
         matchContext: matchConditions
@@ -1218,21 +1788,35 @@ export async function simulateMatchLive(matchId, options = {}) {
     await updateFranchiseResults(homeFranchiseId, awayFranchiseId, winnerId, pool);
 
     const table = await updateSeasonTableWithMatch(match.id, pool);
-    const seasonState = await progressSeasonStructure(match.season_id, pool);
+    let seasonState = { state: 'DEFERRED' };
+    if (!deferSeasonProgression) {
+      seasonState = await progressSeasonStructure(match.season_id, pool);
+    }
 
     await calculateFranchiseValuation(homeFranchiseId, match.season_id, pool);
     await calculateFranchiseValuation(awayFranchiseId, match.season_id, pool);
 
-    if (seasonState.state === 'SEASON_COMPLETED' && autoCreateNextSeason) {
+    if (!deferSeasonProgression && seasonState.state === 'SEASON_COMPLETED' && autoCreateNextSeason) {
       await createNextSeasonFromCompleted(match.season_id, pool);
     }
 
     const scorecard = await getMatchScorecard(match.id);
 
-    broadcast('match:complete', scorecard, `match:${match.id}`);
+    broadcast('match:complete', { ...scorecard, simulationOperationId }, `match:${match.id}`);
     broadcast('league:update', { seasonId: match.season_id, table: table || (await getLeagueTable(match.season_id, pool)) }, 'league');
 
     return scorecard;
+  } catch (simError) {
+    // If the match was set to LIVE but simulation failed before completing,
+    // reset the status so it can be retried and doesn't stay stuck.
+    try {
+      const currentStatus = await pool.query('SELECT status FROM matches WHERE id = $1', [matchId]);
+      if (String(currentStatus.rows[0]?.status || '').toUpperCase() === 'LIVE') {
+        await pool.query(`UPDATE matches SET status = 'SCHEDULED' WHERE id = $1`, [matchId]);
+        console.warn(`[MatchEngine] simulateMatchLive matchId=${matchId} failed — reset status from LIVE to SCHEDULED.`);
+      }
+    } catch { /* best-effort cleanup */ }
+    throw simError;
   } finally {
     activeSimulations.delete(matchId);
   }
@@ -1318,13 +1902,368 @@ export async function getMatchScorecard(matchId, dbClient = pool) {
   return scorecard;
 }
 
+async function simulateMatchUsingStreetMatchApi(matchId, options = {}) {
+  const {
+    broadcast = () => {},
+    autoCreateNextSeason = true,
+    deferSeasonProgression = false,
+    simulationOperationId = null
+  } = options;
+
+  if (activeSimulations.has(matchId)) {
+    const error = new Error('Match simulation is already running.');
+    error.status = 409;
+    throw error;
+  }
+
+  activeSimulations.add(matchId);
+
+  try {
+    const matchResult = await pool.query(
+      `SELECT m.*, hf.franchise_name AS home_name, af.franchise_name AS away_name
+       FROM matches m
+       JOIN franchises hf ON hf.id = m.home_franchise_id
+       JOIN franchises af ON af.id = m.away_franchise_id
+       WHERE m.id = $1`,
+      [matchId]
+    );
+
+    if (!matchResult.rows.length) {
+      const error = new Error('Match not found.');
+      error.status = 404;
+      throw error;
+    }
+
+    const match = matchResult.rows[0];
+    if (String(match.status || '').toUpperCase() === 'COMPLETED') {
+      return getMatchScorecard(match.id);
+    }
+
+    if (String(match.stage || '').toUpperCase() === 'REGULAR' && Number(match.round_no || 0) > 1) {
+      const priorIncomplete = await pool.query(
+        `SELECT MIN(round_no)::int AS round_no
+         FROM matches
+         WHERE season_id = $1
+           AND stage = 'REGULAR'
+           AND status <> 'COMPLETED'
+           AND COALESCE(league_tier, 0) = COALESCE($2, 0)`,
+        [match.season_id, match.league_tier]
+      );
+
+      const earliestIncompleteRound = Number(priorIncomplete.rows[0]?.round_no || 0);
+      if (earliestIncompleteRound && Number(match.round_no) > earliestIncompleteRound) {
+        const error = new Error(
+          `Cannot simulate Round ${match.round_no} yet. Complete Round ${earliestIncompleteRound} first in League ${Number(match.league_tier || 1)}.`
+        );
+        error.status = 409;
+        throw error;
+      }
+    }
+
+    const { homeTeam, awayTeam } = await loadMatchTeams(match, pool);
+    const matchConditions = buildMatchConditions();
+    const apiResult = await simulateMatchViaStreetApi({
+      team1Name: match.home_name,
+      team2Name: match.away_name,
+      team1Players: homeTeam,
+      team2Players: awayTeam,
+      context: {
+        ...matchConditions,
+        roundSeed: Number(match.round_no || 0) + Number(match.id || 0)
+      }
+    });
+
+    if (!apiResult) {
+      return null;
+    }
+
+    const homeFranchiseId = Number(match.home_franchise_id);
+    const awayFranchiseId = Number(match.away_franchise_id);
+
+    const tossData = apiResult.toss_result || {};
+    const tossWinnerId =
+      resolveTossWinnerId(tossData.TossWon || tossData.toss_winner || tossData.tossWon, match) ||
+      (Math.random() >= 0.5 ? homeFranchiseId : awayFranchiseId);
+    const tossDecisionRaw = parseTossDecision(tossData.TossDecision || tossData.toss_decision || tossData.TossDecisionText);
+
+    const inferredFirstBattingId = inferInningsBattingId(apiResult.first_innings, homeTeam, awayTeam, homeFranchiseId, awayFranchiseId);
+    const fallbackFirstBattingId =
+      tossDecisionRaw === 'BAT' ? Number(tossWinnerId) : Number(tossWinnerId) === homeFranchiseId ? awayFranchiseId : homeFranchiseId;
+    const firstBattingId = Number(inferredFirstBattingId || fallbackFirstBattingId);
+    const secondBattingId = Number(firstBattingId) === homeFranchiseId ? awayFranchiseId : homeFranchiseId;
+
+    // Keep toss decision aligned with actual innings order if API toss text and innings data disagree.
+    const tossDecision = Number(tossWinnerId) === Number(firstBattingId) ? 'BAT' : 'BOWL';
+
+    const firstBattingTeam = Number(firstBattingId) === homeFranchiseId ? homeTeam : awayTeam;
+    const firstBowlingTeam = Number(firstBattingId) === homeFranchiseId ? awayTeam : homeTeam;
+    const secondBattingTeam = Number(secondBattingId) === homeFranchiseId ? homeTeam : awayTeam;
+    const secondBowlingTeam = Number(secondBattingId) === homeFranchiseId ? awayTeam : homeTeam;
+
+    const firstInnings = buildInningsFromApiPayload({
+      inningsNo: 1,
+      inningsPayload: apiResult.first_innings || {},
+      battingFranchiseId: firstBattingId,
+      bowlingFranchiseId: secondBattingId,
+      battingTeam: firstBattingTeam,
+      bowlingTeam: firstBowlingTeam,
+      matchId: match.id
+    });
+
+    const secondInnings = buildInningsFromApiPayload({
+      inningsNo: 2,
+      inningsPayload: apiResult.second_innings || {},
+      battingFranchiseId: secondBattingId,
+      bowlingFranchiseId: firstBattingId,
+      battingTeam: secondBattingTeam,
+      bowlingTeam: secondBowlingTeam,
+      matchId: match.id
+    });
+
+    let winnerId = null;
+    if (firstInnings.runs > secondInnings.runs) {
+      winnerId = firstBattingId;
+    } else if (secondInnings.runs > firstInnings.runs) {
+      winnerId = secondBattingId;
+    }
+
+    const homeFirst = Number(firstBattingId) === homeFranchiseId;
+    const homeScore = homeFirst ? firstInnings.runs : secondInnings.runs;
+    const homeWickets = homeFirst ? firstInnings.wickets : secondInnings.wickets;
+    const homeBalls = homeFirst ? firstInnings.balls : secondInnings.balls;
+    const awayScore = homeFirst ? secondInnings.runs : firstInnings.runs;
+    const awayWickets = homeFirst ? secondInnings.wickets : firstInnings.wickets;
+    const awayBalls = homeFirst ? secondInnings.balls : firstInnings.balls;
+
+    const resultSummary =
+      String(apiResult?.match_summary?.result || '').trim() ||
+      matchSummary(match.home_name, match.away_name, firstInnings, secondInnings, winnerId, homeFranchiseId, awayFranchiseId);
+
+    await pool.query('DELETE FROM match_events WHERE match_id = $1', [match.id]);
+    await pool.query('DELETE FROM player_match_stats WHERE match_id = $1', [match.id]);
+    await pool.query(
+      `UPDATE matches
+       SET status = 'LIVE',
+           toss_winner_franchise_id = $2,
+           toss_decision = $3
+       WHERE id = $1`,
+      [match.id, tossWinnerId, tossDecision]
+    );
+
+    broadcast(
+      'match:start',
+      {
+        matchId: match.id,
+        simulationOperationId,
+        homeFranchiseId,
+        awayFranchiseId,
+        tossWinnerFranchiseId: tossWinnerId,
+        tossDecision,
+        message:
+          String(tossData.TossCommentary || '').trim() ||
+          `${Number(tossWinnerId) === homeFranchiseId ? match.home_name : match.away_name} won the toss and chose to ${tossDecision.toLowerCase()} first.`,
+        conditions: matchConditions
+      },
+      `match:${match.id}`
+    );
+
+    const persistedEvents = [...firstInnings.events, ...secondInnings.events].sort((a, b) => {
+      if (Number(a.innings) !== Number(b.innings)) {
+        return Number(a.innings) - Number(b.innings);
+      }
+      if (Number(a.overNumber) !== Number(b.overNumber)) {
+        return Number(a.overNumber) - Number(b.overNumber);
+      }
+      if (Number(a.ballNumber) !== Number(b.ballNumber)) {
+        return Number(a.ballNumber) - Number(b.ballNumber);
+      }
+      return Number(a.sortIndex || 0) - Number(b.sortIndex || 0);
+    });
+
+    for (const event of persistedEvents) {
+      await saveBallEvent(
+        match.id,
+        event.innings,
+        event.overNumber,
+        event.ballNumber,
+        event.battingFranchiseId,
+        event.bowlingFranchiseId,
+        event.strikerPlayerId,
+        event.nonStrikerPlayerId,
+        event.bowlerPlayerId,
+        {
+          runs: event.runs,
+          extras: event.extras,
+          wicket: event.isWicket,
+          eventType: event.eventType,
+          commentary: event.commentary
+        }
+      );
+    }
+
+    await pool.query(
+      `UPDATE matches
+       SET status = 'COMPLETED',
+           toss_winner_franchise_id = $2,
+           toss_decision = $3,
+           winner_franchise_id = $4,
+           home_score = $5,
+           home_wickets = $6,
+           home_balls = $7,
+           away_score = $8,
+           away_wickets = $9,
+           away_balls = $10,
+           result_summary = $11
+       WHERE id = $1`,
+      [match.id, tossWinnerId, tossDecision, winnerId, homeScore, homeWickets, homeBalls, awayScore, awayWickets, awayBalls, resultSummary]
+    );
+
+    await persistScorecard({
+      matchId: match.id,
+      franchiseId: firstBattingId,
+      teamPlayers: firstBattingTeam,
+      innings: 1,
+      battingStats: firstInnings.battingStats,
+      bowlingStats: secondInnings.bowlingStats,
+      fieldingStats: secondInnings.fieldingStats
+    });
+
+    await persistScorecard({
+      matchId: match.id,
+      franchiseId: secondBattingId,
+      teamPlayers: secondBattingTeam,
+      innings: 2,
+      battingStats: secondInnings.battingStats,
+      bowlingStats: firstInnings.bowlingStats,
+      fieldingStats: firstInnings.fieldingStats
+    });
+
+    const pomName = String(apiResult?.match_summary?.player_of_match || apiResult?.player_of_match || '').trim();
+    let playerOfMatchId = null;
+    if (pomName) {
+      const homeLookup = buildPlayerNameLookup(homeTeam);
+      const awayLookup = buildPlayerNameLookup(awayTeam);
+      playerOfMatchId = Number(resolvePlayerByName(pomName, homeTeam, homeLookup)?.id || resolvePlayerByName(pomName, awayTeam, awayLookup)?.id || 0) || null;
+    }
+
+    if (!playerOfMatchId) {
+      playerOfMatchId = await choosePlayerOfMatch(match.id);
+    }
+
+    await pool.query(
+      `UPDATE matches
+       SET player_of_match_id = $2
+       WHERE id = $1`,
+      [match.id, playerOfMatchId]
+    );
+
+    if (playerOfMatchId) {
+      await pool.query(
+        `UPDATE players
+         SET career_player_of_match = career_player_of_match + 1
+         WHERE id = $1`,
+        [playerOfMatchId]
+      );
+    }
+
+    await updateFranchiseResults(homeFranchiseId, awayFranchiseId, winnerId, pool);
+    const table = await updateSeasonTableWithMatch(match.id, pool);
+    let seasonState = { state: 'DEFERRED' };
+    if (!deferSeasonProgression) {
+      seasonState = await progressSeasonStructure(match.season_id, pool);
+    }
+
+    await calculateFranchiseValuation(homeFranchiseId, match.season_id, pool);
+    await calculateFranchiseValuation(awayFranchiseId, match.season_id, pool);
+
+    if (!deferSeasonProgression && seasonState.state === 'SEASON_COMPLETED' && autoCreateNextSeason) {
+      await createNextSeasonFromCompleted(match.season_id, pool);
+    }
+
+    const scorecard = await getMatchScorecard(match.id);
+    broadcast('match:complete', { ...scorecard, simulationOperationId }, `match:${match.id}`);
+    broadcast('league:update', { seasonId: match.season_id, table: table || (await getLeagueTable(match.season_id, pool)) }, 'league');
+
+    return scorecard;
+  } catch (simError) {
+    // If the match was set to LIVE but simulation failed before completing,
+    // reset the status so it can be retried and doesn't stay stuck.
+    try {
+      const currentStatus = await pool.query('SELECT status FROM matches WHERE id = $1', [matchId]);
+      if (String(currentStatus.rows[0]?.status || '').toUpperCase() === 'LIVE') {
+        await pool.query(`UPDATE matches SET status = 'SCHEDULED' WHERE id = $1`, [matchId]);
+        console.warn(`[MatchEngine] simulateMatchUsingStreetMatchApi matchId=${matchId} failed — reset status from LIVE to SCHEDULED.`);
+      }
+    } catch { /* best-effort cleanup */ }
+    throw simError;
+  } finally {
+    activeSimulations.delete(matchId);
+  }
+}
+
+async function simulateMatchForBatch(matchId, options = {}) {
+  const {
+    useExternalFullMatchApi = env.streetCricketFullMatchApiEnabled,
+    useExternalBallApi = env.streetCricketUseForBatchSims,
+    strictExternalFullMatchApi = false,
+    deferSeasonProgression = true
+  } = options;
+
+  console.log(
+    `[MatchEngine] simulateMatchForBatch matchId=${matchId} externalFull=${Boolean(useExternalFullMatchApi)} strictExternal=${Boolean(
+      strictExternalFullMatchApi
+    )} deferSeasonProgression=${Boolean(deferSeasonProgression)}`
+  );
+
+  if (useExternalFullMatchApi) {
+    console.log(`[MatchEngine] matchId=${matchId} using external /simulate_match`);
+    const externalResult = await simulateMatchUsingStreetMatchApi(matchId, {
+      ...options,
+      deferSeasonProgression
+    });
+    if (externalResult) {
+      return externalResult;
+    }
+
+    console.error(`[MatchEngine] matchId=${matchId} external /simulate_match returned null`);
+
+    if (strictExternalFullMatchApi) {
+      const error = new Error('External /simulate_match failed. Local fallback is disabled.');
+      error.status = 502;
+      throw error;
+    }
+  }
+
+  console.log(`[MatchEngine] matchId=${matchId} falling back to local ball engine`);
+  return simulateMatchLive(matchId, {
+    ...options,
+    ballDelayMs: 0,
+    useExternalBallApi,
+    deferSeasonProgression
+  });
+}
+
+export async function simulateMatchOutsideCenter(matchId, options = {}) {
+  return simulateMatchForBatch(matchId, {
+    ...options,
+    deferSeasonProgression: false
+  });
+}
+
 export async function simulateRound(roundNo, options = {}) {
   const {
     broadcast = () => {},
     includePlayoffs = false,
     seasonId = null,
     autoCreateNextSeason = true,
-    useExternalBallApi = env.streetCricketUseForBatchSims
+    useExternalBallApi = env.streetCricketUseForBatchSims,
+    useExternalFullMatchApi = env.streetCricketFullMatchApiEnabled,
+    strictExternalFullMatchApi = false,
+    batchChunkSize = env.streetCricketBatchChunkSize,
+    batchChunkPauseMs = env.streetCricketBatchChunkPauseMs,
+    leagueTier = null,
+    simulationOperationId = null,
+    onSimulationProgress = null
   } = options;
   const activeSeason = seasonId
     ? (await pool.query('SELECT * FROM seasons WHERE id = $1', [seasonId])).rows[0] || null
@@ -1335,52 +2274,332 @@ export async function simulateRound(roundNo, options = {}) {
   }
 
   const stageFilter = includePlayoffs ? `AND stage IN ('REGULAR', 'PLAYOFF', 'FINAL')` : `AND stage = 'REGULAR'`;
-  const targetRound =
-    roundNo ||
-    Number(
-      (
-        await pool.query(
-          `SELECT MIN(round_no)::int AS round_no
-           FROM matches
-           WHERE season_id = $1
-             ${stageFilter}
-             AND status <> 'COMPLETED'`,
-          [activeSeason.id]
-        )
-      ).rows[0].round_no
+  const tierFilter = leagueTier ? `AND league_tier = $2` : '';
+  const tierParams = leagueTier ? [activeSeason.id, Number(leagueTier)] : [activeSeason.id];
+  const firstIncompleteRound = Number(
+    (
+      await pool.query(
+        `SELECT MIN(round_no)::int AS round_no
+         FROM matches
+         WHERE season_id = $1
+           ${tierFilter}
+           ${stageFilter}
+           AND status <> 'COMPLETED'`,
+        tierParams
+      )
+    ).rows[0].round_no
+  );
+
+  if (!includePlayoffs && roundNo && firstIncompleteRound && Number(roundNo) > firstIncompleteRound) {
+    const error = new Error(
+      `Cannot simulate Round ${roundNo} yet. Complete Round ${firstIncompleteRound} first${leagueTier ? ` in League ${Number(leagueTier)}` : ''}.`
     );
+    error.status = 409;
+    throw error;
+  }
+
+  const targetRound = Number(roundNo || firstIncompleteRound || 0);
 
   if (!targetRound) {
-    return { simulated: 0, roundNo: null, seasonId: activeSeason.id };
+    await maybeEmitSimulationProgress(onSimulationProgress, {
+      scope: 'ROUND',
+      phase: 'complete',
+      operationId: simulationOperationId,
+      seasonId: Number(activeSeason.id),
+      roundNo: null,
+      leagueTier: leagueTier ? Number(leagueTier) : null,
+      completed: 0,
+      total: 0
+    });
+
+    return { simulated: 0, totalMatches: 0, roundNo: null, seasonId: activeSeason.id, operationId: simulationOperationId };
   }
 
   const matches = await pool.query(
     `SELECT id
      FROM matches
      WHERE season_id = $1
-       AND round_no = $2
+       ${leagueTier ? 'AND league_tier = $2' : ''}
+       AND round_no = $${leagueTier ? 3 : 2}
        ${stageFilter}
        AND status <> 'COMPLETED'
      ORDER BY id`,
-    [activeSeason.id, targetRound]
+    leagueTier ? [activeSeason.id, Number(leagueTier), targetRound] : [activeSeason.id, targetRound]
   );
 
-  let simulated = 0;
+  const totalMatches = Number(matches.rows.length || 0);
+  await maybeEmitSimulationProgress(onSimulationProgress, {
+    scope: 'ROUND',
+    phase: 'start',
+    operationId: simulationOperationId,
+    seasonId: Number(activeSeason.id),
+    roundNo: Number(targetRound),
+    leagueTier: leagueTier ? Number(leagueTier) : null,
+    completed: 0,
+    total: totalMatches
+  });
 
-  for (const match of matches.rows) {
-    await simulateMatchLive(match.id, { ballDelayMs: 0, broadcast, autoCreateNextSeason, useExternalBallApi });
-    simulated += 1;
+  let simulated = 0;
+  const chunkSize = Math.max(1, Number(batchChunkSize || 1));
+  const pauseMs = Math.max(0, Number(batchChunkPauseMs || 0));
+  const chunks = [];
+  for (let i = 0; i < matches.rows.length; i += chunkSize) {
+    chunks.push(matches.rows.slice(i, i + chunkSize));
   }
+
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+    const chunk = chunks[chunkIndex];
+    await Promise.all(
+      chunk.map(async (match) => {
+        try {
+          await simulateMatchForBatch(match.id, {
+            broadcast,
+            autoCreateNextSeason: false,
+            useExternalBallApi,
+            useExternalFullMatchApi,
+            strictExternalFullMatchApi,
+            simulationOperationId
+          });
+        } catch (matchError) {
+          // Broadcast error so any connected match-center client knows.
+          broadcast('match:error', { matchId: match.id, simulationOperationId, message: matchError.message }, `match:${match.id}`);
+          console.error(`[MatchEngine] simulateRound matchId=${match.id} failed:`, matchError.message);
+          // Don't rethrow — let the rest of the round continue.
+        }
+        simulated += 1;
+        await maybeEmitSimulationProgress(onSimulationProgress, {
+          scope: 'ROUND',
+          phase: 'progress',
+          operationId: simulationOperationId,
+          seasonId: Number(activeSeason.id),
+          roundNo: Number(targetRound),
+          leagueTier: leagueTier ? Number(leagueTier) : null,
+          matchId: Number(match.id),
+          completed: simulated,
+          total: totalMatches,
+          chunkIndex: chunkIndex + 1,
+          chunkTotal: chunks.length
+        });
+      })
+    );
+
+    if (pauseMs > 0 && chunkIndex < chunks.length - 1) {
+      await maybeEmitSimulationProgress(onSimulationProgress, {
+        scope: 'ROUND',
+        phase: 'cooldown',
+        operationId: simulationOperationId,
+        seasonId: Number(activeSeason.id),
+        roundNo: Number(targetRound),
+        leagueTier: leagueTier ? Number(leagueTier) : null,
+        completed: simulated,
+        total: totalMatches,
+        waitMs: pauseMs,
+        nextChunk: chunkIndex + 2
+      });
+      await delay(pauseMs);
+    }
+  }
+
+  const seasonState = await progressSeasonStructure(activeSeason.id, pool);
+  if (seasonState.state === 'SEASON_COMPLETED' && autoCreateNextSeason) {
+    await createNextSeasonFromCompleted(activeSeason.id, pool);
+  }
+
+  await maybeEmitSimulationProgress(onSimulationProgress, {
+    scope: 'ROUND',
+    phase: 'complete',
+    operationId: simulationOperationId,
+    seasonId: Number(activeSeason.id),
+    roundNo: Number(targetRound),
+    leagueTier: leagueTier ? Number(leagueTier) : null,
+    completed: simulated,
+    total: totalMatches
+  });
 
   return {
     simulated,
+    totalMatches,
     roundNo: targetRound,
-    seasonId: activeSeason.id
+    seasonId: activeSeason.id,
+    seasonState: seasonState.state,
+    leagueTier: leagueTier ? Number(leagueTier) : null,
+    operationId: simulationOperationId
+  };
+}
+
+export async function simulateLeagueRound({ seasonId = null, roundNo = null, leagueTier }, options = {}) {
+  const tier = Number(leagueTier || 0);
+  if (!tier || tier < 1 || tier > 4) {
+    const error = new Error('leagueTier must be between 1 and 4.');
+    error.status = 400;
+    throw error;
+  }
+
+  return simulateRound(roundNo, {
+    ...options,
+    includePlayoffs: false,
+    seasonId,
+    autoCreateNextSeason: false,
+    leagueTier: tier
+  });
+}
+
+export async function simulateMyLeagueRound(userId, options = {}) {
+  const activeSeason = await getActiveSeason(pool);
+  if (!activeSeason) {
+    return { simulated: 0, roundNo: null, seasonId: null, leagueTier: null };
+  }
+
+  const managed = await pool.query(
+    `SELECT st.league_tier
+     FROM franchises f
+     JOIN season_teams st ON st.franchise_id = f.id AND st.season_id = $2
+     WHERE f.owner_user_id = $1
+     LIMIT 1`,
+    [userId, activeSeason.id]
+  );
+
+  if (!managed.rows.length) {
+    const error = new Error('No managed franchise found in the active season.');
+    error.status = 404;
+    throw error;
+  }
+
+  const leagueTier = Number(managed.rows[0].league_tier || 0);
+  return simulateLeagueRound(
+    { seasonId: activeSeason.id, roundNo: null, leagueTier },
+    {
+      ...options,
+      autoCreateNextSeason: false
+    }
+  );
+}
+
+export async function simulateHalfSeason(options = {}) {
+  const {
+    broadcast = () => {},
+    useExternalBallApi = env.streetCricketUseForBatchSims,
+    useExternalFullMatchApi = env.streetCricketFullMatchApiEnabled,
+    strictExternalFullMatchApi = false,
+    simulationOperationId = null,
+    onSimulationProgress = null
+  } = options;
+
+  const activeSeason = await getActiveSeason(pool);
+  if (!activeSeason) {
+    return { totalSimulated: 0, seasonId: null, roundsSimulated: [], totalMatches: 0 };
+  }
+
+  const targetSeasonId = Number(activeSeason.id);
+  const regularRounds = await getSeasonRoundOverview(targetSeasonId, pool);
+  const totalRoundCount = Number(regularRounds.length || 0);
+  if (!totalRoundCount) {
+    return { totalSimulated: 0, seasonId: targetSeasonId, roundsSimulated: [], totalMatches: 0, operationId: simulationOperationId };
+  }
+
+  const roundsPerHalf = Math.max(1, Math.ceil(totalRoundCount / 2));
+  const pendingRounds = regularRounds
+    .filter((round) => Number(round.completed_matches || 0) < Number(round.total_matches || 0))
+    .map((round) => Number(round.round_no));
+  const roundsToSimulate = pendingRounds.slice(0, roundsPerHalf);
+
+  if (!roundsToSimulate.length) {
+    await maybeEmitSimulationProgress(onSimulationProgress, {
+      scope: 'HALF_SEASON',
+      phase: 'complete',
+      operationId: simulationOperationId,
+      seasonId: targetSeasonId,
+      completed: 0,
+      total: 0
+    });
+
+    return { totalSimulated: 0, seasonId: targetSeasonId, roundsSimulated: [], totalMatches: 0, operationId: simulationOperationId };
+  }
+
+  const totalMatches = Number(
+    (
+      await pool.query(
+        `SELECT COUNT(*)::int AS count
+         FROM matches
+         WHERE season_id = $1
+           AND stage = 'REGULAR'
+           AND round_no = ANY($2::int[])
+           AND status <> 'COMPLETED'`,
+        [targetSeasonId, roundsToSimulate]
+      )
+    ).rows[0].count
+  );
+
+  let totalSimulated = 0;
+  await maybeEmitSimulationProgress(onSimulationProgress, {
+    scope: 'HALF_SEASON',
+    phase: 'start',
+    operationId: simulationOperationId,
+    seasonId: targetSeasonId,
+    rounds: roundsToSimulate,
+    completed: 0,
+    total: totalMatches
+  });
+
+  for (const roundNo of roundsToSimulate) {
+    const result = await simulateRound(roundNo, {
+      broadcast,
+      includePlayoffs: false,
+      seasonId: targetSeasonId,
+      autoCreateNextSeason: false,
+      useExternalBallApi,
+      useExternalFullMatchApi,
+      strictExternalFullMatchApi,
+      simulationOperationId,
+      onSimulationProgress: async (progress) => {
+        if (progress?.phase !== 'progress') {
+          return;
+        }
+
+        await maybeEmitSimulationProgress(onSimulationProgress, {
+          scope: 'HALF_SEASON',
+          phase: 'progress',
+          operationId: simulationOperationId,
+          seasonId: targetSeasonId,
+          roundNo: progress.roundNo,
+          leagueTier: progress.leagueTier,
+          matchId: progress.matchId,
+          completed: Math.min(totalMatches, totalSimulated + Number(progress.completed || 0)),
+          total: totalMatches
+        });
+      }
+    });
+
+    totalSimulated += Number(result.simulated || 0);
+  }
+
+  await maybeEmitSimulationProgress(onSimulationProgress, {
+    scope: 'HALF_SEASON',
+    phase: 'complete',
+    operationId: simulationOperationId,
+    seasonId: targetSeasonId,
+    completed: totalSimulated,
+    total: totalMatches
+  });
+
+  return {
+    totalSimulated,
+    totalMatches,
+    seasonId: targetSeasonId,
+    roundsSimulated: roundsToSimulate,
+    operationId: simulationOperationId
   };
 }
 
 export async function simulateSeasonToEnd(options = {}) {
-  const { broadcast = () => {} } = options;
+  const {
+    broadcast = () => {},
+    useExternalBallApi = env.streetCricketUseForBatchSims,
+    useExternalFullMatchApi = env.streetCricketFullMatchApiEnabled,
+    strictExternalFullMatchApi = false,
+    simulationOperationId = null,
+    onSimulationProgress = null
+  } = options;
   const activeSeason = await getActiveSeason(pool);
 
   if (!activeSeason) {
@@ -1388,15 +2607,57 @@ export async function simulateSeasonToEnd(options = {}) {
   }
 
   const targetSeasonId = Number(activeSeason.id);
+  const totalPendingMatches = Number(
+    (
+      await pool.query(
+        `SELECT COUNT(*)::int AS count
+         FROM matches
+         WHERE season_id = $1
+           AND stage IN ('REGULAR', 'PLAYOFF', 'FINAL')
+           AND status <> 'COMPLETED'`,
+        [targetSeasonId]
+      )
+    ).rows[0].count
+  );
 
   let totalSimulated = 0;
+
+  await maybeEmitSimulationProgress(onSimulationProgress, {
+    scope: 'SEASON',
+    phase: 'start',
+    operationId: simulationOperationId,
+    seasonId: targetSeasonId,
+    completed: 0,
+    total: totalPendingMatches
+  });
 
   while (true) {
     const result = await simulateRound(null, {
       broadcast,
       includePlayoffs: true,
       seasonId: targetSeasonId,
-      autoCreateNextSeason: false
+      autoCreateNextSeason: false,
+      useExternalBallApi,
+      useExternalFullMatchApi,
+      strictExternalFullMatchApi,
+      simulationOperationId,
+      onSimulationProgress: async (progress) => {
+        if (progress?.phase !== 'progress') {
+          return;
+        }
+
+        await maybeEmitSimulationProgress(onSimulationProgress, {
+          scope: 'SEASON',
+          phase: 'progress',
+          operationId: simulationOperationId,
+          seasonId: targetSeasonId,
+          roundNo: progress.roundNo,
+          leagueTier: progress.leagueTier,
+          matchId: progress.matchId,
+          completed: Math.min(totalPendingMatches, totalSimulated + Number(progress.completed || 0)),
+          total: totalPendingMatches
+        });
+      }
     });
 
     if (!result.simulated) {
@@ -1410,10 +2671,20 @@ export async function simulateSeasonToEnd(options = {}) {
   const completedSeasonId = seasonResult.rows[0]?.status === 'COMPLETED' ? targetSeasonId : null;
   const nextSeason = completedSeasonId ? await createNextSeasonFromCompleted(completedSeasonId, pool) : null;
 
+  await maybeEmitSimulationProgress(onSimulationProgress, {
+    scope: 'SEASON',
+    phase: 'complete',
+    operationId: simulationOperationId,
+    seasonId: targetSeasonId,
+    completed: totalSimulated,
+    total: totalPendingMatches
+  });
+
   return {
     totalSimulated,
     seasonId: targetSeasonId,
     completedSeasonId,
-    nextSeasonId: nextSeason ? Number(nextSeason.id) : null
+    nextSeasonId: nextSeason ? Number(nextSeason.id) : null,
+    operationId: simulationOperationId
   };
 }

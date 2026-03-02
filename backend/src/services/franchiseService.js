@@ -66,8 +66,10 @@ export async function createDefaultRegions(franchiseId, cityName, country, dbCli
 }
 
 export async function ensureStarterSquad(franchiseId, country, dbClient = pool) {
+  const minimumSquadSize = 15;
   const existingPlayersResult = await dbClient.query('SELECT COUNT(*)::int AS count FROM players WHERE franchise_id = $1', [franchiseId]);
-  if (Number(existingPlayersResult.rows[0].count) >= 15) {
+  const existingCount = Number(existingPlayersResult.rows[0].count || 0);
+  if (existingCount >= minimumSquadSize) {
     return;
   }
 
@@ -82,8 +84,12 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool) 
   const usedNameKeys = new Set(existingNames.rows.map((row) => buildNameKey(row.first_name, row.last_name)));
   const usedFirstNames = new Set(existingNames.rows.map((row) => String(row.first_name || '').trim().toLowerCase()).filter(Boolean));
 
-  for (let index = 0; index < ROLE_TEMPLATE.length; index += 1) {
-    const role = ROLE_TEMPLATE[index];
+  const deficit = Math.max(0, minimumSquadSize - existingCount);
+  const seedFreshLineup = existingCount === 0;
+
+  for (let offset = 0; offset < deficit; offset += 1) {
+    const templateIndex = (existingCount + offset) % ROLE_TEMPLATE.length;
+    const role = ROLE_TEMPLATE[templateIndex];
     const base = getBaseSkill(role);
     const name = pickUniquePlayerName(country, usedNameKeys, { usedFirstNames });
 
@@ -119,15 +125,16 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool) 
         form,
         is_youth,
         starting_xi,
+        lineup_slot,
         squad_status
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
         $7, $8, $9, $10, $11, $12,
-        $13, $14, $15, 30, 30, $16, $17, $18
+        $13, $14, $15, 30, 30, $16, $17, $18, $19
       )`,
       [
         franchiseId,
-        regionIds[index % Math.max(1, regionIds.length)] || null,
+        regionIds[(existingCount + offset) % Math.max(1, regionIds.length)] || null,
         name.firstName,
         name.lastName,
         country,
@@ -141,9 +148,10 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool) 
         age,
         marketValue,
         salary,
-        index >= 11,
-        index < 11,
-        index < 11 ? 'MAIN_SQUAD' : 'YOUTH'
+        seedFreshLineup ? offset >= 11 : true,
+        seedFreshLineup ? offset < 11 : false,
+        seedFreshLineup && offset < 11 ? offset + 1 : null,
+        seedFreshLineup && offset < 11 ? 'MAIN_SQUAD' : 'YOUTH'
       ]
     );
   }

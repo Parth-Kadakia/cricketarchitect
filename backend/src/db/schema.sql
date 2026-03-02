@@ -145,6 +145,7 @@ CREATE TABLE players (
   form NUMERIC(5, 2) NOT NULL DEFAULT 30,
   is_youth BOOLEAN NOT NULL DEFAULT TRUE,
   starting_xi BOOLEAN NOT NULL DEFAULT FALSE,
+  lineup_slot INTEGER CHECK (lineup_slot BETWEEN 1 AND 11),
   squad_status TEXT NOT NULL DEFAULT 'YOUTH' CHECK (squad_status IN ('YOUTH', 'MAIN_SQUAD', 'LOANED', 'AUCTION', 'RELEASED', 'RETIRED')),
   on_loan_to_franchise_id BIGINT REFERENCES franchises(id) ON DELETE SET NULL,
   retired_at TIMESTAMPTZ,
@@ -164,6 +165,7 @@ CREATE TABLE players (
 
 CREATE INDEX players_franchise_idx ON players(franchise_id);
 CREATE INDEX players_status_idx ON players(squad_status);
+CREATE UNIQUE INDEX players_franchise_lineup_slot_uidx ON players(franchise_id, lineup_slot) WHERE lineup_slot IS NOT NULL;
 
 CREATE TABLE matches (
   id BIGSERIAL PRIMARY KEY,

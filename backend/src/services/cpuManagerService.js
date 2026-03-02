@@ -28,7 +28,8 @@ async function cpuSellPlayer(franchiseId, franchiseName, seasonId, dbClient = po
      SET franchise_id = NULL,
          squad_status = 'AUCTION',
          on_loan_to_franchise_id = NULL,
-         starting_xi = FALSE
+         starting_xi = FALSE,
+         lineup_slot = NULL
      WHERE id = $1`,
     [player.id]
   );
@@ -75,6 +76,8 @@ async function cpuBuyAuctionPlayer(franchiseId, franchiseName, seasonId, dbClien
      SET franchise_id = $2,
          squad_status = $3,
          is_youth = CASE WHEN $3 = 'YOUTH' THEN TRUE ELSE FALSE END,
+         starting_xi = FALSE,
+         lineup_slot = NULL,
          morale = LEAST(100, morale + 4),
          form = LEAST(100, form + 3)
      WHERE id = $1`,
@@ -131,7 +134,9 @@ async function cpuLoanRequest(franchiseId, franchiseName, seasonId, dbClient = p
   await dbClient.query(
     `UPDATE players
      SET squad_status = 'LOANED',
-         on_loan_to_franchise_id = $2
+         on_loan_to_franchise_id = $2,
+         starting_xi = FALSE,
+         lineup_slot = NULL
      WHERE id = $1`,
     [player.id, franchiseId]
   );
@@ -257,6 +262,8 @@ export async function runCpuMarketCycle(seasonId, dbClient = pool) {
      JOIN franchises f ON f.id = st.franchise_id
      WHERE st.season_id = $1
        AND st.is_ai = TRUE
+       AND f.owner_user_id IS NULL
+       AND f.status = 'AI_CONTROLLED'
      ORDER BY random()
     `,
     [seasonId]
