@@ -10,7 +10,7 @@ const TABS = [
   { key: 'roster', label: 'Roster Actions', icon: '⚙️' }
 ];
 
-const ROLE_ORDER = { Batsman: 0, 'All-Rounder': 1, Bowler: 2, 'Wicket-Keeper': 3 };
+const ROLE_ORDER = { BATTER: 0, WICKET_KEEPER: 1, ALL_ROUNDER: 2, BOWLER: 3 };
 
 function RolePill({ role }) {
   const cls = (role || '').toLowerCase().replace(/[^a-z]/g, '-');
@@ -148,10 +148,10 @@ export default function SquadManagementPage() {
     if (!allPlayers.length) return null;
     const overalls = allPlayers.map((p) => Number(p.overall || 0));
     const avg = overalls.reduce((s, v) => s + v, 0) / overalls.length;
-    const batsmen = allPlayers.filter((p) => p.role === 'Batsman').length;
-    const bowlers = allPlayers.filter((p) => p.role === 'Bowler').length;
-    const allRounders = allPlayers.filter((p) => p.role === 'All-Rounder').length;
-    const keepers = allPlayers.filter((p) => p.role === 'Wicket-Keeper').length;
+    const batsmen = allPlayers.filter((p) => String(p.role || '').toUpperCase() === 'BATTER').length;
+    const bowlers = allPlayers.filter((p) => String(p.role || '').toUpperCase() === 'BOWLER').length;
+    const allRounders = allPlayers.filter((p) => String(p.role || '').toUpperCase() === 'ALL_ROUNDER').length;
+    const keepers = allPlayers.filter((p) => String(p.role || '').toUpperCase() === 'WICKET_KEEPER').length;
     return { total: allPlayers.length, avg: avg.toFixed(1), batsmen, bowlers, allRounders, keepers, mainCount: grouped.main.length, youthCount: grouped.youth.length };
   }, [allPlayers, grouped]);
 

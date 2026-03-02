@@ -168,8 +168,37 @@ export async function generateProspectsForFranchise(franchiseId, seasonId, dbCli
   return generateSeasonYouthPlayers(franchiseId, seasonId, dbClient);
 }
 
-function calcDelta(power, bias = 1) {
-  return clamp(Math.round(power * bias + randomFloat(-2, 2)), 0, 8);
+function calcDelta(power, bias = 1, maxDelta = 2) {
+  return clamp(Math.round(power * bias + randomFloat(-0.45, 0.65)), 0, maxDelta);
+}
+
+function roleGrowthBonus(role, skill) {
+  const normalizedRole = String(role || '').toUpperCase();
+  if (skill === 'batting') {
+    if (normalizedRole === 'BATTER') return 3;
+    if (normalizedRole === 'WICKET_KEEPER') return 2;
+    if (normalizedRole === 'ALL_ROUNDER') return 2;
+    return 0;
+  }
+
+  if (skill === 'bowling') {
+    if (normalizedRole === 'BOWLER') return 3;
+    if (normalizedRole === 'ALL_ROUNDER') return 2;
+    return 0;
+  }
+
+  if (skill === 'fielding') {
+    if (normalizedRole === 'WICKET_KEEPER') return 2;
+    return 1;
+  }
+
+  return 1;
+}
+
+function computeSkillCap(player, academyLevel, skill) {
+  const base = clamp(Math.round(32 + Number(player.potential || 0) * 0.58 + Number(academyLevel || 1) * 1.1), 45, 94);
+  const bonus = roleGrowthBonus(player.role, skill);
+  return clamp(base + bonus, 45, 97);
 }
 
 export async function applyPlayerGrowth(franchiseId, seasonId, dbClient = pool) {
@@ -206,21 +235,38 @@ export async function applyPlayerGrowth(franchiseId, seasonId, dbClient = pool) 
   const updated = [];
 
   for (const player of playersResult.rows) {
-    const basePower = Number(franchise.academy_level) * 0.7 + Number(player.potential) * 0.05 + (player.squad_status === 'MAIN_SQUAD' ? 1.8 : 1.1);
+    const isMainSquad = player.squad_status === 'MAIN_SQUAD';
+    const ageBonus = Number(player.age || 0) <= 21 ? 0.12 : 0;
+    const growthPower =
+      Number(franchise.academy_level) * 0.08 +
+      Number(player.potential) * 0.012 +
+      (isMainSquad ? 0.32 : 0.2) +
+      ageBonus;
 
-    const battingDelta = calcDelta(basePower, player.role === 'BATTER' || player.role === 'ALL_ROUNDER' || player.role === 'WICKET_KEEPER' ? 1.05 : 0.8);
-    const bowlingDelta = calcDelta(basePower, player.role === 'BOWLER' || player.role === 'ALL_ROUNDER' ? 1.05 : 0.8);
-    const fieldingDelta = calcDelta(basePower, 0.75);
-    const fitnessDelta = calcDelta(basePower, 0.7);
-    const temperamentDelta = calcDelta(basePower, 0.6);
+    const battingDelta = calcDelta(
+      growthPower,
+      player.role === 'BATTER' || player.role === 'ALL_ROUNDER' || player.role === 'WICKET_KEEPER' ? 1.0 : 0.6,
+      3
+    );
+    const bowlingDelta = calcDelta(growthPower, player.role === 'BOWLER' || player.role === 'ALL_ROUNDER' ? 1.0 : 0.6, 3);
+    const fieldingDelta = calcDelta(growthPower, 0.55, 2);
+    const fitnessDelta = calcDelta(growthPower, 0.45, 2);
+    const temperamentDelta = calcDelta(growthPower, 0.35, 2);
 
-    const nextBatting = clamp(Number(player.batting) + battingDelta, 0, 100);
-    const nextBowling = clamp(Number(player.bowling) + bowlingDelta, 0, 100);
-    const nextFielding = clamp(Number(player.fielding) + fieldingDelta, 0, 100);
-    const nextFitness = clamp(Number(player.fitness) + fitnessDelta, 0, 100);
-    const nextTemperament = clamp(Number(player.temperament) + temperamentDelta, 0, 100);
+    const battingCap = Math.max(Number(player.batting || 0), computeSkillCap(player, franchise.academy_level, 'batting'));
+    const bowlingCap = Math.max(Number(player.bowling || 0), computeSkillCap(player, franchise.academy_level, 'bowling'));
+    const fieldingCap = Math.max(Number(player.fielding || 0), computeSkillCap(player, franchise.academy_level, 'fielding'));
+    const fitnessCap = Math.max(Number(player.fitness || 0), computeSkillCap(player, franchise.academy_level, 'fitness'));
+    const temperamentCap = Math.max(Number(player.temperament || 0), computeSkillCap(player, franchise.academy_level, 'temperament'));
 
-    const valueDelta = Number(((battingDelta + bowlingDelta + fieldingDelta + fitnessDelta + temperamentDelta) * 0.7).toFixed(2));
+    const nextBatting = clamp(Number(player.batting) + battingDelta, 0, battingCap);
+    const nextBowling = clamp(Number(player.bowling) + bowlingDelta, 0, bowlingCap);
+    const nextFielding = clamp(Number(player.fielding) + fieldingDelta, 0, fieldingCap);
+    const nextFitness = clamp(Number(player.fitness) + fitnessDelta, 0, fitnessCap);
+    const nextTemperament = clamp(Number(player.temperament) + temperamentDelta, 0, temperamentCap);
+
+    const totalDelta = battingDelta + bowlingDelta + fieldingDelta + fitnessDelta + temperamentDelta;
+    const valueDelta = Number((totalDelta * 0.18).toFixed(2));
 
     const updatedPlayer = await dbClient.query(
       `UPDATE players
@@ -234,7 +280,7 @@ export async function applyPlayerGrowth(franchiseId, seasonId, dbClient = pool) 
            morale = LEAST(100, morale + $9)
        WHERE id = $1
        RETURNING *`,
-      [player.id, nextBatting, nextBowling, nextFielding, nextFitness, nextTemperament, valueDelta, 2, 1]
+      [player.id, nextBatting, nextBowling, nextFielding, nextFitness, nextTemperament, valueDelta, isMainSquad ? 1 : 0, 1]
     );
 
     await dbClient.query(

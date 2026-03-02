@@ -4,9 +4,10 @@ import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { releaseInactiveFranchises } from '../services/inactivityService.js';
 import { bootstrapGameWorld } from '../services/bootstrapService.js';
-import { getActiveSeason } from '../services/leagueService.js';
+import { getActiveSeason, getLeagueTable } from '../services/leagueService.js';
 import { runCpuMarketCycle } from '../services/cpuManagerService.js';
 import { processSeasonRetirements } from '../services/retirementService.js';
+import { rebalanceSeasonPlayers } from '../services/rebalanceService.js';
 import { broadcast } from '../ws/realtime.js';
 
 const router = Router();
@@ -51,6 +52,29 @@ router.post(
     broadcast('market:update', { actions }, 'marketplace');
 
     return res.json({ seasonId: season.id, actions });
+  })
+);
+
+router.post(
+  '/rebalance-season',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const requestedSeasonId = Number(req.body?.seasonId || 0) || null;
+    const dryRun = Boolean(req.body?.dryRun);
+
+    const result = await rebalanceSeasonPlayers(
+      { seasonId: requestedSeasonId, dryRun },
+      pool
+    );
+
+    if (!dryRun && result.seasonId) {
+      const table = await getLeagueTable(result.seasonId, pool);
+      broadcast('league:update', { seasonId: result.seasonId, table }, 'league');
+      broadcast('market:update', { reason: 'season_rebalance', seasonId: result.seasonId }, 'marketplace');
+    }
+
+    return res.json(result);
   })
 );
 

@@ -11,6 +11,7 @@ import {
 } from './leagueService.js';
 import { simulateBallViaStreetApi, simulateMatchViaStreetApi, simulateTossViaStreetApi } from './streetCricketService.js';
 import { calculateFranchiseValuation } from './valuationService.js';
+import { ensureFranchiseLineup } from './lineupService.js';
 
 const activeSimulations = new Set();
 const MATCH_WIN_CASH_REWARD = 10;
@@ -865,6 +866,25 @@ function initFieldingStats(players) {
 }
 
 async function loadMatchTeams(match, dbClient = pool) {
+  const franchiseMeta = await dbClient.query(
+    `SELECT id, owner_user_id
+     FROM franchises
+     WHERE id = ANY($1::bigint[])`,
+    [[Number(match.home_franchise_id), Number(match.away_franchise_id)]]
+  );
+  const metaById = new Map(franchiseMeta.rows.map((row) => [Number(row.id), row]));
+
+  await ensureFranchiseLineup(
+    Number(match.home_franchise_id),
+    dbClient,
+    { mode: metaById.get(Number(match.home_franchise_id))?.owner_user_id ? 'smart' : 'auto' }
+  );
+  await ensureFranchiseLineup(
+    Number(match.away_franchise_id),
+    dbClient,
+    { mode: metaById.get(Number(match.away_franchise_id))?.owner_user_id ? 'smart' : 'auto' }
+  );
+
   // Primary query: active squad players
   const query = `SELECT *
                  FROM players
@@ -1481,8 +1501,6 @@ async function updateFranchiseResults(homeId, awayId, winnerId, dbClient = pool)
      SET losses = losses + 1,
          win_streak = 0,
          fan_rating = GREATEST(5, fan_rating - 1.2),
-         prospect_points = prospect_points + 2,
-         growth_points = growth_points + 2,
          financial_balance = financial_balance + $2
      WHERE id = $1`,
     [loserId, MATCH_LOSS_CASH_REWARD]
@@ -1506,9 +1524,8 @@ async function updateFranchiseResults(homeId, awayId, winnerId, dbClient = pool)
   await dbClient.query(
     `INSERT INTO transactions (franchise_id, transaction_type, amount, description)
      VALUES
-       ($1, 'POINT_REWARD', 0, 'Match win reward: +5 prospect points, +5 growth points'),
-       ($2, 'POINT_REWARD', 0, 'Match loss reward: +2 prospect points, +2 growth points')`,
-    [winnerId, loserId]
+       ($1, 'POINT_REWARD', 0, 'Match win reward: +5 prospect points, +5 growth points')`,
+    [winnerId]
   );
 }
 

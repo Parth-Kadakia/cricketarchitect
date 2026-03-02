@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { getFranchiseByOwner } from '../services/franchiseService.js';
 import { demoteMainSquadPlayer, loanPlayer, promoteYouthPlayer, releasePlayer } from '../services/youthService.js';
+import { ensureFranchiseLineup, setFranchiseLineup } from '../services/lineupService.js';
 
 const router = Router();
 const SALARY_CAP = 120;
@@ -16,6 +17,8 @@ router.get(
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
+
+    await ensureFranchiseLineup(franchise.id, pool, { mode: 'smart' });
 
     const players = await pool.query(
       `SELECT *, ROUND((batting + bowling + fielding + fitness + temperament) / 5.0, 1) AS overall
@@ -50,6 +53,8 @@ router.get(
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
+
+    await ensureFranchiseLineup(franchise.id, pool, { mode: 'smart' });
 
     const playerResult = await pool.query(
       `SELECT *, ROUND((batting + bowling + fielding + fitness + temperament) / 5.0, 1) AS overall
@@ -105,6 +110,8 @@ router.get(
       return res.status(404).json({ message: 'No active franchise found.' });
     }
 
+    await ensureFranchiseLineup(franchise.id, pool, { mode: 'smart' });
+
     const lineup = await pool.query(
       `SELECT id, first_name, last_name, role, batting, bowling, fielding, form, morale, lineup_slot
        FROM players
@@ -153,23 +160,11 @@ router.put(
       return res.status(400).json({ message: 'One or more lineup players are not eligible.' });
     }
 
-    await pool.query('UPDATE players SET starting_xi = FALSE, lineup_slot = NULL WHERE franchise_id = $1', [franchise.id]);
+    const lineup = await setFranchiseLineup(franchise.id, playerIds.map((id) => Number(id)), pool, {
+      normalizeOrder: true
+    });
 
-    await pool.query(
-      `UPDATE players
-       SET starting_xi = TRUE,
-           lineup_slot = ordered.slot::int,
-           squad_status = CASE WHEN squad_status = 'YOUTH' THEN 'MAIN_SQUAD' ELSE squad_status END
-       FROM (
-         SELECT player_id::bigint, slot::int
-         FROM unnest($1::bigint[]) WITH ORDINALITY AS t(player_id, slot)
-       ) AS ordered
-       WHERE players.id = ordered.player_id
-         AND players.franchise_id = $2`,
-      [playerIds.map((id) => Number(id)), franchise.id]
-    );
-
-    return res.json({ lineup: playerIds });
+    return res.json({ lineup });
   })
 );
 

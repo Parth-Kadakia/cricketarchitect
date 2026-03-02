@@ -185,14 +185,14 @@ async function cpuDevelopmentCycle(franchiseId, seasonId, dbClient = pool) {
   };
 
   let academyUpgrades = 0;
-  while (state.academy < 10 && academyUpgrades < 2) {
+  if (state.academy < 10 && state.prospect > 0 && maybe(0.35)) {
     try {
       const upgraded = await upgradeAcademyWithPoints(franchiseId, 'ACADEMY_LEVEL', dbClient);
       state.prospect = Number(upgraded.prospect_points || 0);
       state.academy = Number(upgraded.academy_level || state.academy);
-      academyUpgrades += 1;
+      academyUpgrades = 1;
     } catch {
-      break;
+      // ignore for this cycle
     }
   }
 
@@ -203,14 +203,14 @@ async function cpuDevelopmentCycle(franchiseId, seasonId, dbClient = pool) {
   }
 
   let youthUpgrades = 0;
-  while (state.youth < 100 && youthUpgrades < 2) {
+  if (state.youth < 100 && state.growth > 0 && maybe(0.32)) {
     try {
       const upgraded = await upgradeAcademyWithPoints(franchiseId, 'YOUTH_RATING', dbClient);
       state.growth = Number(upgraded.growth_points || 0);
       state.youth = Number(upgraded.youth_development_rating || state.youth);
-      youthUpgrades += 1;
+      youthUpgrades = 1;
     } catch {
-      break;
+      // ignore for this cycle
     }
   }
 
@@ -221,12 +221,13 @@ async function cpuDevelopmentCycle(franchiseId, seasonId, dbClient = pool) {
   }
 
   let prospectsGenerated = 0;
-  while (prospectsGenerated < 1) {
+  if (state.prospect >= 50 && maybe(0.28)) {
     try {
       const generated = await generateProspectsForFranchise(franchiseId, seasonId, dbClient);
-      prospectsGenerated += generated.length ? 1 : 0;
+      prospectsGenerated = generated.length ? 1 : 0;
+      state.prospect = Math.max(0, state.prospect - 50);
     } catch {
-      break;
+      // ignore for this cycle
     }
   }
 
@@ -237,12 +238,12 @@ async function cpuDevelopmentCycle(franchiseId, seasonId, dbClient = pool) {
   }
 
   let growthCycles = 0;
-  while (growthCycles < 3) {
+  if (state.growth >= 5 && maybe(0.6)) {
     try {
       await applyPlayerGrowth(franchiseId, seasonId, dbClient);
-      growthCycles += 1;
+      growthCycles = 1;
     } catch {
-      break;
+      // ignore for this cycle
     }
   }
 
