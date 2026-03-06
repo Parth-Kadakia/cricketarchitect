@@ -60,6 +60,8 @@ export const api = {
   cities: {
     list: (availableOnly = false, q = '', limit = 600) =>
       request(`/cities?available=${availableOnly}&q=${encodeURIComponent(q)}&limit=${limit}`),
+    internationalCountries: () =>
+      request('/cities/international-countries'),
     add: (token, payload) =>
       request('/cities', {
         method: 'POST',

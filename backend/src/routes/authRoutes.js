@@ -28,7 +28,7 @@ router.post(
     const inserted = await pool.query(
       `INSERT INTO users (email, password_hash, display_name, role)
        VALUES ($1, $2, $3, 'user')
-       RETURNING id, email, display_name, role, last_active_at`,
+       RETURNING id, email, display_name, role, career_mode, last_active_at`,
       [normalizedEmail, passwordHash, String(displayName).trim()]
     );
 
@@ -51,7 +51,7 @@ router.post(
     const normalizedEmail = String(email).trim().toLowerCase();
 
     const userResult = await pool.query(
-      `SELECT id, email, password_hash, display_name, role, last_active_at
+      `SELECT id, email, password_hash, display_name, role, career_mode, last_active_at
        FROM users
        WHERE email = $1`,
       [normalizedEmail]
@@ -75,6 +75,7 @@ router.post(
       email: userRow.email,
       display_name: userRow.display_name,
       role: userRow.role,
+      career_mode: userRow.career_mode,
       last_active_at: new Date().toISOString()
     };
 
@@ -89,8 +90,14 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const franchiseResult = await pool.query(
-      `SELECT f.id, f.franchise_name, f.status, f.total_valuation, f.prospect_points, f.growth_points, f.academy_name,
+      `SELECT f.id, f.franchise_name, f.status, f.total_valuation, f.competition_mode, f.prospect_points, f.growth_points, f.academy_name,
               f.wins, f.losses, f.win_streak, f.best_win_streak, f.current_league_tier, f.promotions, f.relegations,
+              ROUND(COALESCE((
+                SELECT AVG((p.batting + p.bowling + p.fielding + p.fitness + p.temperament) / 5.0)
+                FROM players p
+                WHERE p.franchise_id = f.id
+                  AND p.squad_status = 'MAIN_SQUAD'
+              ), 0), 1) AS strength_rating,
               c.name AS city_name, c.country,
               st.league_position,
               st.movement AS season_movement

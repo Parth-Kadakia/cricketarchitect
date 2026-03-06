@@ -51,17 +51,24 @@ export default function LeagueTablePage() {
   const [seasonStats, setSeasonStats] = useState({ batting: [], bowling: [] });
   const [playoffFixtures, setPlayoffFixtures] = useState([]);
   const [finalFixtures, setFinalFixtures] = useState([]);
-  const [expandedTiers, setExpandedTiers] = useState({ 1: true, 2: true, 3: true, 4: true });
+  const [expandedTiers, setExpandedTiers] = useState({});
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const isInternational = String(summary?.season?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
 
   const tableByLeague = useMemo(
-    () => [1, 2, 3, 4].map((tier) => ({
-      tier,
-      rows: (table || []).filter((row) => Number(row.league_tier) === tier)
-    })).filter((g) => g.rows.length > 0),
+    () =>
+      [...new Set((table || []).map((row) => Number(row.league_tier || 0)).filter((tier) => tier > 0))]
+        .sort((a, b) => a - b)
+        .map((tier) => ({
+          tier,
+          rows: (table || []).filter((row) => Number(row.league_tier) === tier)
+        }))
+        .filter((g) => g.rows.length > 0),
     [table]
   );
+  const maxTier = Number(summary?.season?.league_count || tableByLeague.length || 4);
+  const tabs = useMemo(() => (isInternational ? TABS.filter((tabItem) => tabItem.key !== 'knockouts') : TABS), [isInternational]);
 
   const progressPct = useMemo(() => {
     if (!summary?.fixtures) return 0;
@@ -123,6 +130,24 @@ export default function LeagueTablePage() {
     setExpandedTiers((prev) => ({ ...prev, [tier]: !prev[tier] }));
   }
 
+  useEffect(() => {
+    setExpandedTiers((prev) => {
+      const next = { ...prev };
+      for (const group of tableByLeague) {
+        if (next[group.tier] == null) {
+          next[group.tier] = true;
+        }
+      }
+      return next;
+    });
+  }, [tableByLeague]);
+
+  useEffect(() => {
+    if (!tabs.find((tabItem) => tabItem.key === tab)) {
+      setTab('standings');
+    }
+  }, [tab, tabs]);
+
   if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading league data...</span></div>;
 
   const currentSeason = seasons.find((s) => Number(s.id) === Number(seasonId));
@@ -172,7 +197,7 @@ export default function LeagueTablePage() {
 
       {/* ── Tab Navigation ── */}
       <nav className="sq-tabs">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t.key} type="button" className={`sq-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
             <span className="sq-tab-icon">{t.icon}</span>{t.label}
           </button>
@@ -182,7 +207,11 @@ export default function LeagueTablePage() {
       {/* ═══ STANDINGS TAB ═══ */}
       {tab === 'standings' && (
         <div className="sq-tab-content">
-          <p className="lg-info-text">League winners qualify for semifinals. Bottom-two and top-two movement applies between tiers each season.</p>
+          <p className="lg-info-text">
+            {isInternational
+              ? 'Each division winner takes the league title. Top-two and bottom-two movement applies between tiers each season.'
+              : 'League winners qualify for semifinals. Bottom-two and top-two movement applies between tiers each season.'}
+          </p>
           {tableByLeague.map((group) => {
             const expanded = expandedTiers[group.tier];
             const rowCount = group.rows.length;
@@ -218,7 +247,7 @@ export default function LeagueTablePage() {
                           {group.rows.map((row, i) => {
                             const pos = Number(row.league_position);
                             const isPromo = pos <= 2 && group.tier > 1;
-                            const isRelegation = pos >= rowCount - 1 && group.tier < 4;
+                            const isRelegation = pos >= rowCount - 1 && group.tier < maxTier;
                             const isLeader = pos === 1;
                             const zoneCls = isLeader ? 'leader' : isPromo ? 'promo' : isRelegation ? 'releg' : '';
                             return (
@@ -254,7 +283,7 @@ export default function LeagueTablePage() {
                     </div>
                     <div className="lg-zone-legend">
                       {group.tier > 1 && <span className="lg-legend-item lg-legend--promo">● Promotion Zone</span>}
-                      {group.tier < 4 && <span className="lg-legend-item lg-legend--releg">● Relegation Zone</span>}
+                      {group.tier < maxTier && <span className="lg-legend-item lg-legend--releg">● Relegation Zone</span>}
                       <span className="lg-legend-item lg-legend--leader">● League Leader</span>
                     </div>
                   </div>

@@ -62,6 +62,7 @@ function timeAgo(dateStr) {
 
 export default function TransferMarketPage() {
   const { token, franchise, refreshProfile } = useAuth();
+  const isInternationalMode = String(franchise?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
 
   const [tab, setTab] = useState('auction');
   const [auctionPlayers, setAuctionPlayers] = useState([]);
@@ -90,7 +91,15 @@ export default function TransferMarketPage() {
     finally { setLoading(false); }
   }
 
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => {
+    if (isInternationalMode) {
+      setLoading(false);
+      setAuctionPlayers([]);
+      setTransferFeed([]);
+      return;
+    }
+    load();
+  }, [token, isInternationalMode]);
 
   async function buyPlayer(playerId) {
     setBuying(playerId);
@@ -147,6 +156,13 @@ export default function TransferMarketPage() {
   }, [transferFeed, feedFilter]);
 
   if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading transfer hub...</span></div>;
+  if (isInternationalMode) {
+    return (
+      <div className="tm-page">
+        <div className="sq-empty">Transfers and loans are disabled in international mode. Use Youth Academy call-ups and demotions instead.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="tm-page">

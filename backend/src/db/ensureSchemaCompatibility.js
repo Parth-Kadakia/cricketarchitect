@@ -21,9 +21,13 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
   await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS current_league_tier INTEGER DEFAULT 4");
   await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS promotions INTEGER DEFAULT 0");
   await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS relegations INTEGER DEFAULT 0");
+  await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS competition_mode TEXT DEFAULT 'CLUB'");
+
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS career_mode TEXT DEFAULT 'CLUB'");
 
   await dbClient.query("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS league_count INTEGER DEFAULT 4");
   await dbClient.query("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS teams_per_league INTEGER DEFAULT 13");
+  await dbClient.query("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS competition_mode TEXT DEFAULT 'CLUB'");
 
   await dbClient.query("ALTER TABLE season_teams ADD COLUMN IF NOT EXISTS league_tier INTEGER DEFAULT 1");
   await dbClient.query("ALTER TABLE season_teams ADD COLUMN IF NOT EXISTS previous_league_tier INTEGER");
@@ -32,6 +36,8 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
 
   await dbClient.query("ALTER TABLE matches ADD COLUMN IF NOT EXISTS league_tier INTEGER");
   await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS lineup_slot INTEGER");
+  await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS career_fifties INTEGER DEFAULT 0");
+  await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS career_hundreds INTEGER DEFAULT 0");
   await dbClient.query(
     `DO $$
      BEGIN
@@ -51,17 +57,129 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
      WHERE lineup_slot IS NOT NULL`
   );
 
+  await dbClient.query("ALTER TABLE franchises DROP CONSTRAINT IF EXISTS franchises_current_league_tier_check");
+  await dbClient.query("ALTER TABLE season_teams DROP CONSTRAINT IF EXISTS season_teams_league_tier_check");
+  await dbClient.query("ALTER TABLE season_teams DROP CONSTRAINT IF EXISTS season_teams_previous_league_tier_check");
+  await dbClient.query("ALTER TABLE matches DROP CONSTRAINT IF EXISTS matches_league_tier_check");
+
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF NOT EXISTS (
+         SELECT 1
+         FROM pg_constraint
+         WHERE conname = 'franchises_current_league_tier_check'
+       ) THEN
+         ALTER TABLE franchises
+         ADD CONSTRAINT franchises_current_league_tier_check CHECK (current_league_tier BETWEEN 1 AND 20);
+       END IF;
+     END $$;`
+  );
+
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF NOT EXISTS (
+         SELECT 1
+         FROM pg_constraint
+         WHERE conname = 'season_teams_league_tier_check'
+       ) THEN
+         ALTER TABLE season_teams
+         ADD CONSTRAINT season_teams_league_tier_check CHECK (league_tier BETWEEN 1 AND 20);
+       END IF;
+     END $$;`
+  );
+
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF NOT EXISTS (
+         SELECT 1
+         FROM pg_constraint
+         WHERE conname = 'season_teams_previous_league_tier_check'
+       ) THEN
+         ALTER TABLE season_teams
+         ADD CONSTRAINT season_teams_previous_league_tier_check CHECK (
+           previous_league_tier IS NULL OR previous_league_tier BETWEEN 1 AND 20
+         );
+       END IF;
+     END $$;`
+  );
+
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF NOT EXISTS (
+         SELECT 1
+         FROM pg_constraint
+         WHERE conname = 'matches_league_tier_check'
+       ) THEN
+         ALTER TABLE matches
+         ADD CONSTRAINT matches_league_tier_check CHECK (league_tier IS NULL OR league_tier BETWEEN 1 AND 20);
+       END IF;
+     END $$;`
+  );
+
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF NOT EXISTS (
+         SELECT 1
+         FROM pg_constraint
+         WHERE conname = 'franchises_competition_mode_check'
+       ) THEN
+         ALTER TABLE franchises
+         ADD CONSTRAINT franchises_competition_mode_check CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL'));
+       END IF;
+     END $$;`
+  );
+
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF NOT EXISTS (
+         SELECT 1
+         FROM pg_constraint
+         WHERE conname = 'seasons_competition_mode_check'
+       ) THEN
+         ALTER TABLE seasons
+         ADD CONSTRAINT seasons_competition_mode_check CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL'));
+       END IF;
+     END $$;`
+  );
+
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF NOT EXISTS (
+         SELECT 1
+         FROM pg_constraint
+         WHERE conname = 'users_career_mode_check'
+       ) THEN
+         ALTER TABLE users
+         ADD CONSTRAINT users_career_mode_check CHECK (career_mode IN ('CLUB', 'INTERNATIONAL'));
+       END IF;
+     END $$;`
+  );
+
   await dbClient.query(
     `UPDATE franchises
      SET current_league_tier = COALESCE(current_league_tier, 4),
          promotions = COALESCE(promotions, 0),
-         relegations = COALESCE(relegations, 0)`
+         relegations = COALESCE(relegations, 0),
+         competition_mode = COALESCE(NULLIF(competition_mode, ''), 'CLUB')`
+  );
+
+  await dbClient.query(
+    `UPDATE users
+     SET career_mode = COALESCE(NULLIF(career_mode, ''), 'CLUB')`
   );
 
   await dbClient.query(
     `UPDATE seasons
-     SET league_count = COALESCE(league_count, 4),
-         teams_per_league = COALESCE(teams_per_league, GREATEST(1, CEIL(team_count::numeric / 4.0)::int))`
+     SET competition_mode = COALESCE(NULLIF(competition_mode, ''), 'CLUB'),
+         league_count = COALESCE(league_count, CASE WHEN COALESCE(NULLIF(competition_mode, ''), 'CLUB') = 'INTERNATIONAL' THEN 10 ELSE 4 END),
+         teams_per_league = COALESCE(teams_per_league, GREATEST(1, CEIL(team_count::numeric / GREATEST(1, COALESCE(league_count, CASE WHEN COALESCE(NULLIF(competition_mode, ''), 'CLUB') = 'INTERNATIONAL' THEN 10 ELSE 4 END))::numeric)::int))`
   );
 
   await dbClient.query(
@@ -109,5 +227,44 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
      SET starting_xi = FALSE
      WHERE starting_xi = TRUE
        AND lineup_slot IS NULL`
+  );
+
+  await dbClient.query(
+    `UPDATE players
+     SET career_fifties = COALESCE(career_fifties, 0),
+         career_hundreds = COALESCE(career_hundreds, 0)`
+  );
+
+  const playerMatchStatsTable = await dbClient.query(
+    `SELECT to_regclass('player_match_stats') AS table_name`
+  );
+  if (playerMatchStatsTable.rows[0]?.table_name) {
+    await dbClient.query(
+      `WITH milestones AS (
+         SELECT player_id,
+                COALESCE(SUM(CASE WHEN batting_runs BETWEEN 50 AND 99 THEN 1 ELSE 0 END), 0)::int AS fifties,
+                COALESCE(SUM(CASE WHEN batting_runs >= 100 THEN 1 ELSE 0 END), 0)::int AS hundreds
+         FROM player_match_stats
+         GROUP BY player_id
+       )
+       UPDATE players p
+       SET career_fifties = COALESCE(m.fifties, 0),
+           career_hundreds = COALESCE(m.hundreds, 0)
+       FROM milestones m
+       WHERE p.id = m.player_id`
+    );
+  }
+
+  await dbClient.query(
+    `UPDATE franchises f
+     SET franchise_name = c.country
+     FROM cities c
+     WHERE c.id = f.city_id
+       AND COALESCE(f.competition_mode, 'CLUB') = 'INTERNATIONAL'
+       AND (
+         f.franchise_name IS NULL
+         OR BTRIM(f.franchise_name) = ''
+         OR f.franchise_name ~* ' National Team$'
+       )`
   );
 }

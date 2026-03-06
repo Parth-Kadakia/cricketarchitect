@@ -31,6 +31,36 @@ const NAME_PROFILES = {
       'Karunaratne', 'Lakmal', 'Herath', 'Samarawickrama', 'Nissanka', 'Dananjaya', 'de Alwis', 'Senanayake', 'Ranatunga', 'Wijesinghe'
     ]
   },
+  BANGLADESH: {
+    first: [
+      'Shakib', 'Tamim', 'Mushfiqur', 'Mahmudullah', 'Liton', 'Najmul', 'Mehidy', 'Taskin', 'Mustafizur', 'Soumya',
+      'Towhid', 'Shoriful', 'Nasum', 'Rishad', 'Rakibul', 'Parvez', 'Jaker', 'Hasan', 'Tanzid', 'Shahadat'
+    ],
+    last: [
+      'Rahman', 'Hasan', 'Islam', 'Hossain', 'Ahmed', 'Miah', 'Sarkar', 'Khan', 'Akbar', 'Naim',
+      'Shanto', 'Sabbir', 'Rafi', 'Sujon', 'Karim', 'Kabir', 'Mahmud', 'Biplob', 'Haque', 'Sayeed'
+    ]
+  },
+  AUSTRALIA: {
+    first: [
+      'Jack', 'Cooper', 'Mason', 'Lachlan', 'Riley', 'Mitchell', 'Cameron', 'Nathan', 'Alex', 'Tom',
+      'Finn', 'Joel', 'Connor', 'Bailey', 'Tyler', 'Liam', 'Hudson', 'Caleb', 'Ryan', 'Josh'
+    ],
+    last: [
+      'Smith', 'Johnson', 'Brown', 'Taylor', 'Wilson', 'Anderson', 'Miller', 'Thompson', 'White', 'Harris',
+      'Walker', 'Hall', 'Campbell', 'Mitchell', 'Evans', 'Parker', 'Morris', 'Collins', 'Bennett', 'Rogers'
+    ]
+  },
+  ISRAEL: {
+    first: [
+      'Noam', 'Eitan', 'Yonatan', 'Amit', 'Lior', 'Itai', 'Omer', 'Shai', 'Nadav', 'Yair',
+      'Ariel', 'Tomer', 'Gal', 'Ori', 'Aviv', 'Roee', 'Barak', 'Gil', 'Maor', 'Asaf'
+    ],
+    last: [
+      'Cohen', 'Levi', 'Mizrahi', 'Peretz', 'Ben David', 'Shahar', 'Avraham', 'Biton', 'Mor', 'Azoulay',
+      'Nahum', 'Ohayon', 'Sasson', 'Malka', 'Dayan', 'Eliyahu', 'Haddad', 'Shimoni', 'Golan', 'Kaplan'
+    ]
+  },
   ARABIC: {
     first: [
       'Omar', 'Zayed', 'Khalid', 'Saif', 'Hamdan', 'Ayaan', 'Rayan', 'Faris', 'Tariq', 'Nasser',
@@ -188,6 +218,36 @@ const PROFILE_NAME_EXPANSIONS = {
       'Weerakoon', 'Ponnamperuma', 'Ranasinghe', 'Karunathilaka', 'Liyanage', 'Ekanayake', 'Hewage', 'Wijeratne', 'Peiris', 'Samarasinghe'
     ]
   },
+  BANGLADESH: {
+    first: [
+      'Anamul', 'Sabbir', 'Zakir', 'Nasir', 'Rubel', 'Farhad', 'Mominul', 'Saifuddin', 'Imrul', 'Tanvir',
+      'Minhaj', 'Mahfuzur', 'Shamim', 'Rony', 'Mahidul', 'Yasin', 'Shamim', 'Arafat', 'Nayeem', 'Asif'
+    ],
+    last: [
+      'Rubel', 'Anik', 'Bishwas', 'Talukder', 'Mondal', 'Barua', 'Sikder', 'Sarder', 'Rana', 'Majumdar',
+      'Chowdhury', 'Pasha', 'Rabby', 'Nayan', 'Hridoy', 'Jewel', 'Fahim', 'Sohan', 'Sharif', 'Arif'
+    ]
+  },
+  AUSTRALIA: {
+    first: [
+      'Will', 'Archie', 'Patrick', 'Luke', 'Sean', 'Dylan', 'Jordan', 'Corey', 'Brayden', 'Jasper',
+      'Harvey', 'Xavier', 'Angus', 'Trent', 'Blake', 'Elliot', 'Sam', 'Max', 'Owen', 'Callum'
+    ],
+    last: [
+      'McKenzie', 'Dawson', 'Griffin', 'Reynolds', 'Sullivan', 'Murphy', 'Byrne', 'Brooks', 'Foster', 'King',
+      'Henderson', 'Carter', 'Walsh', 'Stevens', 'Lawson', 'Webster', 'Payne', 'Nash', 'Irwin', 'Read'
+    ]
+  },
+  ISRAEL: {
+    first: [
+      'Ido', 'Avi', 'Elad', 'Yehuda', 'Matan', 'Roi', 'Assaf', 'Shimon', 'Yarden', 'Erez',
+      'Doron', 'Amichai', 'Yoni', 'Eliran', 'Ofir', 'Nir', 'Ronen', 'Eyal', 'Tal', 'Harel'
+    ],
+    last: [
+      'Ben Ami', 'Ben Haim', 'Ben Yosef', 'Amsalem', 'Abutbul', 'Berkowitz', 'Friedman', 'Goldberg', 'Rosenberg', 'Katz',
+      'Lavi', 'Navon', 'Sharabi', 'Tzarfati', 'Dahan', 'Nissim', 'Harari', 'Vaknin', 'Toledano', 'Bitan'
+    ]
+  },
   ARABIC: {
     first: [
       'Hamad', 'Marwan', 'Khaled', 'Adel', 'Yousuf', 'Ibrahim', 'Abdulrahman', 'Abdulaziz', 'Saeed', 'Mahmoud',
@@ -330,7 +390,7 @@ const COUNTRY_PROFILE_MAP = {
   india: 'SOUTH_ASIA',
   nepal: 'SOUTH_ASIA',
   bhutan: 'SOUTH_ASIA',
-  bangladesh: 'SOUTH_ASIA',
+  bangladesh: 'BANGLADESH',
   pakistan: 'PAK_AFGHAN',
   afghanistan: 'PAK_AFGHAN',
   'sri lanka': 'SRI_LANKA',
@@ -391,8 +451,9 @@ const COUNTRY_PROFILE_MAP = {
   canada: 'ANGLO',
   uk: 'ANGLO',
   ireland: 'ANGLO',
-  australia: 'ANGLO',
+  australia: 'AUSTRALIA',
   'new zealand': 'ANGLO',
+  israel: 'ISRAEL',
 
   france: 'WEST_EUROPE',
   germany: 'WEST_EUROPE',
@@ -509,7 +570,7 @@ const BLEND_PROFILES_BY_COUNTRY = {
   usa: ['ANGLO', 'IBERIAN_LATAM', 'SOUTH_ASIA'],
   canada: ['ANGLO', 'SOUTH_ASIA', 'IBERIAN_LATAM'],
   uk: ['ANGLO', 'SOUTH_ASIA', 'CARIBBEAN'],
-  australia: ['ANGLO', 'SOUTH_ASIA', 'PACIFIC'],
+  australia: ['AUSTRALIA'],
   'new zealand': ['ANGLO', 'PACIFIC'],
   uae: ['ARABIC', 'SOUTH_ASIA'],
   singapore: ['SOUTH_EAST_ASIA', 'SOUTH_ASIA', 'EAST_ASIA'],
@@ -595,16 +656,17 @@ function getExpandedProfilePool(profileKey) {
   };
 }
 
-function getProfileKeysForCountry(country) {
+function getProfileKeysForCountry(country, options = {}) {
+  const strictCountry = Boolean(options.strictCountry);
   const normalized = normalizeCountry(country);
   const primary = COUNTRY_PROFILE_MAP[normalized] || inferProfileFromKeywords(normalized);
-  const blends = BLEND_PROFILES_BY_COUNTRY[normalized] || [];
+  const blends = strictCountry ? [] : BLEND_PROFILES_BY_COUNTRY[normalized] || [];
   const profiles = unique([primary, ...blends].filter(Boolean));
   return profiles.length ? profiles : ['GLOBAL'];
 }
 
-function pickProfileKeyForCountry(country) {
-  const profiles = getProfileKeysForCountry(country);
+function pickProfileKeyForCountry(country, options = {}) {
+  const profiles = getProfileKeysForCountry(country, options);
 
   if (profiles.length === 1) {
     return profiles[0];
@@ -629,8 +691,8 @@ function pickProfileKeyForCountry(country) {
   return profiles[0];
 }
 
-export function getNamePoolForCountry(country) {
-  const profiles = getProfileKeysForCountry(country);
+export function getNamePoolForCountry(country, options = {}) {
+  const profiles = getProfileKeysForCountry(country, options);
   return buildPoolFromProfiles(profiles);
 }
 
@@ -643,8 +705,8 @@ export function buildAcademyName(cityName) {
   return `${cityName} ${suffix}`;
 }
 
-export function pickPlayerName(country) {
-  const profileKey = pickProfileKeyForCountry(country);
+export function pickPlayerName(country, options = {}) {
+  const profileKey = pickProfileKeyForCountry(country, options);
   const pool = getExpandedProfilePool(profileKey);
   return {
     firstName: pool.first[randomInt(0, pool.first.length - 1)],
@@ -661,7 +723,8 @@ function buildFirstNameKey(firstName) {
 }
 
 export function pickUniquePlayerName(country, usedNameKeys = new Set(), options = {}) {
-  const pool = getNamePoolForCountry(country);
+  const strictCountry = Boolean(options.strictCountry);
+  const pool = getNamePoolForCountry(country, { strictCountry });
   const maxCombinations = pool.first.length * pool.last.length;
   const maxAttempts = Math.min(140, Math.max(30, maxCombinations));
   const usedFirstNames = options.usedFirstNames || null;
@@ -669,7 +732,7 @@ export function pickUniquePlayerName(country, usedNameKeys = new Set(), options 
 
   function tryPick({ avoidUsedFirstName }) {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const { firstName, lastName } = pickPlayerName(country);
+      const { firstName, lastName } = pickPlayerName(country, { strictCountry });
       const key = buildNameKey(firstName, lastName);
 
       if (usedNameKeys.has(key)) {
@@ -705,7 +768,7 @@ export function pickUniquePlayerName(country, usedNameKeys = new Set(), options 
   }
 
   // Fallback if pool combinations are exhausted.
-  const fallback = pickPlayerName(country);
+  const fallback = pickPlayerName(country, { strictCountry });
   usedNameKeys.add(buildNameKey(fallback.firstName, fallback.lastName));
   if (protectFirstNameDiversity) {
     usedFirstNames.add(buildFirstNameKey(fallback.firstName));

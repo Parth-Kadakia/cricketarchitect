@@ -11,6 +11,7 @@ import {
 } from '../services/franchiseService.js';
 import { calculateFranchiseValuation } from '../services/valuationService.js';
 import { upgradeAcademyWithPoints } from '../services/youthService.js';
+import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
 
 const router = Router();
 
@@ -69,13 +70,18 @@ router.post(
   '/claim',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { cityId, franchiseName } = req.body;
+    const { cityId, franchiseName, mode, country } = req.body;
+    const careerMode = normalizeCareerMode(mode || CAREER_MODES.CLUB);
 
-    if (!cityId) {
-      return res.status(400).json({ message: 'cityId is required.' });
+    if (careerMode === CAREER_MODES.INTERNATIONAL) {
+      if (!country) {
+        return res.status(400).json({ message: 'country is required for international mode.' });
+      }
+    } else if (!cityId) {
+      return res.status(400).json({ message: 'cityId is required for club mode.' });
     }
 
-    const franchise = await claimFranchise({ userId: req.user.id, cityId, franchiseName });
+    const franchise = await claimFranchise({ userId: req.user.id, cityId, franchiseName, mode: careerMode, country });
 
     return res.status(201).json({ franchise });
   })

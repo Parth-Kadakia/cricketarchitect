@@ -4,6 +4,8 @@ import env from '../config/env.js';
 import { requireAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { ensureProminentCricketCities } from '../db/seedWorldCities.js';
+import { INTERNATIONAL_COUNTRIES } from '../constants/gameModes.js';
+import { ensureInternationalCountryCities } from '../services/franchiseService.js';
 
 const router = Router();
 
@@ -84,6 +86,51 @@ async function verifyCityViaGeocoding(name, country) {
     clearTimeout(timeout);
   }
 }
+
+router.get(
+  '/international-countries',
+  asyncHandler(async (req, res) => {
+    await ensureInternationalCountryCities(pool);
+
+    const rows = await pool.query(
+      `WITH country_cities AS (
+         SELECT DISTINCT ON (country)
+                id,
+                name,
+                country
+         FROM cities
+         WHERE country = ANY($1::text[])
+         ORDER BY country,
+                  CASE
+                    WHEN LOWER(name) = LOWER(country) THEN 0
+                    WHEN LOWER(name) = LOWER(country || ' National Cricket Ground') THEN 1
+                    ELSE 2
+                  END,
+                  name ASC
+       )
+       SELECT cc.country,
+              cc.id AS city_id,
+              cc.name AS city_name,
+              f.id AS franchise_id,
+              f.status,
+              f.owner_user_id
+       FROM country_cities cc
+       LEFT JOIN franchises f ON f.city_id = cc.id
+       ORDER BY cc.country ASC`,
+      [INTERNATIONAL_COUNTRIES]
+    );
+
+    const countries = rows.rows.map((row) => ({
+      country: row.country,
+      cityId: row.city_id,
+      cityName: row.city_name,
+      franchiseId: row.franchise_id ? Number(row.franchise_id) : null,
+      available: !row.franchise_id || row.owner_user_id == null
+    }));
+
+    return res.json({ countries });
+  })
+);
 
 router.get(
   '/',

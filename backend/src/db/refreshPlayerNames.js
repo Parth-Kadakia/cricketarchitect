@@ -28,7 +28,7 @@ async function refreshPlayerNames(dbClient) {
     const used = usedByFranchise.get(franchiseId);
     const usedFirst = usedFirstByFranchise.get(franchiseId);
     const country = player.country_origin || 'Global';
-    const next = pickUniquePlayerName(country, used, { usedFirstNames: usedFirst });
+    const next = pickUniquePlayerName(country, used, { usedFirstNames: usedFirst, strictCountry: true });
     used.add(buildNameKey(next.firstName, next.lastName));
 
     await dbClient.query(

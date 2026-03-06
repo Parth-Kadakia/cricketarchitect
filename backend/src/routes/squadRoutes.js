@@ -5,6 +5,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { getFranchiseByOwner } from '../services/franchiseService.js';
 import { demoteMainSquadPlayer, loanPlayer, promoteYouthPlayer, releasePlayer } from '../services/youthService.js';
 import { ensureFranchiseLineup, setFranchiseLineup } from '../services/lineupService.js';
+import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
 
 const router = Router();
 const SALARY_CAP = 120;
@@ -224,6 +225,8 @@ router.get(
               COALESCE(SUM(pms.batting_balls), 0)::int  AS balls,
               COALESCE(SUM(pms.fours), 0)::int          AS fours,
               COALESCE(SUM(pms.sixes), 0)::int          AS sixes,
+              COALESCE(SUM(CASE WHEN pms.batting_runs BETWEEN 50 AND 99 THEN 1 ELSE 0 END), 0)::int AS fifties,
+              COALESCE(SUM(CASE WHEN pms.batting_runs >= 100 THEN 1 ELSE 0 END), 0)::int AS hundreds,
               COALESCE(SUM(pms.bowling_wickets), 0)::int AS wickets,
               COALESCE(SUM(pms.bowling_balls), 0)::int  AS bowling_balls,
               COALESCE(SUM(pms.bowling_runs), 0)::int   AS runs_conceded,
@@ -370,6 +373,10 @@ router.post(
       return res.status(404).json({ message: 'No active franchise found.' });
     }
 
+    if (normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB) !== CAREER_MODES.CLUB) {
+      return res.status(403).json({ message: 'Loans are disabled in international mode.' });
+    }
+
     const player = await loanPlayer(franchise.id, req.params.playerId, targetFranchiseId, pool);
     return res.json({ player });
   })
@@ -382,6 +389,10 @@ router.post(
     const franchise = await getFranchiseByOwner(req.user.id);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
+    }
+
+    if (normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB) !== CAREER_MODES.CLUB) {
+      return res.status(403).json({ message: 'Releasing players is disabled in international mode.' });
     }
 
     const player = await releasePlayer(franchise.id, req.params.playerId, pool);

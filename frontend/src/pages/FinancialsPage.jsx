@@ -83,6 +83,7 @@ function BreakdownBars({ data }) {
 /* ──────────────────────────────────── */
 export default function FinancialsPage() {
   const { token, franchise } = useAuth();
+  const isInternationalMode = String(franchise?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
   const [summary, setSummary] = useState(null);
   const [valuations, setValuations] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -110,7 +111,16 @@ export default function FinancialsPage() {
     }
   }
 
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => {
+    if (isInternationalMode) {
+      setLoading(false);
+      setSummary(null);
+      setValuations([]);
+      setTransactions([]);
+      return;
+    }
+    load();
+  }, [token, isInternationalMode]);
 
   async function upgrade(mode) {
     if (!franchise?.id) return;
@@ -161,6 +171,14 @@ export default function FinancialsPage() {
   if (loading) {
     return (
       <div className="sq-loading"><div className="sq-spinner" /><p>Loading financials…</p></div>
+    );
+  }
+
+  if (isInternationalMode) {
+    return (
+      <div className="fn-page">
+        <div className="sq-empty">Financial valuation is disabled in international mode. Team progression is tracked via strength and league results.</div>
+      </div>
     );
   }
 

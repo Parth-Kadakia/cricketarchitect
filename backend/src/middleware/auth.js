@@ -19,7 +19,7 @@ export async function requireAuth(req, res, next) {
 
     const payload = verifyToken(token);
     const { rows } = await pool.query(
-      `SELECT id, email, display_name, role, last_active_at
+      `SELECT id, email, display_name, role, career_mode, last_active_at
        FROM users
        WHERE id = $1`,
       [payload.sub]

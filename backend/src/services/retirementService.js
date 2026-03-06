@@ -104,7 +104,7 @@ async function ensureMinimumSquadSize(franchiseId, dbClient = pool) {
   for (let index = 0; index < missing; index += 1) {
     const role = randomRole();
     const attrs = generateProspectAttributes(role);
-    const name = pickUniquePlayerName(country, usedNameKeys, { usedFirstNames });
+    const name = pickUniquePlayerName(country, usedNameKeys, { usedFirstNames, strictCountry: true });
 
     await dbClient.query(
       `INSERT INTO players (

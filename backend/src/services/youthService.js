@@ -157,7 +157,7 @@ export async function generateSeasonYouthPlayers(franchiseId, seasonId, dbClient
     for (let index = 0; index < count; index += 1) {
       const role = PLAYER_ROLES[randomInt(0, PLAYER_ROLES.length - 1)];
       const adjust = roleAdjustment(role);
-      const name = pickUniquePlayerName(region.region_country, usedNameKeys, { usedFirstNames });
+      const name = pickUniquePlayerName(region.region_country, usedNameKeys, { usedFirstNames, strictCountry: true });
 
       const academyFactor = Number(franchise.academy_level) * 1.4;
       const regionFactor = Number(region.quality_rating) * 0.36;

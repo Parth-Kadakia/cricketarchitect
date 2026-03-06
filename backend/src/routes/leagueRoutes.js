@@ -26,6 +26,7 @@ import {
 } from '../services/matchEngine.js';
 import { runCpuMarketCycle } from '../services/cpuManagerService.js';
 import { broadcast } from '../ws/realtime.js';
+import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
 
 const router = Router();
 
@@ -40,6 +41,16 @@ function resolveOperationId(req, prefix = 'sim') {
 
 function pushSimulationProgress(payload) {
   broadcast('league:simulation_progress', payload, 'league');
+}
+
+async function shouldRunCpuCycleForSeason(seasonId) {
+  const season = await pool.query(
+    `SELECT competition_mode
+     FROM seasons
+     WHERE id = $1`,
+    [seasonId]
+  );
+  return normalizeCareerMode(season.rows[0]?.competition_mode || CAREER_MODES.CLUB) === CAREER_MODES.CLUB;
 }
 
 router.get(
@@ -203,13 +214,13 @@ router.post(
   requireAuth,
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { name, year, teamCount } = req.body;
+    const { name, year, teamCount, competitionMode, leagueCount } = req.body;
 
     if (!year || !teamCount) {
       return res.status(400).json({ message: 'year and teamCount are required.' });
     }
 
-    const season = await createSeason({ name, year, teamCount }, pool);
+    const season = await createSeason({ name, year, teamCount, competitionMode, leagueCount }, pool);
     await generateDoubleRoundRobinFixtures(season.id, pool);
 
     return res.status(201).json({ season });
@@ -474,7 +485,7 @@ router.post(
       }
     });
 
-    if (result.seasonId) {
+    if (result.seasonId && await shouldRunCpuCycleForSeason(result.seasonId)) {
       await runCpuMarketCycle(result.seasonId, pool);
     }
 
@@ -510,7 +521,7 @@ router.post(
       }
     );
 
-    if (result.seasonId) {
+    if (result.seasonId && await shouldRunCpuCycleForSeason(result.seasonId)) {
       await runCpuMarketCycle(result.seasonId, pool);
     }
 
@@ -535,7 +546,7 @@ router.post(
       }
     });
 
-    if (result.seasonId) {
+    if (result.seasonId && await shouldRunCpuCycleForSeason(result.seasonId)) {
       await runCpuMarketCycle(result.seasonId, pool);
     }
 
@@ -559,7 +570,7 @@ router.post(
       }
     });
 
-    if (result.seasonId) {
+    if (result.seasonId && await shouldRunCpuCycleForSeason(result.seasonId)) {
       await runCpuMarketCycle(result.seasonId, pool);
     }
 
@@ -584,7 +595,7 @@ router.post(
     });
 
     const cpuCycleSeasonId = result.nextSeasonId || result.seasonId;
-    if (cpuCycleSeasonId) {
+    if (cpuCycleSeasonId && await shouldRunCpuCycleForSeason(cpuCycleSeasonId)) {
       await runCpuMarketCycle(cpuCycleSeasonId, pool);
     }
 

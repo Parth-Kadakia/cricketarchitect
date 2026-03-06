@@ -2,7 +2,7 @@ import pool from '../config/db.js';
 
 export async function calculateFranchiseValuation(franchiseId, seasonId = null, dbClient = pool) {
   const franchiseResult = await dbClient.query(
-    `SELECT id, base_value, wins, losses, championships, fan_rating, win_streak, best_win_streak
+    `SELECT id, base_value, wins, losses, championships, fan_rating, win_streak, best_win_streak, competition_mode
      FROM franchises
      WHERE id = $1`,
     [franchiseId]
@@ -15,6 +15,29 @@ export async function calculateFranchiseValuation(franchiseId, seasonId = null, 
   }
 
   const franchise = franchiseResult.rows[0];
+
+  if (String(franchise.competition_mode || '').toUpperCase() === 'INTERNATIONAL') {
+    const strength = await dbClient.query(
+      `SELECT ROUND(COALESCE(AVG((batting + bowling + fielding + fitness + temperament) / 5.0), 0), 2) AS strength_rating
+       FROM players
+       WHERE franchise_id = $1
+         AND squad_status IN ('MAIN_SQUAD', 'YOUTH', 'LOANED')`,
+      [franchiseId]
+    );
+
+    const totalValue = Number(strength.rows[0]?.strength_rating || 0);
+
+    await dbClient.query('UPDATE franchises SET total_valuation = $2 WHERE id = $1', [franchiseId, totalValue]);
+
+    return {
+      franchiseId,
+      seasonId,
+      totalValue,
+      breakdown: {
+        strength: totalValue
+      }
+    };
+  }
 
   const playersResult = await dbClient.query(
     `SELECT COALESCE(SUM((batting + bowling + fielding + fitness + temperament) / 5.0), 0) AS player_strength_sum

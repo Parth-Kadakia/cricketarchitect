@@ -323,9 +323,20 @@ export default function FixturesResultsPage() {
 
   const seasonMeta = useMemo(() => seasons.find((s) => Number(s.id) === Number(selectedSeasonId)) || null, [seasons, selectedSeasonId]);
   const seasonId = selectedSeasonId;
+  const isInternationalSeason = String(seasonMeta?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
   const playoffFixtures = useMemo(() => (allFixtures || []).filter((f) => f.stage === 'PLAYOFF'), [allFixtures]);
   const finalFixtures = useMemo(() => (allFixtures || []).filter((f) => f.stage === 'FINAL'), [allFixtures]);
-  const roundFixturesByLeague = useMemo(() => [1, 2, 3, 4].map((tier) => ({ tier, rows: (fixtures || []).filter((f) => Number(f.league_tier) === tier) })), [fixtures]);
+  const roundFixturesByLeague = useMemo(
+    () =>
+      [...new Set((fixtures || []).map((f) => Number(f.league_tier || 0)).filter((tier) => tier > 0))]
+        .sort((a, b) => a - b)
+        .map((tier) => ({ tier, rows: (fixtures || []).filter((f) => Number(f.league_tier) === tier) })),
+    [fixtures]
+  );
+  const leagueTierFilters = useMemo(
+    () => [0, ...new Set((allFixtures || []).map((f) => Number(f.league_tier || 0)).filter((tier) => tier > 0))].sort((a, b) => a - b),
+    [allFixtures]
+  );
 
   const earliestIncompleteRoundByLeague = useMemo(() => {
     const map = new Map();
@@ -376,6 +387,12 @@ export default function FixturesResultsPage() {
     setFixtures(filterRoundFixtures(allFixtures, selectedRound, nextTier));
     syncQueryParams(selectedSeasonId, selectedRound, nextTier);
   }
+
+  useEffect(() => {
+    if (isInternationalSeason && tab === 'knockouts') {
+      setTab('regular');
+    }
+  }, [isInternationalSeason, tab]);
 
   if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading fixtures...</span></div>;
 
@@ -497,9 +514,11 @@ export default function FixturesResultsPage() {
         <button type="button" className={`sq-tab ${tab === 'regular' ? 'active' : ''}`} onClick={() => setTab('regular')}>
           <span className="sq-tab-icon">📅</span>Regular Season
         </button>
-        <button type="button" className={`sq-tab ${tab === 'knockouts' ? 'active' : ''}`} onClick={() => setTab('knockouts')}>
-          <span className="sq-tab-icon">⚡</span>Knockouts
-        </button>
+        {!isInternationalSeason && (
+          <button type="button" className={`sq-tab ${tab === 'knockouts' ? 'active' : ''}`} onClick={() => setTab('knockouts')}>
+            <span className="sq-tab-icon">⚡</span>Knockouts
+          </button>
+        )}
       </nav>
 
       {/* ═══ REGULAR SEASON TAB ═══ */}
@@ -538,7 +557,7 @@ export default function FixturesResultsPage() {
               {/* League filter + "Simulate My Round" button */}
               <div className="fx-controls">
                 <div className="fx-league-filters">
-                  {[0, 1, 2, 3, 4].map((tier) => (
+                  {leagueTierFilters.map((tier) => (
                     <button key={tier} type="button" className={`sq-filter-btn ${Number(selectedLeagueTier) === tier ? 'active' : ''}`} onClick={() => changeLeagueFilter(tier)}>
                       {tier === 0 ? 'All Leagues' : `League ${tier}`}
                     </button>

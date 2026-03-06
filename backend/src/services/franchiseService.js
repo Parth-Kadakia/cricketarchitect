@@ -4,6 +4,7 @@ import { buildAcademyName, buildNameKey, getDefaultRegionLabels, pickUniquePlaye
 import { ensureActiveSeason, generateDoubleRoundRobinFixtures } from './leagueService.js';
 import { calculateFranchiseValuation } from './valuationService.js';
 import { ensureProminentCricketCities } from '../db/seedWorldCities.js';
+import { CAREER_MODES, INTERNATIONAL_COUNTRIES, normalizeCareerMode } from '../constants/gameModes.js';
 
 const ROLE_TEMPLATE = [
   'BATTER',
@@ -72,7 +73,51 @@ const PREFERRED_CITY_NAMES_BY_COUNTRY = {
   'United Kingdom': ['London', 'Manchester', 'Birmingham', 'Leeds', 'Glasgow']
 };
 
-function getBaseSkill(role) {
+function getBaseSkill(role, competitionMode = CAREER_MODES.CLUB) {
+  if (competitionMode === CAREER_MODES.INTERNATIONAL) {
+    if (role === 'BATTER') {
+      return {
+        batting: [48, 56],
+        bowling: [0, 10],
+        fielding: [44, 56],
+        fitness: [46, 58],
+        temperament: [45, 58],
+        potential: [48, 66]
+      };
+    }
+
+    if (role === 'BOWLER') {
+      return {
+        batting: [12, 28],
+        bowling: [48, 56],
+        fielding: [44, 56],
+        fitness: [46, 60],
+        temperament: [45, 58],
+        potential: [48, 66]
+      };
+    }
+
+    if (role === 'WICKET_KEEPER') {
+      return {
+        batting: [44, 56],
+        bowling: [0, 2],
+        fielding: [50, 62],
+        fitness: [46, 60],
+        temperament: [46, 60],
+        potential: [48, 66]
+      };
+    }
+
+    return {
+      batting: [44, 54],
+      bowling: [44, 54],
+      fielding: [44, 56],
+      fitness: [46, 60],
+      temperament: [45, 58],
+      potential: [48, 66]
+    };
+  }
+
   if (role === 'BATTER') {
     return {
       batting: [28, 44],
@@ -156,6 +201,45 @@ function pickCityForCountry(country, cities) {
   return shuffleRows(cities)[0];
 }
 
+function pseudoLatitude(index) {
+  const normalizedIndex = Number(index || 0);
+  return Number((((normalizedIndex * 17) % 140) - 70 + 0.1234).toFixed(4));
+}
+
+function pseudoLongitude(index) {
+  const normalizedIndex = Number(index || 0);
+  return Number((((normalizedIndex * 29) % 320) - 160 + 0.5678).toFixed(4));
+}
+
+export async function ensureInternationalCountryCities(dbClient = pool) {
+  for (let index = 0; index < INTERNATIONAL_COUNTRIES.length; index += 1) {
+    const country = INTERNATIONAL_COUNTRIES[index];
+    const fallbackCityName = `${country} National Cricket Ground`;
+
+    const existing = await dbClient.query(
+      `SELECT id
+       FROM cities
+       WHERE country = $1
+       ORDER BY
+         CASE WHEN LOWER(name) = LOWER($1) THEN 0 ELSE 1 END,
+         name ASC
+       LIMIT 1`,
+      [country]
+    );
+
+    if (existing.rows.length) {
+      continue;
+    }
+
+    await dbClient.query(
+      `INSERT INTO cities (name, country, latitude, longitude)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (name, country) DO NOTHING`,
+      [fallbackCityName, country, pseudoLatitude(index + 1), pseudoLongitude(index + 1)]
+    );
+  }
+}
+
 async function normalizeRoleSkillBands(franchiseId, dbClient = pool) {
   await dbClient.query(
     `WITH normalized AS (
@@ -232,7 +316,8 @@ export async function createDefaultRegions(franchiseId, cityName, country, dbCli
   }
 }
 
-export async function ensureStarterSquad(franchiseId, country, dbClient = pool) {
+export async function ensureStarterSquad(franchiseId, country, dbClient = pool, options = {}) {
+  const competitionMode = normalizeCareerMode(options.competitionMode || CAREER_MODES.CLUB);
   const minimumSquadSize = 15;
   const existingPlayersResult = await dbClient.query('SELECT COUNT(*)::int AS count FROM players WHERE franchise_id = $1', [franchiseId]);
   const existingCount = Number(existingPlayersResult.rows[0].count || 0);
@@ -258,8 +343,8 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool) 
   for (let offset = 0; offset < deficit; offset += 1) {
     const templateIndex = (existingCount + offset) % ROLE_TEMPLATE.length;
     const role = ROLE_TEMPLATE[templateIndex];
-    const base = getBaseSkill(role);
-    const name = pickUniquePlayerName(country, usedNameKeys, { usedFirstNames });
+    const base = getBaseSkill(role, competitionMode);
+    const name = pickUniquePlayerName(country, usedNameKeys, { usedFirstNames, strictCountry: true });
 
     const batting = randomBetween(base.batting);
     const bowling = randomBetween(base.bowling);
@@ -329,7 +414,7 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool) 
 
 export async function ensureFranchiseInfrastructure(franchiseId, dbClient = pool) {
   const franchiseResult = await dbClient.query(
-    `SELECT f.id, c.name AS city_name, c.country
+    `SELECT f.id, f.competition_mode, c.name AS city_name, c.country
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
      WHERE f.id = $1`,
@@ -342,7 +427,9 @@ export async function ensureFranchiseInfrastructure(franchiseId, dbClient = pool
 
   const franchise = franchiseResult.rows[0];
   await createDefaultRegions(franchise.id, franchise.city_name, franchise.country, dbClient);
-  await ensureStarterSquad(franchise.id, franchise.country, dbClient);
+  await ensureStarterSquad(franchise.id, franchise.country, dbClient, {
+    competitionMode: normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB)
+  });
 }
 
 export async function initializeAllFranchises(dbClient = pool) {
@@ -359,7 +446,13 @@ async function getOwnedFranchise(userId, dbClient = pool) {
     `SELECT f.*, c.name AS city_name, c.country, c.latitude, c.longitude,
             st.league_tier,
             st.league_position,
-            st.movement AS season_movement
+            st.movement AS season_movement,
+            ROUND(COALESCE((
+              SELECT AVG((p.batting + p.bowling + p.fielding + p.fitness + p.temperament) / 5.0)
+              FROM players p
+              WHERE p.franchise_id = f.id
+                AND p.squad_status = 'MAIN_SQUAD'
+            ), 0), 1) AS strength_rating
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
      LEFT JOIN seasons s ON s.status = 'ACTIVE'
@@ -407,9 +500,18 @@ async function markCpuAndHumanOwnership(selectedFranchiseId, dbClient) {
 }
 
 async function createFranchiseRecord(
-  { cityId, cityName, ownerUserId = null, status = 'AI_CONTROLLED', franchiseName = null, academyName = null },
+  {
+    cityId,
+    cityName,
+    ownerUserId = null,
+    status = 'AI_CONTROLLED',
+    franchiseName = null,
+    academyName = null,
+    competitionMode = CAREER_MODES.CLUB
+  },
   dbClient
 ) {
+  const resolvedMode = normalizeCareerMode(competitionMode);
   const inserted = await dbClient.query(
     `INSERT INTO franchises (
       city_id,
@@ -417,6 +519,7 @@ async function createFranchiseRecord(
       franchise_name,
       status,
       academy_name,
+      competition_mode,
       base_value,
       wins,
       losses,
@@ -431,12 +534,19 @@ async function createFranchiseRecord(
       growth_points,
       total_valuation
     ) VALUES (
-      $1, $2, $3, $4, $5,
+      $1, $2, $3, $4, $5, $6,
       100, 0, 0, 0, 0, 0,
       20, 100, 1, 20, 0, 0, 100
     )
     RETURNING *`,
-    [cityId, ownerUserId, franchiseName || `${cityName} Cricket Club`, status, academyName || buildAcademyName(cityName)]
+    [
+      cityId,
+      ownerUserId,
+      franchiseName || `${cityName} Cricket Club`,
+      status,
+      academyName || buildAcademyName(cityName),
+      resolvedMode
+    ]
   );
 
   return inserted.rows[0];
@@ -452,7 +562,8 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
       ownerUserId: userId,
       status: 'ACTIVE',
       franchiseName: franchiseName?.trim() || `${city.name} Cricket Club`,
-      academyName: buildAcademyName(city.name)
+      academyName: buildAcademyName(city.name),
+      competitionMode: CAREER_MODES.CLUB
     },
     dbClient
   );
@@ -542,7 +653,8 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
         cityId: cpuCity.id,
         cityName: cpuCity.name,
         ownerUserId: null,
-        status: 'AI_CONTROLLED'
+        status: 'AI_CONTROLLED',
+        competitionMode: CAREER_MODES.CLUB
       },
       dbClient
     );
@@ -553,6 +665,13 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
     await ensureFranchiseInfrastructure(franchiseId, dbClient);
     await calculateFranchiseValuation(franchiseId, null, dbClient);
   }
+
+  await dbClient.query(
+    `UPDATE users
+     SET career_mode = $2
+     WHERE id = $1`,
+    [userId, CAREER_MODES.CLUB]
+  );
 
   const season = await ensureActiveSeason(dbClient);
   if (season) {
@@ -573,27 +692,152 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
   return managerFranchise;
 }
 
-export async function claimFranchise({ userId, cityId, franchiseName }) {
+function buildInternationalTeamName(country) {
+  return String(country || '').trim() || 'International XI';
+}
+
+function buildInternationalAcademyName(country) {
+  return `${country} National Cricket Academy`;
+}
+
+async function initializeInternationalCareerWithCountry({ userId, country, franchiseName }, dbClient) {
+  await ensureInternationalCountryCities(dbClient);
+
+  const normalizedCountry = String(country || '').trim();
+  if (!normalizedCountry) {
+    const error = new Error('country is required for international career mode.');
+    error.status = 400;
+    throw error;
+  }
+
+  const officialCountry = INTERNATIONAL_COUNTRIES.find((entry) => normalizeCountry(entry) === normalizeCountry(normalizedCountry));
+  if (!officialCountry) {
+    const error = new Error('Selected country is not in the international competition pool.');
+    error.status = 400;
+    throw error;
+  }
+
+  const availableCountryCities = await dbClient.query(
+    `SELECT DISTINCT ON (country)
+            id, name, country
+     FROM cities
+     WHERE country = ANY($1::text[])
+     ORDER BY country,
+              CASE
+                WHEN LOWER(name) = LOWER(country) THEN 0
+                WHEN LOWER(name) = LOWER(country || ' National Cricket Ground') THEN 1
+                ELSE 2
+              END,
+              name ASC`,
+    [INTERNATIONAL_COUNTRIES]
+  );
+
+  const cityByCountry = new Map();
+  for (const row of availableCountryCities.rows) {
+    if (!cityByCountry.has(row.country)) {
+      cityByCountry.set(row.country, row);
+    }
+  }
+
+  const missingCountries = INTERNATIONAL_COUNTRIES.filter((entry) => !cityByCountry.has(entry));
+  if (missingCountries.length) {
+    const error = new Error(`Missing required countries in city catalog: ${missingCountries.join(', ')}`);
+    error.status = 500;
+    throw error;
+  }
+
+  const managerCity = cityByCountry.get(officialCountry);
+  const managerFranchise = await createFranchiseRecord(
+    {
+      cityId: managerCity.id,
+      cityName: managerCity.name,
+      ownerUserId: userId,
+      status: 'ACTIVE',
+      franchiseName: franchiseName?.trim() || buildInternationalTeamName(officialCountry),
+      academyName: buildInternationalAcademyName(officialCountry),
+      competitionMode: CAREER_MODES.INTERNATIONAL
+    },
+    dbClient
+  );
+
+  const allFranchiseIds = [Number(managerFranchise.id)];
+
+  for (const countryName of INTERNATIONAL_COUNTRIES) {
+    if (countryName === officialCountry) {
+      continue;
+    }
+
+    const cpuCity = cityByCountry.get(countryName);
+    const cpuFranchise = await createFranchiseRecord(
+      {
+        cityId: cpuCity.id,
+        cityName: cpuCity.name,
+        ownerUserId: null,
+        status: 'AI_CONTROLLED',
+        franchiseName: buildInternationalTeamName(countryName),
+        academyName: buildInternationalAcademyName(countryName),
+        competitionMode: CAREER_MODES.INTERNATIONAL
+      },
+      dbClient
+    );
+
+    allFranchiseIds.push(Number(cpuFranchise.id));
+  }
+
+  for (const franchiseId of allFranchiseIds) {
+    await ensureFranchiseInfrastructure(franchiseId, dbClient);
+    await calculateFranchiseValuation(franchiseId, null, dbClient);
+  }
+
+  await dbClient.query(
+    `UPDATE users
+     SET career_mode = $2
+     WHERE id = $1`,
+    [userId, CAREER_MODES.INTERNATIONAL]
+  );
+
+  const season = await ensureActiveSeason(dbClient);
+  if (season) {
+    await dbClient.query(
+      `INSERT INTO season_teams (season_id, franchise_id, is_ai, league_tier, previous_league_tier, movement)
+       SELECT $1, f.id, f.owner_user_id IS NULL, f.current_league_tier, f.current_league_tier, 'STAY'
+       FROM franchises f
+       WHERE f.id = ANY($2::bigint[])
+       ON CONFLICT (season_id, franchise_id) DO UPDATE
+       SET is_ai = EXCLUDED.is_ai`,
+      [season.id, allFranchiseIds]
+    );
+
+    await markCpuAndHumanOwnership(managerFranchise.id, dbClient);
+    await generateDoubleRoundRobinFixtures(season.id, dbClient);
+  }
+
+  return managerFranchise;
+}
+
+export async function claimFranchise({ userId, cityId, franchiseName, mode = CAREER_MODES.CLUB, country = null }) {
   return withTransaction(async (client) => {
+    const careerMode = normalizeCareerMode(mode);
     const owned = await getOwnedFranchise(userId, client);
     if (owned) {
       const error = new Error('You already manage a franchise in this save.');
       error.status = 400;
       throw error;
     }
-
-    const cityResult = await client.query('SELECT id, name, country FROM cities WHERE id = $1', [cityId]);
-    if (!cityResult.rows.length) {
-      const error = new Error('City not found.');
-      error.status = 404;
-      throw error;
-    }
-
-    const city = cityResult.rows[0];
     const franchiseCount = Number((await client.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
 
     if (franchiseCount === 0) {
-      const created = await initializeCareerLeagueWithCity({ userId, city, franchiseName }, client);
+      const created = careerMode === CAREER_MODES.INTERNATIONAL
+        ? await initializeInternationalCareerWithCountry({ userId, country, franchiseName }, client)
+        : await (async () => {
+          const cityResult = await client.query('SELECT id, name, country FROM cities WHERE id = $1', [cityId]);
+          if (!cityResult.rows.length) {
+            const error = new Error('City not found.');
+            error.status = 404;
+            throw error;
+          }
+          return initializeCareerLeagueWithCity({ userId, city: cityResult.rows[0], franchiseName }, client);
+        })();
 
       const refreshed = await client.query(
         `SELECT f.*, c.name AS city_name, c.country, c.latitude, c.longitude
@@ -606,12 +850,77 @@ export async function claimFranchise({ userId, cityId, franchiseName }) {
       return refreshed.rows[0];
     }
 
+    const worldModesResult = await client.query(
+      `SELECT DISTINCT competition_mode
+       FROM franchises`
+    );
+    const worldModes = new Set(
+      worldModesResult.rows
+        .map((row) => normalizeCareerMode(row.competition_mode || CAREER_MODES.CLUB))
+        .filter(Boolean)
+    );
+
+    if (worldModes.size > 1) {
+      const error = new Error('Mixed world modes detected. Start a new game to continue.');
+      error.status = 409;
+      throw error;
+    }
+
+    const worldMode = worldModes.size ? [...worldModes][0] : CAREER_MODES.CLUB;
+    if (worldMode !== careerMode) {
+      const error = new Error(`Current save is ${worldMode.toLowerCase()} mode. Start a new game for ${careerMode.toLowerCase()} mode.`);
+      error.status = 409;
+      throw error;
+    }
+
+    let resolvedCityId = Number(cityId || 0) || null;
+    if (!resolvedCityId && worldMode === CAREER_MODES.INTERNATIONAL) {
+      const requestedCountry = String(country || '').trim();
+      if (!requestedCountry) {
+        const error = new Error('country is required to claim an international team.');
+        error.status = 400;
+        throw error;
+      }
+
+      const countryCity = await client.query(
+        `SELECT id
+         FROM cities
+         WHERE LOWER(country) = LOWER($1)
+         ORDER BY
+           CASE
+             WHEN LOWER(name) = LOWER(country) THEN 0
+             WHEN LOWER(name) = LOWER(country || ' National Cricket Ground') THEN 1
+             ELSE 2
+           END,
+           name ASC
+         LIMIT 1`,
+        [requestedCountry]
+      );
+
+      resolvedCityId = countryCity.rows[0]?.id ? Number(countryCity.rows[0].id) : null;
+    }
+
+    if (!resolvedCityId) {
+      const error = new Error('cityId is required for this save.');
+      error.status = 400;
+      throw error;
+    }
+
+    const cityResult = await client.query('SELECT id, name, country FROM cities WHERE id = $1', [resolvedCityId]);
+    if (!cityResult.rows.length) {
+      const error = new Error('City not found.');
+      error.status = 404;
+      throw error;
+    }
+
+    const city = cityResult.rows[0];
+
     const franchiseResult = await client.query(
       `SELECT *
        FROM franchises
        WHERE city_id = $1
        FOR UPDATE`,
-      [cityId]
+      [resolvedCityId]
     );
 
     if (!franchiseResult.rows.length) {
@@ -639,9 +948,16 @@ export async function claimFranchise({ userId, cityId, franchiseName }) {
       [
         franchise.id,
         userId,
-        franchiseName?.trim() || `${city.name} Cricket Club`,
-        buildAcademyName(city.name)
+        franchiseName?.trim() || (worldMode === CAREER_MODES.INTERNATIONAL ? buildInternationalTeamName(city.country) : `${city.name} Cricket Club`),
+        worldMode === CAREER_MODES.INTERNATIONAL ? buildInternationalAcademyName(city.country) : buildAcademyName(city.name)
       ]
+    );
+
+    await client.query(
+      `UPDATE users
+       SET career_mode = $2
+       WHERE id = $1`,
+      [userId, worldMode]
     );
 
     await ensureFranchiseInfrastructure(franchise.id, client);
@@ -743,6 +1059,13 @@ export async function purchaseFranchise({ buyerUserId, franchiseId, newFranchise
       [franchiseId, buyerUserId, newFranchiseName?.trim() || null]
     );
 
+    await client.query(
+      `UPDATE users
+       SET career_mode = $2
+       WHERE id = $1`,
+      [buyerUserId, normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB)]
+    );
+
     await markCpuAndHumanOwnership(franchiseId, client);
 
     await client.query(
@@ -775,7 +1098,7 @@ export async function getMarketplaceData() {
   const allFranchises = await pool.query(
     `SELECT f.id, f.franchise_name, f.status, f.total_valuation, f.wins, f.losses, f.championships,
             f.win_streak, f.prospect_points, f.growth_points, f.academy_level, f.youth_development_rating,
-            f.current_league_tier, f.promotions, f.relegations,
+            f.current_league_tier, f.promotions, f.relegations, f.competition_mode,
             c.name AS city_name, c.country, c.latitude, c.longitude,
             COALESCE(
               NULLIF(to_jsonb(u)->>'display_name', ''),

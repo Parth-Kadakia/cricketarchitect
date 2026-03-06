@@ -3,6 +3,7 @@ import pool from '../config/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { getFranchiseByOwner } from '../services/franchiseService.js';
+import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
 
 const router = Router();
 
@@ -32,12 +33,24 @@ router.get(
       [franchise.id]
     );
 
+    const strengthResult = await pool.query(
+      `SELECT ROUND(COALESCE(AVG((batting + bowling + fielding + fitness + temperament) / 5.0), 0), 1) AS strength_rating
+       FROM players
+       WHERE franchise_id = $1
+         AND squad_status = 'MAIN_SQUAD'`,
+      [franchise.id]
+    );
+
+    const mode = normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB);
+
     return res.json({
       franchise,
+      competitionMode: mode,
       cashBalance: Number(franchise.financial_balance),
       payroll: Number(payroll.rows[0].payroll),
       playerMarketValue: Number(playerValue.rows[0].total_market),
-      cashFlowHealth: Number((Number(franchise.financial_balance) - Number(payroll.rows[0].payroll)).toFixed(2))
+      cashFlowHealth: Number((Number(franchise.financial_balance) - Number(payroll.rows[0].payroll)).toFixed(2)),
+      strengthRating: Number(strengthResult.rows[0].strength_rating || 0)
     });
   })
 );
@@ -73,6 +86,10 @@ router.get(
 
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
+    }
+
+    if (normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB) !== CAREER_MODES.CLUB) {
+      return res.json({ valuations: [] });
     }
 
     const valuations = await pool.query(

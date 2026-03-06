@@ -333,6 +333,90 @@ function normalizeDismissalText(value) {
   return raw;
 }
 
+function cleanPlayerNameToken(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseDismissalDetails(value) {
+  const raw = String(value || '').trim();
+  const normalized = normalizeDismissalText(raw);
+  if (!normalized) {
+    return {
+      text: null,
+      type: null,
+      bowlerName: null,
+      fielderName: null
+    };
+  }
+
+  const lower = raw.toLowerCase();
+  if (lower.includes('run out')) {
+    const runOutMatch =
+      raw.match(/run out\s*\(([^)]+)\)/i) ||
+      raw.match(/run out(?:\s+by\s+([A-Za-z0-9 .'-]+))?/i);
+    const fielderToken = runOutMatch ? (runOutMatch[1] || runOutMatch[2] || '') : '';
+    const fielderName = cleanPlayerNameToken(String(fielderToken).split(/[,&/]/)[0]);
+    return {
+      text: fielderName ? `run out (${fielderName})` : 'run out',
+      type: 'RUN_OUT',
+      bowlerName: null,
+      fielderName: fielderName || null
+    };
+  }
+
+  const bowlerMatch = raw.match(/\bb\s+([A-Za-z0-9 .'-]+)\s*(?:\(|$)/i);
+  const bowlerName = bowlerMatch ? cleanPlayerNameToken(bowlerMatch[1]) : null;
+
+  const caughtMatch = raw.match(/\bc\s+(.+?)\s+b\b/i);
+  const stumpedMatch = raw.match(/\bst\s+(.+?)\s+b\b/i);
+  const fielderName = cleanPlayerNameToken((caughtMatch?.[1] || stumpedMatch?.[1] || '').split(/[,&/]/)[0]) || null;
+
+  if (lower.includes('c ')) {
+    return {
+      text: normalized,
+      type: 'CAUGHT',
+      bowlerName,
+      fielderName
+    };
+  }
+
+  if (lower.includes('lbw')) {
+    return {
+      text: bowlerName ? `lbw b ${bowlerName}` : 'lbw',
+      type: 'LBW',
+      bowlerName,
+      fielderName: null
+    };
+  }
+
+  if (lower.includes('st ')) {
+    return {
+      text: normalized,
+      type: 'STUMPED',
+      bowlerName,
+      fielderName
+    };
+  }
+
+  if (bowlerName) {
+    return {
+      text: `b ${bowlerName}`,
+      type: 'BOWLED',
+      bowlerName,
+      fielderName: null
+    };
+  }
+
+  return {
+    text: normalized,
+    type: 'OTHER',
+    bowlerName: null,
+    fielderName: null
+  };
+}
+
 function inferInningsBattingId(inningsPayload, homeTeam, awayTeam, homeId, awayId) {
   const battingScorecard = inningsPayload?.batting_scorecard || {};
   const names = Object.keys(battingScorecard);
@@ -518,6 +602,7 @@ function buildInningsFromApiPayload({
 
   const battingScorecard = inningsPayload?.batting_scorecard || {};
   const battingEntries = Object.entries(battingScorecard);
+  const derivedBowlerWickets = new Map();
 
   for (const [name, line] of battingEntries) {
     const player = resolvePlayerByName(name, battingTeam, battingLookup);
@@ -533,38 +618,41 @@ function buildInningsFromApiPayload({
     row.fours = toInt(line?.['4s'] ?? line?.fours ?? 0);
     row.sixes = toInt(line?.['6s'] ?? line?.sixes ?? 0);
 
-    const dismissalRaw = String(line?.dismissal ?? line?.dismissal_text ?? '').trim();
-    const dismissalText = normalizeDismissalText(dismissalRaw);
-    row.dismissalText = dismissalText;
-    row.notOut = !dismissalText;
+    const dismissalRaw = String(line?.dismissal ?? line?.dismissal_text ?? '');
+    const dismissal = parseDismissalDetails(dismissalRaw);
+    row.dismissalText = dismissal.text;
+    row.notOut = !dismissal.text;
 
-    const dismissalLower = dismissalRaw.toLowerCase();
-    if (dismissalLower.includes('run out')) {
-      const runOutMatch =
-        dismissalRaw.match(/run out\s*\(([^)]+)\)/i) ||
-        dismissalRaw.match(/run out(?:\s+by\s+([A-Za-z0-9 .'-]+))?/i);
-      const fielderName = runOutMatch ? (runOutMatch[1] || runOutMatch[2] || '').split(/[,&/]/)[0].trim() : '';
-      if (fielderName) {
-        const fielder = resolvePlayerByName(fielderName, bowlingTeam, bowlingLookup);
+    if (dismissal.type === 'RUN_OUT') {
+      if (dismissal.fielderName) {
+        const fielder = resolvePlayerByName(dismissal.fielderName, bowlingTeam, bowlingLookup);
         if (fielder) {
           const fieldLine = fieldingStats.get(Number(fielder.id));
           fieldLine.runOuts += 1;
         }
       }
-    } else if (dismissalLower.includes('c ')) {
-      const caughtMatch = dismissalRaw.match(/\bc\s+(.+?)\s+b\b/i);
-      const fielderName = caughtMatch ? String(caughtMatch[1] || '').trim() : '';
-      if (fielderName) {
-        const fielder = resolvePlayerByName(fielderName, bowlingTeam, bowlingLookup);
-        if (fielder) {
-          const fieldLine = fieldingStats.get(Number(fielder.id));
-          fieldLine.catches += 1;
-        }
+      continue;
+    }
+
+    if (dismissal.type === 'CAUGHT' && dismissal.fielderName) {
+      const fielder = resolvePlayerByName(dismissal.fielderName, bowlingTeam, bowlingLookup);
+      if (fielder) {
+        const fieldLine = fieldingStats.get(Number(fielder.id));
+        fieldLine.catches += 1;
+      }
+    }
+
+    if (dismissal.bowlerName) {
+      const bowler = resolvePlayerByName(dismissal.bowlerName, bowlingTeam, bowlingLookup);
+      if (bowler) {
+        const bowlerId = Number(bowler.id);
+        derivedBowlerWickets.set(bowlerId, Number(derivedBowlerWickets.get(bowlerId) || 0) + 1);
       }
     }
   }
 
   const bowlingScorecard = inningsPayload?.bowling_scorecard || {};
+  const useDerivedWicketCredits = battingEntries.length > 0;
   for (const [name, line] of Object.entries(bowlingScorecard)) {
     const player = resolvePlayerByName(name, bowlingTeam, bowlingLookup);
     if (!player) {
@@ -574,7 +662,9 @@ function buildInningsFromApiPayload({
     const row = bowlingStats.get(Number(player.id));
     row.balls = toInt(line?.B ?? line?.balls ?? oversTextToBalls(line?.O ?? line?.overs ?? 0));
     row.runs = toInt(line?.R ?? line?.runs ?? 0);
-    row.wickets = toInt(line?.W ?? line?.wkts ?? line?.wickets ?? 0);
+    row.wickets = useDerivedWicketCredits
+      ? Number(derivedBowlerWickets.get(Number(player.id)) || 0)
+      : toInt(line?.W ?? line?.wkts ?? line?.wickets ?? 0);
     row.maidens = toInt(line?.M ?? line?.maidens ?? 0);
     row.currentOverRuns = 0;
   }
@@ -1444,6 +1534,8 @@ async function persistScorecard({ matchId, franchiseId, teamPlayers, innings, ba
     );
 
     const careerOversDelta = inningsBallsToOvers(statLine.bowling_balls);
+    const careerFiftyDelta = statLine.batting_runs >= 50 && statLine.batting_runs < 100 ? 1 : 0;
+    const careerHundredDelta = statLine.batting_runs >= 100 ? 1 : 0;
 
     await pool.query(
       `UPDATE players
@@ -1456,8 +1548,10 @@ async function persistScorecard({ matchId, franchiseId, teamPlayers, innings, ba
            career_overs = career_overs + $7,
            career_runs_conceded = career_runs_conceded + $8,
            career_catches = career_catches + $9,
-           form = LEAST(100, GREATEST(5, form + $10)),
-           morale = LEAST(100, GREATEST(5, morale + $11))
+           career_fifties = career_fifties + $10,
+           career_hundreds = career_hundreds + $11,
+           form = LEAST(100, GREATEST(5, form + $12)),
+           morale = LEAST(100, GREATEST(5, morale + $13))
        WHERE id = $1`,
       [
         id,
@@ -1469,6 +1563,8 @@ async function persistScorecard({ matchId, franchiseId, teamPlayers, innings, ba
         careerOversDelta,
         statLine.bowling_runs,
         statLine.catches,
+        careerFiftyDelta,
+        careerHundredDelta,
         Number((statLine.batting_runs / 20 + statLine.bowling_wickets * 2.2 - statLine.bowling_runs / 40).toFixed(2)),
         Number((statLine.batting_runs / 25 + statLine.bowling_wickets * 1.5 + statLine.catches * 0.5 - 1).toFixed(2))
       ]
@@ -2478,8 +2574,13 @@ export async function simulateRound(roundNo, options = {}) {
 
 export async function simulateLeagueRound({ seasonId = null, roundNo = null, leagueTier }, options = {}) {
   const tier = Number(leagueTier || 0);
-  if (!tier || tier < 1 || tier > 4) {
-    const error = new Error('leagueTier must be between 1 and 4.');
+  const activeSeason = seasonId
+    ? (await pool.query('SELECT id, league_count FROM seasons WHERE id = $1', [seasonId])).rows[0] || null
+    : await getActiveSeason(pool);
+  const maxTier = Number(activeSeason?.league_count || 4);
+
+  if (!tier || tier < 1 || tier > maxTier) {
+    const error = new Error(`leagueTier must be between 1 and ${maxTier}.`);
     error.status = 400;
     throw error;
   }

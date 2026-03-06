@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { getMarketplaceData, getFranchiseByOwner } from '../services/franchiseService.js';
 import { getTransferFeed } from '../services/cpuManagerService.js';
 import { calculateFranchiseValuation } from '../services/valuationService.js';
+import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
 
 const router = Router();
 
@@ -52,10 +53,11 @@ router.get(
   '/franchises',
   asyncHandler(async (req, res) => {
     const franchises = await pool.query(
-      `SELECT
+        `SELECT
          f.id,
          f.franchise_name,
          f.status,
+         f.competition_mode,
          f.total_valuation,
          f.wins,
          f.losses,
@@ -94,6 +96,18 @@ router.get(
 router.get(
   '/auction-pool',
   asyncHandler(async (req, res) => {
+    const activeSeason = await pool.query(
+      `SELECT competition_mode
+       FROM seasons
+       WHERE status = 'ACTIVE'
+       ORDER BY id DESC
+       LIMIT 1`
+    );
+    const mode = normalizeCareerMode(activeSeason.rows[0]?.competition_mode || CAREER_MODES.CLUB);
+    if (mode !== CAREER_MODES.CLUB) {
+      return res.json({ players: [] });
+    }
+
     const players = await pool.query(
       `SELECT id, first_name, last_name, country_origin, role, age, batting, bowling, fielding, fitness, temperament, potential, market_value
        FROM players
@@ -115,6 +129,12 @@ router.post(
       if (!franchise) {
         const error = new Error('No active franchise found.');
         error.status = 404;
+        throw error;
+      }
+
+      if (normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB) !== CAREER_MODES.CLUB) {
+        const error = new Error('Transfers are disabled in international mode.');
+        error.status = 403;
         throw error;
       }
 
@@ -198,6 +218,18 @@ router.post(
 router.get(
   '/transfer-feed',
   asyncHandler(async (req, res) => {
+    const activeSeason = await pool.query(
+      `SELECT competition_mode
+       FROM seasons
+       WHERE status = 'ACTIVE'
+       ORDER BY id DESC
+       LIMIT 1`
+    );
+    const mode = normalizeCareerMode(activeSeason.rows[0]?.competition_mode || CAREER_MODES.CLUB);
+    if (mode !== CAREER_MODES.CLUB) {
+      return res.json({ feed: [] });
+    }
+
     const limit = Math.max(20, Math.min(250, Number(req.query.limit || 100)));
     const feed = await getTransferFeed(limit);
     return res.json({ feed });

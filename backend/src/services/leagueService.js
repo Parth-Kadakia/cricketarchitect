@@ -1,9 +1,23 @@
 import pool from '../config/db.js';
 import { processSeasonRetirements } from './retirementService.js';
+import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
 
-const LEAGUE_COUNT = 4;
 const DEFAULT_LEAGUE_TEAM_COUNT = 52;
+const DEFAULT_INTERNATIONAL_TEAM_COUNT = 100;
+const DEFAULT_CLUB_LEAGUE_COUNT = 4;
+const DEFAULT_INTERNATIONAL_LEAGUE_COUNT = 10;
 const PROMOTION_SPOTS = 2;
+
+function resolveLeagueCount(competitionMode, requestedLeagueCount = null) {
+  const mode = normalizeCareerMode(competitionMode || CAREER_MODES.CLUB);
+  const fallback = mode === CAREER_MODES.INTERNATIONAL ? DEFAULT_INTERNATIONAL_LEAGUE_COUNT : DEFAULT_CLUB_LEAGUE_COUNT;
+  const parsed = Number(requestedLeagueCount || 0);
+  return parsed > 0 ? parsed : fallback;
+}
+
+function shouldUseDoubleRoundRobin(competitionMode) {
+  return normalizeCareerMode(competitionMode || CAREER_MODES.CLUB) === CAREER_MODES.CLUB;
+}
 
 function generateRoundRobin(teamIds) {
   const teams = [...teamIds];
@@ -95,7 +109,7 @@ async function refreshPositions(seasonId, dbClient = pool) {
   }
 }
 
-async function buildRandomTierAssignments(teamCount, dbClient = pool) {
+async function buildRandomTierAssignments(teamCount, leagueCount, dbClient = pool) {
   const franchises = await dbClient.query(
     `SELECT id, owner_user_id
      FROM franchises
@@ -109,13 +123,13 @@ async function buildRandomTierAssignments(teamCount, dbClient = pool) {
   return shuffled.map((row, index) => ({
     franchiseId: Number(row.id),
     isAi: !row.owner_user_id,
-    leagueTier: (index % LEAGUE_COUNT) + 1,
+    leagueTier: (index % leagueCount) + 1,
     previousLeagueTier: null,
     movement: 'NEW'
   }));
 }
 
-async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCount, dbClient = pool) {
+async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCount, leagueCount, dbClient = pool) {
   const previousRows = await dbClient.query(
     `SELECT st.franchise_id,
             st.league_tier,
@@ -150,7 +164,7 @@ async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCoun
        WHERE ($1::bigint[] IS NULL OR id <> ALL($1::bigint[]))
        ORDER BY random()
        LIMIT $3`,
-      [selectedIds.length ? selectedIds : null, LEAGUE_COUNT, teamCount - selectedRows.length]
+      [selectedIds.length ? selectedIds : null, leagueCount, teamCount - selectedRows.length]
     );
 
     selectedRows = [...selectedRows, ...extras.rows];
@@ -158,7 +172,7 @@ async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCoun
   const byTier = new Map();
 
   for (const row of selectedRows) {
-    const tier = Number(row.league_tier || LEAGUE_COUNT);
+    const tier = Number(row.league_tier || leagueCount);
     if (!byTier.has(tier)) {
       byTier.set(tier, []);
     }
@@ -168,18 +182,18 @@ async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCoun
   const promoted = new Set();
   const relegated = new Set();
 
-  for (let tier = 2; tier <= LEAGUE_COUNT; tier += 1) {
+  for (let tier = 2; tier <= leagueCount; tier += 1) {
     const standings = [...(byTier.get(tier) || [])].sort(compareStandingsRows);
     standings.slice(0, PROMOTION_SPOTS).forEach((row) => promoted.add(Number(row.franchise_id)));
   }
 
-  for (let tier = 1; tier < LEAGUE_COUNT; tier += 1) {
+  for (let tier = 1; tier < leagueCount; tier += 1) {
     const standings = [...(byTier.get(tier) || [])].sort(compareStandingsRows);
     standings.slice(Math.max(0, standings.length - PROMOTION_SPOTS)).forEach((row) => relegated.add(Number(row.franchise_id)));
   }
 
   const assignments = selectedRows.map((row) => {
-    const previousTier = Number(row.league_tier || LEAGUE_COUNT);
+    const previousTier = Number(row.league_tier || leagueCount);
     const franchiseId = Number(row.franchise_id);
 
     let nextTier = previousTier;
@@ -189,7 +203,7 @@ async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCoun
       nextTier = Math.max(1, previousTier - 1);
       movement = nextTier < previousTier ? 'PROMOTED' : 'STAY';
     } else if (relegated.has(franchiseId)) {
-      nextTier = Math.min(LEAGUE_COUNT, previousTier + 1);
+      nextTier = Math.min(leagueCount, previousTier + 1);
       movement = nextTier > previousTier ? 'RELEGATED' : 'STAY';
     }
 
@@ -208,16 +222,16 @@ async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCoun
     tierCounts.set(assignment.leagueTier, (tierCounts.get(assignment.leagueTier) || 0) + 1);
   }
 
-  const targetPerTier = Math.ceil(teamCount / LEAGUE_COUNT);
-  for (let tier = 1; tier <= LEAGUE_COUNT; tier += 1) {
+  const targetPerTier = Math.ceil(teamCount / leagueCount);
+  for (let tier = 1; tier <= leagueCount; tier += 1) {
     while ((tierCounts.get(tier) || 0) > targetPerTier) {
       const movable = assignments.find((assignment) => assignment.leagueTier === tier && assignment.movement === 'STAY');
       if (!movable) {
         break;
       }
 
-      const destination = tier < LEAGUE_COUNT ? tier + 1 : tier - 1;
-      if (destination < 1 || destination > LEAGUE_COUNT) {
+      const destination = tier < leagueCount ? tier + 1 : tier - 1;
+      if (destination < 1 || destination > leagueCount) {
         break;
       }
 
@@ -254,6 +268,7 @@ export async function listSeasons(limit = 12, dbClient = pool) {
             season_number,
             name,
             year,
+            competition_mode,
             team_count,
             league_count,
             teams_per_league,
@@ -286,9 +301,13 @@ export async function createSeason({
   year,
   teamCount,
   format = 'T20',
+  competitionMode = CAREER_MODES.CLUB,
+  leagueCount = null,
   seasonNumber = null,
   previousSeasonId = null
 }, dbClient = pool) {
+  const resolvedMode = normalizeCareerMode(competitionMode || CAREER_MODES.CLUB);
+  const resolvedLeagueCount = resolveLeagueCount(resolvedMode, leagueCount);
   const requestedTeamCount = Number(teamCount || 0);
   if (requestedTeamCount < 2) {
     const error = new Error('A season requires at least 2 teams.');
@@ -309,7 +328,9 @@ export async function createSeason({
     seasonNumber ||
     Number((await dbClient.query('SELECT COALESCE(MAX(season_number), 0) AS season_number FROM seasons')).rows[0].season_number) + 1;
 
-  let seasonName = name || `Global T20 Season ${nextSeasonNumber}`;
+  let seasonName = name || (resolvedMode === CAREER_MODES.INTERNATIONAL
+    ? `International T20 Season ${nextSeasonNumber}`
+    : `Global T20 Season ${nextSeasonNumber}`);
 
   // Ensure the name is unique — if a season with this name already exists, append a suffix
   const nameCheck = await dbClient.query('SELECT id FROM seasons WHERE name = $1', [seasonName]);
@@ -318,22 +339,24 @@ export async function createSeason({
       (await dbClient.query("SELECT COALESCE(MAX(season_number), 0) AS mn FROM seasons")).rows[0].mn
     );
     const uniqueNum = Math.max(nextSeasonNumber, maxNum) + 1;
-    seasonName = name ? `${name} (${uniqueNum})` : `Global T20 Season ${uniqueNum}`;
+    seasonName = name
+      ? `${name} (${uniqueNum})`
+      : (resolvedMode === CAREER_MODES.INTERNATIONAL ? `International T20 Season ${uniqueNum}` : `Global T20 Season ${uniqueNum}`);
   }
-  const teamsPerLeague = Math.ceil(resolvedTeamCount / LEAGUE_COUNT);
+  const teamsPerLeague = Math.ceil(resolvedTeamCount / resolvedLeagueCount);
 
   const inserted = await dbClient.query(
-    `INSERT INTO seasons (season_number, name, year, format, team_count, league_count, teams_per_league, status, start_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE', CURRENT_DATE)
+    `INSERT INTO seasons (season_number, name, year, format, competition_mode, team_count, league_count, teams_per_league, status, start_date)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE', CURRENT_DATE)
      RETURNING *`,
-    [nextSeasonNumber, seasonName, year, format, resolvedTeamCount, LEAGUE_COUNT, teamsPerLeague]
+    [nextSeasonNumber, seasonName, year, format, resolvedMode, resolvedTeamCount, resolvedLeagueCount, teamsPerLeague]
   );
 
   const season = inserted.rows[0];
 
   const assignments = previousSeasonId
-    ? await buildTierAssignmentsFromPreviousSeason(previousSeasonId, resolvedTeamCount, dbClient)
-    : await buildRandomTierAssignments(resolvedTeamCount, dbClient);
+    ? await buildTierAssignmentsFromPreviousSeason(previousSeasonId, resolvedTeamCount, resolvedLeagueCount, dbClient)
+    : await buildRandomTierAssignments(resolvedTeamCount, resolvedLeagueCount, dbClient);
 
   for (const assignment of assignments) {
     await dbClient.query(
@@ -368,7 +391,18 @@ export async function ensureActiveSeason(dbClient = pool) {
     return null;
   }
 
-  const teamCount = Math.min(DEFAULT_LEAGUE_TEAM_COUNT, franchiseCount);
+  const modeResult = await dbClient.query(
+    `SELECT competition_mode, COUNT(*)::int AS count
+     FROM franchises
+     GROUP BY competition_mode
+     ORDER BY COUNT(*) DESC
+     LIMIT 1`
+  );
+  const competitionMode = normalizeCareerMode(modeResult.rows[0]?.competition_mode || CAREER_MODES.CLUB);
+  const leagueCount = resolveLeagueCount(competitionMode);
+
+  const seasonTeamTarget = competitionMode === CAREER_MODES.INTERNATIONAL ? DEFAULT_INTERNATIONAL_TEAM_COUNT : DEFAULT_LEAGUE_TEAM_COUNT;
+  const teamCount = Math.min(seasonTeamTarget, franchiseCount);
   const nextYear = new Date().getFullYear();
 
   return createSeason(
@@ -376,7 +410,9 @@ export async function ensureActiveSeason(dbClient = pool) {
       name: null,
       year: nextYear,
       teamCount,
-      format: 'T20'
+      format: 'T20',
+      competitionMode,
+      leagueCount
     },
     dbClient
   );
@@ -387,6 +423,16 @@ export async function generateDoubleRoundRobinFixtures(seasonId, dbClient = pool
   if (Number(existing.rows[0].count) > 0) {
     return { inserted: 0, skipped: true };
   }
+
+  const seasonResult = await dbClient.query(
+    `SELECT league_count, competition_mode
+     FROM seasons
+     WHERE id = $1`,
+    [seasonId]
+  );
+  const season = seasonResult.rows[0] || null;
+  const leagueCount = resolveLeagueCount(season?.competition_mode || CAREER_MODES.CLUB, season?.league_count);
+  const useDoubleRoundRobin = shouldUseDoubleRoundRobin(season?.competition_mode || CAREER_MODES.CLUB);
 
   const teamsByTier = await dbClient.query(
     `SELECT league_tier, franchise_id
@@ -412,15 +458,16 @@ export async function generateDoubleRoundRobinFixtures(seasonId, dbClient = pool
   const schedulesByTier = new Map();
   let maxRounds = 0;
 
-  for (let tier = 1; tier <= LEAGUE_COUNT; tier += 1) {
+  for (let tier = 1; tier <= leagueCount; tier += 1) {
     const teamIds = tierMap.get(tier) || [];
     if (teamIds.length < 2) {
       continue;
     }
 
     const firstLeg = generateRoundRobin(teamIds);
-    const secondLeg = firstLeg.map((round) => round.map(([home, away]) => [away, home]));
-    const fullSchedule = [...firstLeg, ...secondLeg];
+    const fullSchedule = useDoubleRoundRobin
+      ? [...firstLeg, ...firstLeg.map((round) => round.map(([home, away]) => [away, home]))]
+      : firstLeg;
 
     schedulesByTier.set(tier, fullSchedule);
     maxRounds = Math.max(maxRounds, fullSchedule.length);
@@ -432,7 +479,7 @@ export async function generateDoubleRoundRobinFixtures(seasonId, dbClient = pool
   for (let roundIndex = 0; roundIndex < maxRounds; roundIndex += 1) {
     const roundNo = roundIndex + 1;
 
-    for (let tier = 1; tier <= LEAGUE_COUNT; tier += 1) {
+    for (let tier = 1; tier <= leagueCount; tier += 1) {
       const tierSchedule = schedulesByTier.get(tier);
       if (!tierSchedule || !tierSchedule[roundIndex]) {
         continue;
@@ -689,6 +736,19 @@ export async function updateSeasonTableWithMatch(matchId, dbClient = pool) {
 }
 
 async function createPlayoffMatches(seasonId, dbClient = pool) {
+  const seasonResult = await dbClient.query(
+    `SELECT competition_mode, league_count
+     FROM seasons
+     WHERE id = $1`,
+    [seasonId]
+  );
+  const season = seasonResult.rows[0] || null;
+  const competitionMode = normalizeCareerMode(season?.competition_mode || CAREER_MODES.CLUB);
+  if (competitionMode !== CAREER_MODES.CLUB) {
+    return;
+  }
+  const leagueCount = resolveLeagueCount(competitionMode, season?.league_count);
+
   const existing = await dbClient.query(
     `SELECT COUNT(*)::int AS count
      FROM matches
@@ -704,7 +764,7 @@ async function createPlayoffMatches(seasonId, dbClient = pool) {
   const table = await getLeagueTable(seasonId, dbClient);
   const leagueWinners = [];
 
-  for (let tier = 1; tier <= LEAGUE_COUNT; tier += 1) {
+  for (let tier = 1; tier <= leagueCount; tier += 1) {
     const winner = table
       .filter((row) => Number(row.league_tier) === tier)
       .sort((a, b) => Number(a.league_position || 999) - Number(b.league_position || 999))[0];
@@ -720,8 +780,9 @@ async function createPlayoffMatches(seasonId, dbClient = pool) {
 
   const maxRound = Number((await dbClient.query('SELECT COALESCE(MAX(round_no), 0) AS value FROM matches WHERE season_id = $1', [seasonId])).rows[0].value);
 
-  const semi1 = [Number(leagueWinners[0].franchise_id), Number(leagueWinners[3].franchise_id)];
-  const semi2 = [Number(leagueWinners[1].franchise_id), Number(leagueWinners[2].franchise_id)];
+  const finalists = leagueWinners.slice(0, 4);
+  const semi1 = [Number(finalists[0].franchise_id), Number(finalists[3].franchise_id)];
+  const semi2 = [Number(finalists[1].franchise_id), Number(finalists[2].franchise_id)];
 
   await dbClient.query(
     `INSERT INTO matches (season_id, home_franchise_id, away_franchise_id, stage, league_tier, round_no, matchday_label, scheduled_at, status)
@@ -821,7 +882,64 @@ async function finalizeSeasonIfChampionKnown(seasonId, dbClient = pool) {
   return true;
 }
 
+async function finalizeInternationalSeason(seasonId, dbClient = pool) {
+  const seasonResult = await dbClient.query(
+    `SELECT status, league_count
+     FROM seasons
+     WHERE id = $1`,
+    [seasonId]
+  );
+  if (!seasonResult.rows.length || seasonResult.rows[0].status === 'COMPLETED') {
+    return false;
+  }
+
+  const leagueCount = Number(seasonResult.rows[0].league_count || DEFAULT_INTERNATIONAL_LEAGUE_COUNT);
+  const table = await getLeagueTable(seasonId, dbClient);
+
+  for (let tier = 1; tier <= leagueCount; tier += 1) {
+    const winner = table
+      .filter((row) => Number(row.league_tier) === tier)
+      .sort((a, b) => Number(a.league_position || 999) - Number(b.league_position || 999))[0];
+
+    if (!winner) {
+      continue;
+    }
+
+    const winnerId = Number(winner.franchise_id);
+    await dbClient.query(
+      `UPDATE franchises
+       SET fan_rating = LEAST(100, fan_rating + 3)
+       WHERE id = $1`,
+      [winnerId]
+    );
+
+    await dbClient.query(
+      `INSERT INTO trophy_cabinet (franchise_id, season_id, title)
+       VALUES ($1, $2, $3)`,
+      [winnerId, seasonId, `League ${tier} Division Winner`]
+    );
+  }
+
+  await dbClient.query(
+    `UPDATE seasons
+     SET status = 'COMPLETED',
+         end_date = CURRENT_DATE
+     WHERE id = $1`,
+    [seasonId]
+  );
+
+  return true;
+}
+
 export async function progressSeasonStructure(seasonId, dbClient = pool) {
+  const season = await dbClient.query(
+    `SELECT competition_mode
+     FROM seasons
+     WHERE id = $1`,
+    [seasonId]
+  );
+  const competitionMode = normalizeCareerMode(season.rows[0]?.competition_mode || CAREER_MODES.CLUB);
+
   const regularRemaining = Number(
     (
       await dbClient.query(
@@ -834,6 +952,14 @@ export async function progressSeasonStructure(seasonId, dbClient = pool) {
       )
     ).rows[0].count
   );
+
+  if (competitionMode === CAREER_MODES.INTERNATIONAL) {
+    if (regularRemaining === 0) {
+      const completed = await finalizeInternationalSeason(seasonId, dbClient);
+      return { state: completed ? 'SEASON_COMPLETED' : 'PROGRESSED' };
+    }
+    return { state: 'PROGRESSED' };
+  }
 
   if (regularRemaining === 0) {
     await createPlayoffMatches(seasonId, dbClient);
@@ -884,13 +1010,20 @@ export async function createNextSeasonFromCompleted(completedSeasonId, dbClient 
 
   const nextYear = Number(completed.rows[0].year) + 1;
   const teamCount = Number(completed.rows[0].team_count);
+  const competitionMode = normalizeCareerMode(completed.rows[0].competition_mode || CAREER_MODES.CLUB);
+  const leagueCount = resolveLeagueCount(competitionMode, completed.rows[0].league_count);
+  const nextSeasonName = competitionMode === CAREER_MODES.INTERNATIONAL
+    ? `International T20 Season ${nextNumber}`
+    : `Global T20 Season ${nextNumber}`;
 
   const season = await createSeason(
     {
-      name: `Global T20 Season ${nextNumber}`,
+      name: nextSeasonName,
       year: nextYear,
       teamCount,
       format: completed.rows[0].format,
+      competitionMode,
+      leagueCount,
       seasonNumber: nextNumber,
       previousSeasonId: completedSeasonId
     },

@@ -79,23 +79,31 @@ const Icons = {
   ),
 };
 
-const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', icon: 'dashboard' },
-  { to: '/fixtures', label: 'Season Center', icon: 'fixtures' },
-  { to: '/league', label: 'Table & Seasons', icon: 'league' },
-  { to: '/stats', label: 'Rankings', icon: 'stats' },
-  { to: '/squad', label: 'Player Cards', icon: 'squad' },
-  { to: '/youth', label: 'Youth Academy', icon: 'youth' },
-  { to: '/transfer-market', label: 'Transfers', icon: 'transfer' },
-  { to: '/marketplace', label: 'City Market', icon: 'marketplace' },
-  { to: '/financials', label: 'Valuation', icon: 'financials' },
-  { to: '/trophies', label: 'Trophies', icon: 'trophies' }
-];
+function getNavItems(mode) {
+  const isInternational = String(mode || '').toUpperCase() === 'INTERNATIONAL';
+  return [
+    { to: '/', label: 'Dashboard', icon: 'dashboard' },
+    { to: '/fixtures', label: 'Season Center', icon: 'fixtures' },
+    { to: '/league', label: 'Table & Seasons', icon: 'league' },
+    { to: '/stats', label: 'Rankings', icon: 'stats' },
+    { to: '/squad', label: 'Player Cards', icon: 'squad' },
+    { to: '/youth', label: 'Youth Academy', icon: 'youth' },
+    ...(isInternational ? [] : [{ to: '/transfer-market', label: 'Transfers', icon: 'transfer' }]),
+    { to: '/marketplace', label: isInternational ? 'Team Market' : 'City Market', icon: 'marketplace' },
+    ...(isInternational ? [] : [{ to: '/financials', label: 'Valuation', icon: 'financials' }]),
+    { to: '/trophies', label: 'Trophies', icon: 'trophies' }
+  ];
+}
 
 export default function AppLayout() {
   const { user, franchise, logout } = useAuth();
   const { connected } = useSocket();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const navItems = getNavItems(franchise?.competition_mode || user?.career_mode || 'CLUB');
+  const isInternational = String(franchise?.competition_mode || user?.career_mode || '').toUpperCase() === 'INTERNATIONAL';
+  const topMetricValue = isInternational
+    ? Number(franchise?.strength_rating ?? franchise?.total_valuation ?? 0)
+    : Number(franchise?.total_valuation || 100);
 
   return (
     <div className="app-shell">
@@ -116,7 +124,7 @@ export default function AppLayout() {
         </div>
 
         <nav className="nav-links">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const IconComp = Icons[item.icon];
             return (
               <NavLink key={item.to} to={item.to} end={item.to === '/'} onClick={() => setSidebarOpen(false)}>
@@ -142,11 +150,11 @@ export default function AppLayout() {
             <Icons.menu />
           </button>
           <div>
-            <h2>{franchise?.franchise_name || 'Select Your City Franchise'}</h2>
+            <h2>{franchise?.franchise_name || 'Start Your Career'}</h2>
             <p>
               {franchise?.city_name
                 ? `${franchise.city_name}, ${franchise.country} • League ${franchise?.league_tier || franchise?.current_league_tier || 1}`
-                : 'Choose one city and build from the bottom.'}
+                : 'Choose your career mode and build from the bottom.'}
             </p>
           </div>
           <div className="top-metrics">
@@ -159,8 +167,8 @@ export default function AppLayout() {
               <strong>{franchise?.growth_points ?? 0}</strong>
             </div>
             <div>
-              <span>Value</span>
-              <strong>${Number(franchise?.total_valuation || 100).toFixed(2)}</strong>
+              <span>{isInternational ? 'Strength' : 'Value'}</span>
+              <strong>{isInternational ? topMetricValue.toFixed(1) : `$${topMetricValue.toFixed(2)}`}</strong>
             </div>
           </div>
         </header>

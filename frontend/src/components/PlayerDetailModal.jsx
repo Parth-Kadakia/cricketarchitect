@@ -109,6 +109,8 @@ export default function PlayerDetailModal({ open, playerDetail, selectedPlayer, 
                 <div className="pd-quick-nums">
                   <span><b>{fmt(p.career_matches)}</b> Mat</span>
                   <span><b>{fmt(p.career_runs)}</b> Runs</span>
+                  <span><b>{fmt(p.career_fifties || 0)}</b> 50s</span>
+                  <span><b>{fmt(p.career_hundreds || 0)}</b> 100s</span>
                   <span><b>{fmt(p.career_wickets)}</b> Wkts</span>
                   <span><b>{fmt(p.career_player_of_match)}</b> POTM</span>
                 </div>
@@ -173,10 +175,10 @@ export default function PlayerDetailModal({ open, playerDetail, selectedPlayer, 
                   <div className="pd-section">
                     <h4 className="pd-section-title">Career Batting</h4>
                     <div className="pd-stats-table-wrap">
-                      <table className="pd-stats-table">
-                        <thead>
+                        <table className="pd-stats-table">
+                          <thead>
                           <tr>
-                            <th>Mat</th><th>Runs</th><th>Balls</th><th>Avg</th><th>SR</th><th>4s</th><th>6s</th>
+                            <th>Mat</th><th>Runs</th><th>Balls</th><th>Avg</th><th>SR</th><th>4s</th><th>6s</th><th>50s</th><th>100s</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -188,6 +190,8 @@ export default function PlayerDetailModal({ open, playerDetail, selectedPlayer, 
                             <td>{careerSR}</td>
                             <td>{fmt(p.career_fours)}</td>
                             <td>{fmt(p.career_sixes)}</td>
+                            <td>{fmt(p.career_fifties || 0)}</td>
+                            <td>{fmt(p.career_hundreds || 0)}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -247,7 +251,7 @@ export default function PlayerDetailModal({ open, playerDetail, selectedPlayer, 
                         <table className="pd-stats-table pd-stats-table--seasons">
                           <thead>
                             <tr>
-                              <th>Season</th><th>Mat</th><th>Runs</th><th>Balls</th><th>Avg</th><th>SR</th><th>4s</th><th>6s</th><th>NO</th><th>HS</th>
+                              <th>Season</th><th>Mat</th><th>Runs</th><th>Balls</th><th>Avg</th><th>SR</th><th>4s</th><th>6s</th><th>50s</th><th>100s</th><th>NO</th><th>HS</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -264,6 +268,8 @@ export default function PlayerDetailModal({ open, playerDetail, selectedPlayer, 
                                   <td>{sr(s.runs, s.balls)}</td>
                                   <td>{fmt(s.fours)}</td>
                                   <td>{fmt(s.sixes)}</td>
+                                  <td>{fmt(s.fifties || 0)}</td>
+                                  <td>{fmt(s.hundreds || 0)}</td>
                                   <td>{s.not_outs || 0}</td>
                                   <td>{fmt(s.highest_score)}</td>
                                 </tr>
@@ -277,9 +283,11 @@ export default function PlayerDetailModal({ open, playerDetail, selectedPlayer, 
                                 balls: a.balls + s.balls,
                                 fours: a.fours + s.fours,
                                 sixes: a.sixes + s.sixes,
+                                fifties: a.fifties + (s.fifties || 0),
+                                hundreds: a.hundreds + (s.hundreds || 0),
                                 not_outs: a.not_outs + (s.not_outs || 0),
                                 highest_score: Math.max(a.highest_score, s.highest_score || 0),
-                              }), { matches: 0, runs: 0, balls: 0, fours: 0, sixes: 0, not_outs: 0, highest_score: 0 });
+                              }), { matches: 0, runs: 0, balls: 0, fours: 0, sixes: 0, fifties: 0, hundreds: 0, not_outs: 0, highest_score: 0 });
                               const outs = tot.matches - tot.not_outs;
                               const avg = outs > 0 ? (tot.runs / outs).toFixed(2) : '-';
                               return (
@@ -292,6 +300,8 @@ export default function PlayerDetailModal({ open, playerDetail, selectedPlayer, 
                                   <td>{sr(tot.runs, tot.balls)}</td>
                                   <td>{fmt(tot.fours)}</td>
                                   <td>{fmt(tot.sixes)}</td>
+                                  <td>{fmt(tot.fifties)}</td>
+                                  <td>{fmt(tot.hundreds)}</td>
                                   <td>{tot.not_outs}</td>
                                   <td>{fmt(tot.highest_score)}</td>
                                 </tr>
@@ -462,4 +472,3 @@ export default function PlayerDetailModal({ open, playerDetail, selectedPlayer, 
     </div>
   );
 }
-

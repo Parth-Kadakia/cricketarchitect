@@ -1,6 +1,7 @@
 import pool from '../config/db.js';
 import { randomInt } from '../utils/gameMath.js';
 import { applyPlayerGrowth, generateProspectsForFranchise, upgradeAcademyWithPoints } from './youthService.js';
+import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
 
 function maybe(probability) {
   return Math.random() < probability;
@@ -257,6 +258,17 @@ async function cpuDevelopmentCycle(franchiseId, seasonId, dbClient = pool) {
 }
 
 export async function runCpuMarketCycle(seasonId, dbClient = pool) {
+  const season = await dbClient.query(
+    `SELECT competition_mode
+     FROM seasons
+     WHERE id = $1`,
+    [seasonId]
+  );
+  const competitionMode = normalizeCareerMode(season.rows[0]?.competition_mode || CAREER_MODES.CLUB);
+  if (competitionMode !== CAREER_MODES.CLUB) {
+    return [];
+  }
+
   const cpuTeams = await dbClient.query(
     `SELECT st.franchise_id, f.franchise_name
      FROM season_teams st

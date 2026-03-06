@@ -18,17 +18,19 @@ function opId(prefix = 'sim') {
 }
 
 export default function DashboardPage() {
-  const { token, franchise, refreshProfile } = useAuth();
+  const { token, user, franchise, refreshProfile } = useAuth();
   const { subscribe } = useSocket();
 
   const [franchiseData, setFranchiseData] = useState(null);
   const [squadSummary, setSquadSummary] = useState(null);
   const [recentResults, setRecentResults] = useState([]);
   const [availableCities, setAvailableCities] = useState([]);
+  const [internationalCountries, setInternationalCountries] = useState([]);
   const [seasonSummary, setSeasonSummary] = useState(null);
   const [valuations, setValuations] = useState([]);
   const [transferFeed, setTransferFeed] = useState([]);
   const [countrySearch, setCountrySearch] = useState('');
+  const [careerMode, setCareerMode] = useState('CLUB');
   const [selectedCountry, setSelectedCountry] = useState('');
   const [citySearch, setCitySearch] = useState('');
   const [newCityName, setNewCityName] = useState('');
@@ -49,9 +51,10 @@ export default function DashboardPage() {
   async function loadData() {
     setError('');
     try {
-      const [franchiseResponse, marketCities, activeSeason, feedResponse] = await Promise.all([
+      const [franchiseResponse, marketCities, intlCountriesResponse, activeSeason, feedResponse] = await Promise.all([
         api.franchise.me(token),
         api.marketplace.cities('', 1200),
+        api.cities.internationalCountries(),
         api.league.activeSeason(),
         api.marketplace.transferFeed(40)
       ]);
@@ -59,12 +62,13 @@ export default function DashboardPage() {
       setSquadSummary(franchiseResponse.squadSummary || null);
       setRecentResults(franchiseResponse.recentResults || []);
       setAvailableCities(marketCities.cities || []);
+      setInternationalCountries(intlCountriesResponse.countries || []);
       setTransferFeed(feedResponse.feed || []);
       if (activeSeason.season?.id) {
         const summary = await api.league.seasonSummary(activeSeason.season.id);
         setSeasonSummary(summary);
       }
-      if (franchiseResponse.franchise) {
+      if (franchiseResponse.franchise && String(franchiseResponse.franchise.competition_mode || '').toUpperCase() !== 'INTERNATIONAL') {
         const valuationResponse = await api.financials.valuations(token);
         setValuations(valuationResponse.valuations || []);
       } else {
@@ -82,6 +86,13 @@ export default function DashboardPage() {
     })();
     return () => { mounted = false; };
   }, [token]);
+
+  useEffect(() => {
+    if (!franchise) {
+      const preferred = String(user?.career_mode || '').toUpperCase() === 'INTERNATIONAL' ? 'INTERNATIONAL' : 'CLUB';
+      setCareerMode(preferred);
+    }
+  }, [franchise, user?.career_mode]);
 
   useEffect(() => {
     const un1 = subscribe('*', (message) => {
@@ -125,7 +136,20 @@ export default function DashboardPage() {
   async function claimCity(cityId, cityName) {
     try {
       setError('');
-      await api.franchise.claim(token, { cityId, franchiseName: `${cityName} Rise` });
+      await api.franchise.claim(token, { cityId, franchiseName: `${cityName} Rise`, mode: 'CLUB' });
+      await refreshProfile();
+      await loadData();
+    } catch (e) { setError(e.message); }
+  }
+
+  async function claimInternationalCountry(country) {
+    try {
+      setError('');
+      await api.franchise.claim(token, {
+        mode: 'INTERNATIONAL',
+        country,
+        franchiseName: country
+      });
       await refreshProfile();
       await loadData();
     } catch (e) { setError(e.message); }
@@ -204,6 +228,16 @@ export default function DashboardPage() {
     return q ? countries.filter((i) => i.country.toLowerCase().includes(q)) : countries;
   }, [countries, countrySearch]);
 
+  const filteredInternationalCountries = useMemo(() => {
+    const q = countrySearch.trim().toLowerCase();
+    const list = (internationalCountries || []).map((entry) => ({
+      country: entry.country,
+      cityName: entry.cityName,
+      available: Boolean(entry.available)
+    }));
+    return q ? list.filter((item) => item.country.toLowerCase().includes(q)) : list;
+  }, [internationalCountries, countrySearch]);
+
   const countryCities = useMemo(() => selectedCountry ? availableCities.filter((c) => c.country === selectedCountry) : [], [availableCities, selectedCountry]);
 
   const filteredCities = useMemo(() => {
@@ -262,28 +296,61 @@ export default function DashboardPage() {
   if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading career dashboard...</span></div>;
 
   if (!franchise) {
+    const isInternationalCareer = careerMode === 'INTERNATIONAL';
     const pickerStep = selectedCountry ? 2 : 1;
     return (
       <div className="db-page fp-page">
         {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
 
+        <div className="sq-tabs" style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            className={`sq-tab ${careerMode === 'CLUB' ? 'active' : ''}`}
+            onClick={() => {
+              setCareerMode('CLUB');
+              setSelectedCountry('');
+              setCountrySearch('');
+              setCitySearch('');
+            }}
+          >
+            Club T20 Career
+          </button>
+          <button
+            type="button"
+            className={`sq-tab ${careerMode === 'INTERNATIONAL' ? 'active' : ''}`}
+            onClick={() => {
+              setCareerMode('INTERNATIONAL');
+              setSelectedCountry('');
+              setCountrySearch('');
+              setCitySearch('');
+            }}
+          >
+            International Career
+          </button>
+        </div>
+
         {/* ── Hero banner ── */}
         <div className="fp-hero">
           <div className="fp-hero-icon">🏏</div>
-          <h2 className="fp-hero-title">Claim Your City</h2>
+          <h2 className="fp-hero-title">{isInternationalCareer ? 'Select Your National Team' : 'Claim Your City'}</h2>
           <p className="fp-hero-sub">
-            Choose a city, build a franchise, and rise through the global cricket pyramid.
-            <br />Every club begins at <strong className="fp-price-tag">$100.00</strong>.
+            {isInternationalCareer
+              ? 'Choose one country and build your international side from equal strength.'
+              : 'Choose a city, build a franchise, and rise through the global cricket pyramid.'}
+            <br />
+            {isInternationalCareer
+              ? <>100 national teams, 10 divisions, top-2 promotion and bottom-2 relegation.</>
+              : <>Every club begins at <strong className="fp-price-tag">$100.00</strong>.</>}
           </p>
           <div className="fp-hero-stats">
             <div className="fp-stat">
-              <span className="fp-stat-val">{countries.length}</span>
+              <span className="fp-stat-val">{isInternationalCareer ? internationalCountries.length : countries.length}</span>
               <span className="fp-stat-lbl">Countries</span>
             </div>
             <div className="fp-stat-divider" />
             <div className="fp-stat">
-              <span className="fp-stat-val">{availableCities.length}</span>
-              <span className="fp-stat-lbl">Open Cities</span>
+              <span className="fp-stat-val">{isInternationalCareer ? filteredInternationalCountries.filter((entry) => entry.available).length : availableCities.length}</span>
+              <span className="fp-stat-lbl">{isInternationalCareer ? 'Open Teams' : 'Open Cities'}</span>
             </div>
             <div className="fp-stat-divider" />
             <div className="fp-stat fp-stat--active">
@@ -293,31 +360,14 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Step indicator ── */}
-        <div className="fp-steps-bar">
-          <div className={`fp-steps-dot ${pickerStep >= 1 ? 'fp-steps-dot--done' : ''}`}>
-            <span>1</span>
-          </div>
-          <div className={`fp-steps-line ${pickerStep >= 2 ? 'fp-steps-line--done' : ''}`} />
-          <div className={`fp-steps-dot ${pickerStep >= 2 ? 'fp-steps-dot--done' : ''}`}>
-            <span>2</span>
-          </div>
-        </div>
-
-        <div className="fp-picker-grid">
-          {/* ── Step 1: Country ── */}
-          <div className={`fp-card ${pickerStep === 1 ? 'fp-card--active' : ''}`}>
+        {isInternationalCareer ? (
+          <div className="fp-card fp-card--active">
             <div className="fp-card-head">
               <div className="fp-card-num">1</div>
               <div>
-                <h3 className="fp-card-title">Select Country</h3>
-                <span className="fp-card-sub">Pick the nation where your franchise will be based.</span>
+                <h3 className="fp-card-title">Choose Country</h3>
+                <span className="fp-card-sub">One national team per country. All teams start at equal base strength.</span>
               </div>
-              {selectedCountry && (
-                <button type="button" className="fp-clear-btn" onClick={() => { setSelectedCountry(''); setCitySearch(''); }}>
-                  ✕ Clear
-                </button>
-              )}
             </div>
 
             <div className="fp-search-wrap">
@@ -330,112 +380,178 @@ export default function DashboardPage() {
                 placeholder="Search countries…"
               />
               {countrySearch && (
-                <span className="fp-search-count">{filteredCountries.length} found</span>
+                <span className="fp-search-count">{filteredInternationalCountries.length} found</span>
               )}
             </div>
 
-            <div className="fp-country-list">
-              {filteredCountries.map((item) => (
+            <div className="fp-country-list" style={{ maxHeight: 520 }}>
+              {filteredInternationalCountries.map((item) => (
                 <button
                   key={item.country}
                   type="button"
                   className={`fp-country-row ${selectedCountry === item.country ? 'fp-country-row--active' : ''}`}
-                  onClick={() => { setSelectedCountry(item.country); setCitySearch(''); }}
+                  onClick={() => {
+                    setSelectedCountry(item.country);
+                    if (item.available) {
+                      claimInternationalCountry(item.country);
+                    }
+                  }}
+                  disabled={!item.available}
+                  title={item.available ? `Claim ${item.country}` : `${item.country} is already assigned`}
                 >
                   <span className="fp-country-name">{item.country}</span>
-                  <span className="fp-country-badge">{item.count}</span>
+                  <span className={`fp-country-badge ${item.available ? '' : 'is-claimed'}`}>{item.available ? 'Available' : 'Taken'}</span>
                 </button>
               ))}
             </div>
           </div>
-
-          {/* ── Step 2: City ── */}
-          <div className={`fp-card ${pickerStep === 2 ? 'fp-card--active' : ''} ${!selectedCountry ? 'fp-card--disabled' : ''}`}>
-            <div className="fp-card-head">
-              <div className="fp-card-num">2</div>
-              <div>
-                <h3 className="fp-card-title">Select City</h3>
-                <span className="fp-card-sub">
-                  {selectedCountry
-                    ? <>{countryCities.length} {countryCities.length === 1 ? 'city' : 'cities'} available in <strong>{selectedCountry}</strong></>
-                    : 'Select a country first to see available cities.'}
-                </span>
+        ) : (
+          <>
+            {/* ── Step indicator ── */}
+            <div className="fp-steps-bar">
+              <div className={`fp-steps-dot ${pickerStep >= 1 ? 'fp-steps-dot--done' : ''}`}>
+                <span>1</span>
+              </div>
+              <div className={`fp-steps-line ${pickerStep >= 2 ? 'fp-steps-line--done' : ''}`} />
+              <div className={`fp-steps-dot ${pickerStep >= 2 ? 'fp-steps-dot--done' : ''}`}>
+                <span>2</span>
               </div>
             </div>
 
-            {selectedCountry && (
-              <div className="fp-search-wrap">
-                <span className="fp-search-icon">🔍</span>
-                <input
-                  type="search"
-                  className="fp-search"
-                  value={citySearch}
-                  onChange={(e) => setCitySearch(e.target.value)}
-                  placeholder={`Search in ${selectedCountry}…`}
-                />
-              </div>
-            )}
+            <div className="fp-picker-grid">
+              {/* ── Step 1: Country ── */}
+              <div className={`fp-card ${pickerStep === 1 ? 'fp-card--active' : ''}`}>
+                <div className="fp-card-head">
+                  <div className="fp-card-num">1</div>
+                  <div>
+                    <h3 className="fp-card-title">Select Country</h3>
+                    <span className="fp-card-sub">Pick the nation where your franchise will be based.</span>
+                  </div>
+                  {selectedCountry && (
+                    <button type="button" className="fp-clear-btn" onClick={() => { setSelectedCountry(''); setCitySearch(''); }}>
+                      ✕ Clear
+                    </button>
+                  )}
+                </div>
 
-            {!selectedCountry ? (
-              <div className="fp-empty">
-                <div className="fp-empty-icon">🌍</div>
-                <span>Choose your country on the left to unlock city selection.</span>
-              </div>
-            ) : filteredCities.length === 0 ? (
-              <div className="fp-empty">
-                <div className="fp-empty-icon">🔎</div>
-                <span>No matching cities in {selectedCountry}.</span>
-              </div>
-            ) : (
-              <div className="fp-city-grid">
-                {filteredCities.map((city) => (
-                  <button
-                    key={city.id}
-                    type="button"
-                    className="fp-city-card"
-                    onClick={() => claimCity(city.id, city.name)}
-                  >
-                    <span className="fp-city-name">{city.name}</span>
-                    <span className="fp-city-country">{city.country}</span>
-                    <span className="fp-city-price">$100</span>
-                    <span className="fp-city-cta">Claim →</span>
-                  </button>
-                ))}
-              </div>
-            )}
+                <div className="fp-search-wrap">
+                  <span className="fp-search-icon">🔍</span>
+                  <input
+                    type="search"
+                    className="fp-search"
+                    value={countrySearch}
+                    onChange={(e) => setCountrySearch(e.target.value)}
+                    placeholder="Search countries…"
+                  />
+                  {countrySearch && (
+                    <span className="fp-search-count">{filteredCountries.length} found</span>
+                  )}
+                </div>
 
-            {/* ── Add missing city ── */}
-            <div className="fp-add-city">
-              <div className="fp-add-city-head">
-                <span className="fp-add-city-icon">📍</span>
-                <div>
-                  <strong>Can&apos;t find your city?</strong>
-                  <span>We&apos;ll verify and add it to the global database instantly.</span>
+                <div className="fp-country-list">
+                  {filteredCountries.map((item) => (
+                    <button
+                      key={item.country}
+                      type="button"
+                      className={`fp-country-row ${selectedCountry === item.country ? 'fp-country-row--active' : ''}`}
+                      onClick={() => { setSelectedCountry(item.country); setCitySearch(''); }}
+                    >
+                      <span className="fp-country-name">{item.country}</span>
+                      <span className="fp-country-badge">{item.count}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
-              <form className="fp-add-city-form" onSubmit={addMissingCity}>
-                <input
-                  type="text"
-                  value={newCityName}
-                  onChange={(e) => setNewCityName(e.target.value)}
-                  placeholder="City name"
-                  required
-                />
-                <input
-                  type="text"
-                  value={newCityCountry}
-                  onChange={(e) => setNewCityCountry(e.target.value)}
-                  placeholder="Country"
-                  required
-                />
-                <button type="submit" className="fp-add-btn" disabled={addingCity}>
-                  {addingCity ? '⏳ Verifying…' : '✓ Verify & Add'}
-                </button>
-              </form>
-              {addCityNote && <span className="fp-add-city-note">✅ {addCityNote}</span>}
+
+              {/* ── Step 2: City ── */}
+              <div className={`fp-card ${pickerStep === 2 ? 'fp-card--active' : ''} ${!selectedCountry ? 'fp-card--disabled' : ''}`}>
+                <div className="fp-card-head">
+                  <div className="fp-card-num">2</div>
+                  <div>
+                    <h3 className="fp-card-title">Select City</h3>
+                    <span className="fp-card-sub">
+                      {selectedCountry
+                        ? <>{countryCities.length} {countryCities.length === 1 ? 'city' : 'cities'} available in <strong>{selectedCountry}</strong></>
+                        : 'Select a country first to see available cities.'}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedCountry && (
+                  <div className="fp-search-wrap">
+                    <span className="fp-search-icon">🔍</span>
+                    <input
+                      type="search"
+                      className="fp-search"
+                      value={citySearch}
+                      onChange={(e) => setCitySearch(e.target.value)}
+                      placeholder={`Search in ${selectedCountry}…`}
+                    />
+                  </div>
+                )}
+
+                {!selectedCountry ? (
+                  <div className="fp-empty">
+                    <div className="fp-empty-icon">🌍</div>
+                    <span>Choose your country on the left to unlock city selection.</span>
+                  </div>
+                ) : filteredCities.length === 0 ? (
+                  <div className="fp-empty">
+                    <div className="fp-empty-icon">🔎</div>
+                    <span>No matching cities in {selectedCountry}.</span>
+                  </div>
+                ) : (
+                  <div className="fp-city-grid">
+                    {filteredCities.map((city) => (
+                      <button
+                        key={city.id}
+                        type="button"
+                        className="fp-city-card"
+                        onClick={() => claimCity(city.id, city.name)}
+                      >
+                        <span className="fp-city-name">{city.name}</span>
+                        <span className="fp-city-country">{city.country}</span>
+                        <span className="fp-city-price">$100</span>
+                        <span className="fp-city-cta">Claim →</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── Add missing city ── */}
+                <div className="fp-add-city">
+                  <div className="fp-add-city-head">
+                    <span className="fp-add-city-icon">📍</span>
+                    <div>
+                      <strong>Can&apos;t find your city?</strong>
+                      <span>We&apos;ll verify and add it to the global database instantly.</span>
+                    </div>
+                  </div>
+                  <form className="fp-add-city-form" onSubmit={addMissingCity}>
+                    <input
+                      type="text"
+                      value={newCityName}
+                      onChange={(e) => setNewCityName(e.target.value)}
+                      placeholder="City name"
+                      required
+                    />
+                    <input
+                      type="text"
+                      value={newCityCountry}
+                      onChange={(e) => setNewCityCountry(e.target.value)}
+                      placeholder="Country"
+                      required
+                    />
+                    <button type="submit" className="fp-add-btn" disabled={addingCity}>
+                      {addingCity ? '⏳ Verifying…' : '✓ Verify & Add'}
+                    </button>
+                  </form>
+                  {addCityNote && <span className="fp-add-city-note">✅ {addCityNote}</span>}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
     );
   }
@@ -448,6 +564,9 @@ export default function DashboardPage() {
   const fixturesTotal = Number(ss?.fixtures?.total_matches || 0);
   const fixturesDone = Number(ss?.fixtures?.completed_matches || 0);
   const fixturesPct = fixturesTotal ? Math.round((fixturesDone / fixturesTotal) * 100) : 0;
+  const isInternationalMode = String(fd?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
+  const teamStrength = Number(fd?.strength_rating ?? squadSummary?.avg_team_rating ?? 0);
+  const teamsPerLeague = Number(ss?.season?.teams_per_league || 0);
 
   return (
     <div className="db-page">
@@ -464,9 +583,9 @@ export default function DashboardPage() {
       {/* ── Hero stats ── */}
       <div className="db-hero-strip">
         <div className="db-hero-card">
-          <span className="db-hero-label">Franchise Value</span>
-          <span className="db-hero-value db-hero-value--green">{money(fd?.total_valuation)}</span>
-          <ValSparkline data={valuationSeries} />
+          <span className="db-hero-label">{isInternationalMode ? 'Team Strength' : 'Franchise Value'}</span>
+          <span className="db-hero-value db-hero-value--green">{isInternationalMode ? teamStrength.toFixed(1) : money(fd?.total_valuation)}</span>
+          {!isInternationalMode && <ValSparkline data={valuationSeries} />}
         </div>
         <div className="db-hero-card">
           <span className="db-hero-label">Record</span>
@@ -475,7 +594,7 @@ export default function DashboardPage() {
         </div>
         <div className="db-hero-card">
           <span className="db-hero-label">League Position</span>
-          <span className="db-hero-value">{fd?.league_position || '—'}<span className="db-hero-dim">/ {ss?.season?.league_count ? Number(ss.season.league_count) * 12 : '?'}</span></span>
+          <span className="db-hero-value">{fd?.league_position || '—'}<span className="db-hero-dim">/ {teamsPerLeague || '?'}</span></span>
           <span className="db-hero-hint">Tier {fd?.current_league_tier || 1}</span>
         </div>
         <div className="db-hero-card">
@@ -539,7 +658,7 @@ export default function DashboardPage() {
             <>
               <div className="db-season-meta">
                 <span><strong>{ss.season.name}</strong></span>
-                <span>{ss.season.league_count || 4} leagues</span>
+                <span>{ss.season.league_count || 4} {isInternationalMode ? 'divisions' : 'leagues'}</span>
               </div>
               <div className="db-season-progress">
                 <div className="db-season-bar"><div className="db-season-bar-fill" style={{ width: `${fixturesPct}%` }} /></div>
@@ -592,23 +711,24 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Transfer feed ── */}
-      <div className="db-card">
-        <h3 className="db-section-title">Transfer &amp; Loan Activity</h3>
-        {transferFeed.length === 0 ? (
-          <div className="sq-empty">No recent activity.</div>
-        ) : (
-          <div className="db-feed-list">
-            {transferFeed.slice(0, 15).map((item) => (
-              <div key={item.id} className="db-feed-item">
-                <div className="db-feed-dot" />
-                <span className="db-feed-msg">{item.message}</span>
-                <span className="db-feed-time">{timeAgo(item.created_at)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {!isInternationalMode && (
+        <div className="db-card">
+          <h3 className="db-section-title">Transfer &amp; Loan Activity</h3>
+          {transferFeed.length === 0 ? (
+            <div className="sq-empty">No recent activity.</div>
+          ) : (
+            <div className="db-feed-list">
+              {transferFeed.slice(0, 15).map((item) => (
+                <div key={item.id} className="db-feed-item">
+                  <div className="db-feed-dot" />
+                  <span className="db-feed-msg">{item.message}</span>
+                  <span className="db-feed-time">{timeAgo(item.created_at)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Danger Zone ── */}
       <div className="db-card db-card--danger">
