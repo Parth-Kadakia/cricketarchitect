@@ -245,7 +245,7 @@ function isBalancedLineup(players) {
     .slice(0, 4)
     .filter((row) => roleOf(row) === 'BOWLER').length;
 
-  return wicketKeepers >= 1 && bowlingOptions >= 4 && topFourBowlers <= 1;
+  return wicketKeepers >= 1 && bowlingOptions >= 5 && topFourBowlers <= 1;
 }
 
 async function applyLineup(franchiseId, playerIds, dbClient = pool) {

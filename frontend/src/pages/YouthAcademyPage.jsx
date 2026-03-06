@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 
 /* ── Helpers ── */
@@ -359,7 +360,9 @@ export default function YouthAcademyPage() {
                 return (
                   <div key={club.id} className={`ya-club-row ${isMe ? 'ya-club-row--mine' : ''}`}>
                     <span className="ya-club-col ya-club-col--name">
-                      <strong>{club.franchise_name}</strong>
+                      <TeamNameButton franchiseId={club.id} name={club.franchise_name} city={club.city_name} country={club.country} className="ya-team-link">
+                        {club.franchise_name}
+                      </TeamNameButton>
                       <span className="ya-club-sub">{club.city_name}, {club.country}</span>
                     </span>
                     <span className={`ya-club-col ya-club-ctrl ya-club-ctrl--${ctrl.toLowerCase()}`}>{ctrl}</span>

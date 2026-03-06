@@ -9,29 +9,55 @@ function roleBonus(role, skill) {
   const normalized = String(role || '').toUpperCase();
 
   if (skill === 'batting') {
-    if (normalized === 'BATTER') return 6;
-    if (normalized === 'WICKET_KEEPER') return 4;
-    if (normalized === 'ALL_ROUNDER') return 3;
-    return 0;
+    if (normalized === 'BATTER') return 10;
+    if (normalized === 'WICKET_KEEPER') return 5;
+    if (normalized === 'ALL_ROUNDER') return 5;
+    return -16;
   }
 
   if (skill === 'bowling') {
-    if (normalized === 'BOWLER') return 6;
-    if (normalized === 'ALL_ROUNDER') return 3;
-    return 0;
+    if (normalized === 'BOWLER') return 10;
+    if (normalized === 'ALL_ROUNDER') return 5;
+    if (normalized === 'BATTER') return -16;
+    return -26;
   }
 
   if (skill === 'fielding') {
-    if (normalized === 'WICKET_KEEPER') return 4;
-    if (normalized === 'ALL_ROUNDER') return 2;
+    if (normalized === 'WICKET_KEEPER') return 10;
+    if (normalized === 'ALL_ROUNDER') return 3;
+    if (normalized === 'BOWLER') return 2;
     return 1;
   }
 
   if (skill === 'fitness') {
-    return normalized === 'ALL_ROUNDER' ? 2 : 1;
+    if (normalized === 'ALL_ROUNDER') return 3;
+    if (normalized === 'BOWLER') return 2;
+    return 1;
   }
 
-  return 0;
+  return 1;
+}
+
+function roleSkillCap(role, skill) {
+  const normalized = String(role || '').toUpperCase();
+  const caps = {
+    BATTER: { batting: 96, bowling: 24, fielding: 84, fitness: 90, temperament: 90 },
+    BOWLER: { batting: 36, bowling: 96, fielding: 86, fitness: 92, temperament: 90 },
+    ALL_ROUNDER: { batting: 90, bowling: 90, fielding: 88, fitness: 92, temperament: 92 },
+    WICKET_KEEPER: { batting: 90, bowling: 4, fielding: 97, fitness: 90, temperament: 93 }
+  };
+  return caps[normalized]?.[skill] || 90;
+}
+
+function roleSkillFloor(role, skill) {
+  const normalized = String(role || '').toUpperCase();
+  const floors = {
+    BATTER: { batting: 24, bowling: 0, fielding: 20, fitness: 24, temperament: 20 },
+    BOWLER: { batting: 0, bowling: 24, fielding: 20, fitness: 24, temperament: 20 },
+    ALL_ROUNDER: { batting: 20, bowling: 20, fielding: 20, fitness: 24, temperament: 20 },
+    WICKET_KEEPER: { batting: 20, bowling: 0, fielding: 28, fitness: 24, temperament: 22 }
+  };
+  return floors[normalized]?.[skill] || 18;
 }
 
 function computeMarketValue(player) {
@@ -125,13 +151,33 @@ export async function rebalanceSeasonPlayers({ seasonId = null, dryRun = false }
     const potential = Number(player.potential || 0);
 
     const leagueBoost = (5 - clamp(leagueTier, 1, 4)) * 1.25;
-    const base = 34 + potential * 0.5 + academyLevel * 0.65 + leagueBoost;
+    const base = 30 + potential * 0.44 + academyLevel * 0.55 + leagueBoost * 0.7;
 
-    const battingCap = clamp(Math.round(base + roleBonus(player.role, 'batting')), 35, 92);
-    const bowlingCap = clamp(Math.round(base + roleBonus(player.role, 'bowling')), 35, 92);
-    const fieldingCap = clamp(Math.round(base - 2 + roleBonus(player.role, 'fielding')), 34, 90);
-    const fitnessCap = clamp(Math.round(base - 3 + roleBonus(player.role, 'fitness')), 34, 88);
-    const temperamentCap = clamp(Math.round(base - 5), 32, 86);
+    const battingCap = clamp(
+      Math.min(Math.round(base + roleBonus(player.role, 'batting')), roleSkillCap(player.role, 'batting')),
+      roleSkillFloor(player.role, 'batting'),
+      roleSkillCap(player.role, 'batting')
+    );
+    const bowlingCap = clamp(
+      Math.min(Math.round(base + roleBonus(player.role, 'bowling')), roleSkillCap(player.role, 'bowling')),
+      roleSkillFloor(player.role, 'bowling'),
+      roleSkillCap(player.role, 'bowling')
+    );
+    const fieldingCap = clamp(
+      Math.min(Math.round(base - 2 + roleBonus(player.role, 'fielding')), roleSkillCap(player.role, 'fielding')),
+      roleSkillFloor(player.role, 'fielding'),
+      roleSkillCap(player.role, 'fielding')
+    );
+    const fitnessCap = clamp(
+      Math.min(Math.round(base - 3 + roleBonus(player.role, 'fitness')), roleSkillCap(player.role, 'fitness')),
+      roleSkillFloor(player.role, 'fitness'),
+      roleSkillCap(player.role, 'fitness')
+    );
+    const temperamentCap = clamp(
+      Math.min(Math.round(base - 5 + roleBonus(player.role, 'temperament')), roleSkillCap(player.role, 'temperament')),
+      roleSkillFloor(player.role, 'temperament'),
+      roleSkillCap(player.role, 'temperament')
+    );
 
     const nextBatting = Math.min(Number(player.batting || 0), battingCap);
     const nextBowling = Math.min(Number(player.bowling || 0), bowlingCap);

@@ -15,12 +15,26 @@ function randomRole() {
 }
 
 function generateProspectAttributes(role) {
-  const battingBase = role === 'BATTER' ? [24, 44] : role === 'ALL_ROUNDER' || role === 'WICKET_KEEPER' ? [20, 38] : [10, 28];
-  const bowlingBase = role === 'BOWLER' ? [24, 44] : role === 'ALL_ROUNDER' ? [20, 38] : [10, 28];
+  const battingBase =
+    role === 'BATTER'
+      ? [28, 46]
+      : role === 'WICKET_KEEPER'
+        ? [24, 42]
+        : role === 'ALL_ROUNDER'
+          ? [20, 38]
+          : [6, 24];
+  const bowlingBase =
+    role === 'BOWLER'
+      ? [30, 48]
+      : role === 'ALL_ROUNDER'
+        ? [20, 38]
+        : role === 'WICKET_KEEPER'
+          ? [0, 2]
+          : [0, 12];
 
   const batting = randomInt(battingBase[0], battingBase[1]);
   const bowling = randomInt(bowlingBase[0], bowlingBase[1]);
-  const fielding = randomInt(20, 45);
+  const fielding = role === 'WICKET_KEEPER' ? randomInt(32, 52) : randomInt(20, 45);
   const fitness = randomInt(22, 48);
   const temperament = randomInt(20, 45);
   const potential = randomInt(40, 70);

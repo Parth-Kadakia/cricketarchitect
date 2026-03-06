@@ -10,6 +10,7 @@ import LoginPage from './pages/LoginPage';
 import MatchCenterPage from './pages/MatchCenterPage';
 import SquadManagementPage from './pages/SquadManagementPage';
 import TransferMarketPage from './pages/TransferMarketPage';
+import StatsPage from './pages/StatsPage';
 import TrophyRoomPage from './pages/TrophyRoomPage';
 import YouthAcademyPage from './pages/YouthAcademyPage';
 
@@ -27,6 +28,7 @@ export default function App() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="squad" element={<SquadManagementPage />} />
+        <Route path="stats" element={<StatsPage />} />
         <Route path="youth" element={<YouthAcademyPage />} />
         <Route path="league" element={<LeagueTablePage />} />
         <Route path="fixtures" element={<FixturesResultsPage />} />

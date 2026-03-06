@@ -309,7 +309,17 @@ export async function createSeason({
     seasonNumber ||
     Number((await dbClient.query('SELECT COALESCE(MAX(season_number), 0) AS season_number FROM seasons')).rows[0].season_number) + 1;
 
-  const seasonName = name || `Global T20 Season ${nextSeasonNumber}`;
+  let seasonName = name || `Global T20 Season ${nextSeasonNumber}`;
+
+  // Ensure the name is unique — if a season with this name already exists, append a suffix
+  const nameCheck = await dbClient.query('SELECT id FROM seasons WHERE name = $1', [seasonName]);
+  if (nameCheck.rows.length) {
+    const maxNum = Number(
+      (await dbClient.query("SELECT COALESCE(MAX(season_number), 0) AS mn FROM seasons")).rows[0].mn
+    );
+    const uniqueNum = Math.max(nextSeasonNumber, maxNum) + 1;
+    seasonName = name ? `${name} (${uniqueNum})` : `Global T20 Season ${uniqueNum}`;
+  }
   const teamsPerLeague = Math.ceil(resolvedTeamCount / LEAGUE_COUNT);
 
   const inserted = await dbClient.query(
@@ -519,6 +529,7 @@ export async function getSeasonPlayerLeaders(seasonId, dbClient = pool) {
     `SELECT p.id AS player_id,
             p.first_name,
             p.last_name,
+            f.id AS franchise_id,
             f.franchise_name,
             COUNT(*) FILTER (WHERE pms.batting_balls > 0)::int AS innings,
             SUM(pms.batting_runs)::int AS runs,
@@ -533,7 +544,7 @@ export async function getSeasonPlayerLeaders(seasonId, dbClient = pool) {
      JOIN franchises f ON f.id = p.franchise_id
      WHERE m.season_id = $1
        AND m.stage = 'REGULAR'
-     GROUP BY p.id, p.first_name, p.last_name, f.franchise_name
+     GROUP BY p.id, p.first_name, p.last_name, f.id, f.franchise_name
      HAVING SUM(pms.batting_balls) > 0
      ORDER BY runs DESC, strike_rate DESC
      LIMIT 30`,
@@ -544,6 +555,7 @@ export async function getSeasonPlayerLeaders(seasonId, dbClient = pool) {
     `SELECT p.id AS player_id,
             p.first_name,
             p.last_name,
+            f.id AS franchise_id,
             f.franchise_name,
             SUM(pms.bowling_balls)::int AS balls,
             SUM(pms.bowling_runs)::int AS runs_conceded,
@@ -556,7 +568,8 @@ export async function getSeasonPlayerLeaders(seasonId, dbClient = pool) {
      JOIN franchises f ON f.id = p.franchise_id
      WHERE m.season_id = $1
        AND m.stage = 'REGULAR'
-     GROUP BY p.id, p.first_name, p.last_name, f.franchise_name
+       AND p.role IN ('BOWLER', 'ALL_ROUNDER')
+     GROUP BY p.id, p.first_name, p.last_name, f.id, f.franchise_name
      HAVING SUM(pms.bowling_balls) > 0
      ORDER BY wickets DESC, economy ASC
      LIMIT 30`,
@@ -858,9 +871,17 @@ export async function createNextSeasonFromCompleted(completedSeasonId, dbClient 
     return existingActive;
   }
 
+  // Guard: if a season with this number already exists (e.g. stale retry), skip to its record
+  const nextNumber = Number(completed.rows[0].season_number) + 1;
+  const existingNext = await dbClient.query(
+    'SELECT * FROM seasons WHERE season_number = $1', [nextNumber]
+  );
+  if (existingNext.rows.length) {
+    return existingNext.rows[0];
+  }
+
   await processSeasonRetirements(completedSeasonId, dbClient);
 
-  const nextNumber = Number(completed.rows[0].season_number) + 1;
   const nextYear = Number(completed.rows[0].year) + 1;
   const teamCount = Number(completed.rows[0].team_count);
 

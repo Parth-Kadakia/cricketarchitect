@@ -3,6 +3,7 @@ import pool, { withTransaction } from '../config/db.js';
 import env from '../config/env.js';
 import { requireAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { ensureProminentCricketCities } from '../db/seedWorldCities.js';
 
 const router = Router();
 
@@ -91,6 +92,10 @@ router.get(
     const q = String(req.query.q || '').trim().toLowerCase();
     const limit = Math.max(20, Math.min(2000, Number(req.query.limit || 600)));
     const franchiseCount = Number((await pool.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
+
+    if (franchiseCount === 0) {
+      await ensureProminentCricketCities(pool);
+    }
 
     let query;
     let params;

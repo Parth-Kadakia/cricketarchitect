@@ -57,13 +57,45 @@ function sortByBatting(players) {
 }
 
 function selectBowlers(players) {
-  const sorted = [...players].sort((a, b) => {
-    const aScore = Number(a.bowling) * 0.58 + Number(a.form) * 0.2 + Number(a.fitness) * 0.22;
-    const bScore = Number(b.bowling) * 0.58 + Number(b.form) * 0.2 + Number(b.fitness) * 0.22;
+  const scorePlayer = (player) => {
+    const role = String(player.role || '').toUpperCase();
+    const roleBonus = role === 'BOWLER' ? 2.2 : role === 'ALL_ROUNDER' ? 1.1 : role === 'BATTER' ? -1 : -4;
+    return Number(player.bowling) * 0.58 + Number(player.form) * 0.2 + Number(player.fitness) * 0.22 + roleBonus;
+  };
+
+  const specialists = players.filter((player) => {
+    const role = String(player.role || '').toUpperCase();
+    const bowl = Number(player.bowling || 0);
+    if (role === 'BOWLER') {
+      return bowl >= 32;
+    }
+    if (role === 'ALL_ROUNDER') {
+      return bowl >= 28;
+    }
+    return false;
+  });
+
+  const backupBatters = players.filter((player) => {
+    const role = String(player.role || '').toUpperCase();
+    return role === 'BATTER' && Number(player.bowling || 0) >= 48;
+  });
+  const nonKeepers = players.filter((player) => String(player.role || '').toUpperCase() !== 'WICKET_KEEPER');
+
+  let candidatePool = specialists;
+  if (candidatePool.length < 5) {
+    candidatePool = [...candidatePool, ...backupBatters];
+  }
+  if (!candidatePool.length) {
+    candidatePool = nonKeepers.length ? nonKeepers : players;
+  }
+
+  const sorted = [...candidatePool].sort((a, b) => {
+    const aScore = scorePlayer(a);
+    const bScore = scorePlayer(b);
     return bScore - aScore;
   });
 
-  return sorted.slice(0, 6);
+  return sorted.slice(0, 5);
 }
 
 function getOverPhase(overNumber) {

@@ -95,4 +95,44 @@ router.post(
   })
 );
 
+/* ── Reset Game (available to any authenticated user) ── */
+router.post(
+  '/reset-game',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const confirmText = String(req.body?.confirm || '').trim();
+    if (confirmText !== 'RESET') {
+      return res.status(400).json({ message: 'You must send { confirm: "RESET" } to proceed.' });
+    }
+
+    /* Wipe all game data but keep users and the world-city catalog */
+    await pool.query(`
+      TRUNCATE TABLE
+        transfer_feed,
+        franchise_sales,
+        trophy_cabinet,
+        valuations,
+        transactions,
+        player_growth_logs,
+        player_match_stats,
+        match_events,
+        matches,
+        season_teams,
+        seasons,
+        players,
+        regions,
+        franchises
+      RESTART IDENTITY CASCADE
+    `);
+
+    /* Re-seed the welcome note */
+    await pool.query(
+      `INSERT INTO transfer_feed (season_id, action_type, message)
+       VALUES (NULL, 'SEASON_NOTE', 'Game world has been reset. Claim any city to start a fresh career.')`
+    );
+
+    return res.json({ message: 'Game world reset successfully. Pick a new city to begin.' });
+  })
+);
+
 export default router;

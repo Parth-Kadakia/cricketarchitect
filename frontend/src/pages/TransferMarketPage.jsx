@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 
 /* ── Helpers ── */
@@ -276,9 +277,25 @@ export default function TransferMarketPage() {
                         {entry.first_name && <strong className="tm-feed-player">{entry.first_name} {entry.last_name}</strong>}
                       </div>
                       <div className="tm-feed-route">
-                        {entry.source_franchise_name && <span className="tm-feed-franchise">{entry.source_franchise_name}</span>}
+                        {entry.source_franchise_name && (
+                          <TeamNameButton
+                            franchiseId={entry.source_franchise_id}
+                            name={entry.source_franchise_name}
+                            className="tm-feed-franchise"
+                          >
+                            {entry.source_franchise_name}
+                          </TeamNameButton>
+                        )}
                         {entry.source_franchise_name && entry.target_franchise_name && <span className="tm-feed-arrow">→</span>}
-                        {entry.target_franchise_name && <span className="tm-feed-franchise">{entry.target_franchise_name}</span>}
+                        {entry.target_franchise_name && (
+                          <TeamNameButton
+                            franchiseId={entry.target_franchise_id}
+                            name={entry.target_franchise_name}
+                            className="tm-feed-franchise"
+                          >
+                            {entry.target_franchise_name}
+                          </TeamNameButton>
+                        )}
                       </div>
                       {entry.message && <p className="tm-feed-msg">{entry.message}</p>}
                     </div>

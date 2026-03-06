@@ -236,6 +236,23 @@ function deriveMatchBowlerMentality(player) {
   return 'Powerplay Specialist';
 }
 
+function capBowlerRatingByRole(player) {
+  const role = String(player.role || '').toUpperCase();
+  const bowling = clampInt(Number(player.bowling || 0), 0, 100, 50);
+
+  if (role === 'WICKET_KEEPER') {
+    return 0;
+  }
+  if (role === 'BATTER') {
+    return Math.min(16, bowling);
+  }
+  if (role === 'ALL_ROUNDER') {
+    return Math.min(88, Math.max(22, bowling));
+  }
+
+  return bowling;
+}
+
 function mapDismissal(wicketTypeRaw = '') {
   const wicketType = String(wicketTypeRaw || '').trim().toLowerCase();
   if (wicketType.includes('lbw')) {
@@ -350,9 +367,18 @@ function deriveTeamStrengthLabel(teamPlayers = []) {
 }
 
 function buildMatchPlayerPayload(player, index = 0) {
+  const role = String(player.role || '').toUpperCase();
   const batting = clampInt(Number(player.batting || 0), 0, 100, 50);
-  const bowling = clampInt(Number(player.bowling || 0), 0, 100, 50);
+  const bowling = capBowlerRatingByRole(player);
   const hand = normalizeAllowed(deriveHandFromId(Number(player.id || index + 1)), VALID_HAND, 'Right');
+  const bowlerStyle =
+    role === 'WICKET_KEEPER'
+      ? 'Off-Spin Bowler'
+      : normalizeAllowed(deriveMatchBowlerStyle(player), VALID_MATCH_BOWLER_STYLE, 'Medium Pace Bowler (Seam Bowler)');
+  const bowlerMentality =
+    role === 'WICKET_KEEPER' || role === 'BATTER'
+      ? 'Economical'
+      : normalizeAllowed(deriveMatchBowlerMentality(player), VALID_MATCH_BOWLER_MENTALITY, 'Wicket Taker');
 
   return {
     name: normalizePlayerName(player, `Player ${index + 1}`),
@@ -360,9 +386,9 @@ function buildMatchPlayerPayload(player, index = 0) {
     bowler_rating: bowling,
     batsman_type: normalizeAllowed(deriveMatchBatsmanType(player), VALID_MATCH_BATSMAN_TYPE, 'Balanced'),
     batsman_hand: hand,
-    bowler_style: normalizeAllowed(deriveMatchBowlerStyle(player), VALID_MATCH_BOWLER_STYLE, 'Medium Pace Bowler (Seam Bowler)'),
+    bowler_style: bowlerStyle,
     bowler_hand: hand,
-    bowler_mentality: normalizeAllowed(deriveMatchBowlerMentality(player), VALID_MATCH_BOWLER_MENTALITY, 'Wicket Taker')
+    bowler_mentality: bowlerMentality
   };
 }
 

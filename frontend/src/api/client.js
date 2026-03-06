@@ -101,6 +101,10 @@ export const api = {
   },
   squad: {
     get: (token) => request('/squad', { headers: buildHeaders(token, false) }),
+    franchise: (token, franchiseId) =>
+      request(`/squad/franchise/${franchiseId}`, {
+        headers: buildHeaders(token, false)
+      }),
     playerDetail: (token, playerId) => request(`/squad/player/${playerId}`, { headers: buildHeaders(token, false) }),
     lineup: (token) => request('/squad/lineup', { headers: buildHeaders(token, false) }),
     setLineup: (token, playerIds) =>
@@ -210,7 +214,9 @@ export const api = {
         method: 'POST',
         headers: buildHeaders(token),
         body: JSON.stringify(payload || {})
-      })
+      }),
+    allStats: (seasonId = null) =>
+      request(`/league/all-stats${seasonId ? `?seasonId=${seasonId}` : ''}`)
   },
   marketplace: {
     overview: () => request('/marketplace'),
@@ -223,6 +229,20 @@ export const api = {
         headers: buildHeaders(token)
       }),
     transferFeed: (limit = 100) => request(`/marketplace/transfer-feed?limit=${limit}`)
+  },
+  admin: {
+    resetGame: (token) =>
+      request('/admin/reset-game', {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify({ confirm: 'RESET' })
+      }),
+    rebalanceSeason: (token, { seasonId, dryRun } = {}) =>
+      request('/admin/rebalance-season', {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify({ seasonId: seasonId || undefined, dryRun: !!dryRun })
+      })
   },
   financials: {
     summary: (token) => request('/financials/summary', { headers: buildHeaders(token, false) }),

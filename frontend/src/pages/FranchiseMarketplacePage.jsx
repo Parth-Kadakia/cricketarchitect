@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 
 /* ── Helpers ── */
@@ -213,7 +214,15 @@ export default function FranchiseMarketplacePage() {
                   <div key={club.id} className={`mp-club-card ${isMe ? 'mp-club-card--mine' : ''}`}>
                     <div className="mp-club-top">
                       <div className="mp-club-identity">
-                        <strong className="mp-club-name">{club.franchise_name}</strong>
+                        <TeamNameButton
+                          franchiseId={club.id}
+                          name={club.franchise_name}
+                          city={club.city_name}
+                          country={club.country}
+                          className="mp-club-name"
+                        >
+                          {club.franchise_name}
+                        </TeamNameButton>
                         <span className="mp-club-loc">📍 {club.city_name}, {club.country}</span>
                       </div>
                       <span className={`mp-ctrl-badge ${controlClass(ctrl)}`}>{ctrl}</span>
@@ -283,7 +292,9 @@ export default function FranchiseMarketplacePage() {
                 <div key={club.id} className="mp-sale-card">
                   <div className="mp-sale-header">
                     <div>
-                      <strong className="mp-sale-name">{club.franchise_name}</strong>
+                      <TeamNameButton franchiseId={club.id} name={club.franchise_name} city={club.city_name} country={club.country} className="mp-sale-name">
+                        {club.franchise_name}
+                      </TeamNameButton>
                       <span className="mp-sale-loc">📍 {club.city_name}, {club.country}</span>
                     </div>
                     <span className={`lg-tier-badge lg-tier-badge--${club.current_league_tier}`} style={{ width: 26, height: 26, fontSize: '0.72rem' }}>{club.current_league_tier}</span>
@@ -350,7 +361,9 @@ export default function FranchiseMarketplacePage() {
                 <div key={sale.id || i} className="mp-history-item">
                   <div className="mp-history-dot" />
                   <div className="mp-history-body">
-                    <strong className="mp-history-name">{sale.franchise_name}</strong>
+                    <TeamNameButton franchiseId={sale.franchise_id} name={sale.franchise_name} className="mp-history-name">
+                      {sale.franchise_name}
+                    </TeamNameButton>
                     <span className="mp-history-detail">Sold for <strong>{money(sale.sale_value)}</strong></span>
                   </div>
                   <span className="mp-history-time">{sale.sold_at ? timeAgo(sale.sold_at) : ''}</span>

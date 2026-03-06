@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
+import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 
@@ -1461,18 +1462,6 @@ export default function MatchCenterPage() {
   const matchCompleted = matchStatus === 'COMPLETED';
   const isLive = matchStatus === 'LIVE' || simulating;
 
-  let tossSummary = 'Toss pending';
-  if (scorecard?.match) {
-    const hId = Number(scorecard.match.home_franchise_id || 0);
-    const aId = Number(scorecard.match.away_franchise_id || 0);
-    const tWin = Number(scorecard.match.toss_winner_franchise_id || 0);
-    const tDec = String(scorecard.match.toss_decision || '').toUpperCase();
-    if (tWin && (tDec === 'BAT' || tDec === 'BOWL')) {
-      const tName = tWin === hId ? scorecard.match.home_name : tWin === aId ? scorecard.match.away_name : `Franchise ${tWin}`;
-      tossSummary = `${tName} won toss, chose to ${tDec === 'BAT' ? 'bat' : 'bowl'}`;
-    }
-  }
-
   const homeScore = scoreLabel(scorecard?.match?.home_score, scorecard?.match?.home_wickets, scorecard?.match?.home_balls);
   const awayScore = scoreLabel(scorecard?.match?.away_score, scorecard?.match?.away_wickets, scorecard?.match?.away_balls);
   const homeName = scorecard?.match?.home_name || 'Home';
@@ -1482,6 +1471,26 @@ export default function MatchCenterPage() {
   const winnerId = Number(scorecard?.match?.winner_franchise_id || 0);
   const homeId = Number(scorecard?.match?.home_franchise_id || 0);
   const awayId = Number(scorecard?.match?.away_franchise_id || 0);
+
+  let tossSummary = 'Toss pending';
+  let tossWinnerMeta = null;
+  if (scorecard?.match) {
+    const hId = Number(scorecard.match.home_franchise_id || 0);
+    const aId = Number(scorecard.match.away_franchise_id || 0);
+    const tWin = Number(scorecard.match.toss_winner_franchise_id || 0);
+    const tDec = String(scorecard.match.toss_decision || '').toUpperCase();
+    if (tWin && (tDec === 'BAT' || tDec === 'BOWL')) {
+      const tName = tWin === hId ? scorecard.match.home_name : tWin === aId ? scorecard.match.away_name : `Franchise ${tWin}`;
+      const tCountry = tWin === hId ? scorecard.match.home_country : tWin === aId ? scorecard.match.away_country : '';
+      tossSummary = `${tName} won toss, chose to ${tDec === 'BAT' ? 'bat' : 'bowl'}`;
+      tossWinnerMeta = {
+        id: tWin,
+        name: tName,
+        country: tCountry,
+        decision: tDec
+      };
+    }
+  }
 
   /* worm chart */
   const WormChart = () => {
@@ -1531,7 +1540,9 @@ export default function MatchCenterPage() {
 
         <div className="mc-hero-teams">
           <div className={`mc-hero-team ${winnerId === homeId ? 'mc-hero-team--winner' : ''}`}>
-            <span className="mc-hero-team-name">{homeName}</span>
+            <TeamNameButton franchiseId={homeId} name={homeName} country={homeCountry} className="mc-hero-team-name">
+              {homeName}
+            </TeamNameButton>
             <span className="mc-hero-team-country">{homeCountry}</span>
             <span className="mc-hero-team-score">{homeScore}</span>
           </div>
@@ -1539,7 +1550,9 @@ export default function MatchCenterPage() {
           <div className="mc-hero-vs">vs</div>
 
           <div className={`mc-hero-team ${winnerId === awayId ? 'mc-hero-team--winner' : ''}`}>
-            <span className="mc-hero-team-name">{awayName}</span>
+            <TeamNameButton franchiseId={awayId} name={awayName} country={awayCountry} className="mc-hero-team-name">
+              {awayName}
+            </TeamNameButton>
             <span className="mc-hero-team-country">{awayCountry}</span>
             <span className="mc-hero-team-score">{awayScore}</span>
           </div>
@@ -1549,7 +1562,24 @@ export default function MatchCenterPage() {
           {matchCompleted && scorecard?.match?.result_summary && (
             <span className="mc-hero-result">{scorecard.match.result_summary}</span>
           )}
-          <span className="mc-hero-toss">{tossSummary}</span>
+          <span className="mc-hero-toss">
+            {tossWinnerMeta ? (
+              <>
+                🪙{' '}
+                <TeamNameButton
+                  franchiseId={tossWinnerMeta.id}
+                  name={tossWinnerMeta.name}
+                  country={tossWinnerMeta.country}
+                  className="mc-inline-team-link"
+                >
+                  {tossWinnerMeta.name}
+                </TeamNameButton>{' '}
+                won toss, chose to {tossWinnerMeta.decision === 'BAT' ? 'bat' : 'bowl'}
+              </>
+            ) : (
+              tossSummary
+            )}
+          </span>
           {scorecard?.match?.player_of_match_name && (
             <span className="mc-hero-pom">🏅 Player of the Match: <strong>{scorecard.match.player_of_match_name}</strong></span>
           )}
@@ -1629,7 +1659,16 @@ export default function MatchCenterPage() {
       <div className="mc-two-col">
         {/* Batting */}
         <div className="mc-card">
-          <h3 className="mc-section-title">🏏 Batting — {activeMeta?.battingName?.replace(/\s*\(.*\)/, '') || 'Team'}</h3>
+          <h3 className="mc-section-title">
+            🏏 Batting —{' '}
+            <TeamNameButton
+              franchiseId={activeMeta?.battingId}
+              name={activeMeta?.battingName?.replace(/\s*\(.*\)/, '') || 'Team'}
+              className="mc-inline-team-link"
+            >
+              {activeMeta?.battingName?.replace(/\s*\(.*\)/, '') || 'Team'}
+            </TeamNameButton>
+          </h3>
           {activeBattingRows.length === 0 ? (
             <div className="sq-empty">No batting data yet.</div>
           ) : (
@@ -1677,7 +1716,16 @@ export default function MatchCenterPage() {
 
         {/* Bowling */}
         <div className="mc-card">
-          <h3 className="mc-section-title">🎯 Bowling — {activeMeta?.bowlingName?.replace(/\s*\(.*\)/, '') || 'Team'}</h3>
+          <h3 className="mc-section-title">
+            🎯 Bowling —{' '}
+            <TeamNameButton
+              franchiseId={activeMeta?.bowlingId}
+              name={activeMeta?.bowlingName?.replace(/\s*\(.*\)/, '') || 'Team'}
+              className="mc-inline-team-link"
+            >
+              {activeMeta?.bowlingName?.replace(/\s*\(.*\)/, '') || 'Team'}
+            </TeamNameButton>
+          </h3>
           {activeBowlingRows.length === 0 ? (
             <div className="sq-empty">No bowling data yet.</div>
           ) : (

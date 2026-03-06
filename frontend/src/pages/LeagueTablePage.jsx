@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import TeamNameButton from '../components/TeamNameButton';
 import { useSocket } from '../context/SocketContext';
 
 function oversFromBalls(balls) {
@@ -226,7 +227,15 @@ export default function LeagueTablePage() {
                                   <span className={`lg-pos-badge ${zoneCls ? `lg-pos--${zoneCls}` : ''}`}>{pos}</span>
                                 </td>
                                 <td className="lg-td-name">
-                                  <strong>{row.franchise_name}</strong>
+                                  <TeamNameButton
+                                    franchiseId={row.franchise_id}
+                                    name={row.franchise_name}
+                                    country={row.country}
+                                    city={row.city}
+                                    className="lg-team-link"
+                                  >
+                                    {row.franchise_name}
+                                  </TeamNameButton>
                                   {row.country && <span className="lg-country-tag">{row.country}</span>}
                                 </td>
                                 <td className="lg-td-city">{row.city || '-'}</td>
@@ -276,7 +285,9 @@ export default function LeagueTablePage() {
                       </span>
                       <div className="lg-leader-info">
                         <strong>{p.first_name} {p.last_name}</strong>
-                        <span className="lg-leader-team">{p.franchise_name}</span>
+                        <TeamNameButton franchiseId={p.franchise_id} name={p.franchise_name} className="lg-leader-team">
+                          {p.franchise_name}
+                        </TeamNameButton>
                       </div>
                       <div className="lg-leader-stats">
                         <span className="lg-leader-primary">{p.runs}</span>
@@ -308,7 +319,9 @@ export default function LeagueTablePage() {
                       </span>
                       <div className="lg-leader-info">
                         <strong>{p.first_name} {p.last_name}</strong>
-                        <span className="lg-leader-team">{p.franchise_name}</span>
+                        <TeamNameButton franchiseId={p.franchise_id} name={p.franchise_name} className="lg-leader-team">
+                          {p.franchise_name}
+                        </TeamNameButton>
                       </div>
                       <div className="lg-leader-stats">
                         <span className="lg-leader-primary">{p.wickets} wkts</span>
@@ -348,13 +361,17 @@ export default function LeagueTablePage() {
                     </div>
                     <div className="lg-match-teams">
                       <div className="lg-match-team">
-                        <strong>{f.home_franchise_name}</strong>
+                        <TeamNameButton franchiseId={f.home_franchise_id} name={f.home_franchise_name} country={f.home_country} className="lg-team-link">
+                          {f.home_franchise_name}
+                        </TeamNameButton>
                         <span className="lg-match-country">{f.home_country || ''}</span>
                         <span className="lg-match-score">{scoreLabel(f.home_score, f.home_wickets, f.home_balls)}</span>
                       </div>
                       <span className="lg-match-vs">vs</span>
                       <div className="lg-match-team lg-match-team--away">
-                        <strong>{f.away_franchise_name}</strong>
+                        <TeamNameButton franchiseId={f.away_franchise_id} name={f.away_franchise_name} country={f.away_country} className="lg-team-link">
+                          {f.away_franchise_name}
+                        </TeamNameButton>
                         <span className="lg-match-country">{f.away_country || ''}</span>
                         <span className="lg-match-score">{scoreLabel(f.away_score, f.away_wickets, f.away_balls)}</span>
                       </div>
@@ -382,13 +399,17 @@ export default function LeagueTablePage() {
                     </div>
                     <div className="lg-match-teams">
                       <div className="lg-match-team">
-                        <strong>{f.home_franchise_name}</strong>
+                        <TeamNameButton franchiseId={f.home_franchise_id} name={f.home_franchise_name} country={f.home_country} className="lg-team-link">
+                          {f.home_franchise_name}
+                        </TeamNameButton>
                         <span className="lg-match-country">{f.home_country || ''}</span>
                         <span className="lg-match-score">{scoreLabel(f.home_score, f.home_wickets, f.home_balls)}</span>
                       </div>
                       <span className="lg-match-vs">vs</span>
                       <div className="lg-match-team lg-match-team--away">
-                        <strong>{f.away_franchise_name}</strong>
+                        <TeamNameButton franchiseId={f.away_franchise_id} name={f.away_franchise_name} country={f.away_country} className="lg-team-link">
+                          {f.away_franchise_name}
+                        </TeamNameButton>
                         <span className="lg-match-country">{f.away_country || ''}</span>
                         <span className="lg-match-score">{scoreLabel(f.away_score, f.away_wickets, f.away_balls)}</span>
                       </div>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
+import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 
@@ -58,9 +59,17 @@ function FixtureStatusBadge({ status }) {
 function WinnerBadge({ row }) {
   const winnerId = Number(row.winner_franchise_id || 0);
   if (!winnerId) return null;
-  const name = teamNameById(row, winnerId);
+  const winner = teamSnapshotById(row, winnerId);
   const isHome = winnerId === Number(row.home_franchise_id || 0);
-  return <span className={`fx-winner-badge ${isHome ? 'fx-winner--home' : 'fx-winner--away'}`}>🏆 {name} wins</span>;
+  return (
+    <span className={`fx-winner-badge ${isHome ? 'fx-winner--home' : 'fx-winner--away'}`}>
+      🏆{' '}
+      <TeamNameButton franchiseId={winner.id} name={winner.name} country={winner.country} className="fx-inline-team-link">
+        {winner.name}
+      </TeamNameButton>{' '}
+      wins
+    </span>
+  );
 }
 
 function battingOrder(row) {
@@ -114,10 +123,18 @@ function teamSnapshotById(row, franchiseId) {
 function TossLine({ row }) {
   const tossWinnerId = Number(row.toss_winner_franchise_id || 0);
   if (!tossWinnerId) return null;
-  const name = teamNameById(row, tossWinnerId);
+  const winner = teamSnapshotById(row, tossWinnerId);
   const decision = String(row.toss_decision || '').toLowerCase();
   if (!decision) return null;
-  return <span className="fx-toss-line">🪙 {name} won toss &amp; chose to {decision} first</span>;
+  return (
+    <span className="fx-toss-line">
+      🪙{' '}
+      <TeamNameButton franchiseId={winner.id} name={winner.name} country={winner.country} className="fx-inline-team-link">
+        {winner.name}
+      </TeamNameButton>{' '}
+      won toss &amp; chose to {decision} first
+    </span>
+  );
 }
 
 export default function FixturesResultsPage() {
@@ -390,7 +407,9 @@ export default function FixturesResultsPage() {
         {/* Teams */}
         <div className="fx-card-teams">
           <div className="fx-card-team">
-            <strong className="fx-team-name">{inningsOne.name}</strong>
+            <TeamNameButton franchiseId={inningsOne.id} name={inningsOne.name} country={inningsOne.country} className="fx-team-name">
+              {inningsOne.name}
+            </TeamNameButton>
             <span className="fx-team-country">{inningsOne.country}</span>
             <span className="fx-team-ovr">{inningsOne.ovr.toFixed(0)} OVR</span>
             <span className="fx-team-score">{scoreLabel(inningsOne.score, inningsOne.wickets, inningsOne.balls)}</span>
@@ -405,7 +424,9 @@ export default function FixturesResultsPage() {
             <span className="fx-vs">vs</span>
           </div>
           <div className="fx-card-team fx-card-team--away">
-            <strong className="fx-team-name">{inningsTwo.name}</strong>
+            <TeamNameButton franchiseId={inningsTwo.id} name={inningsTwo.name} country={inningsTwo.country} className="fx-team-name">
+              {inningsTwo.name}
+            </TeamNameButton>
             <span className="fx-team-country">{inningsTwo.country}</span>
             <span className="fx-team-ovr">{inningsTwo.ovr.toFixed(0)} OVR</span>
             <span className="fx-team-score">{scoreLabel(inningsTwo.score, inningsTwo.wickets, inningsTwo.balls)}</span>

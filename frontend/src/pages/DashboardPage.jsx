@@ -42,6 +42,9 @@ export default function DashboardPage() {
   const [simulatingSeason, setSimulatingSeason] = useState(false);
   const [simulationProgress, setSimulationProgress] = useState(null);
   const [error, setError] = useState('');
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetTyped, setResetTyped] = useState('');
+  const [resetting, setResetting] = useState(false);
 
   async function loadData() {
     setError('');
@@ -219,6 +222,23 @@ export default function DashboardPage() {
 
   const isBusy = simulatingRound || simulatingSeason || simulatingHalfSeason || simulatingMyLeagueRound;
 
+  /* ── Reset game ── */
+  async function resetGame() {
+    try {
+      setError('');
+      setResetting(true);
+      await api.admin.resetGame(token);
+      setShowResetConfirm(false);
+      setResetTyped('');
+      await refreshProfile();
+      await loadData();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setResetting(false);
+    }
+  }
+
   /* ── Valuation sparkline ── */
   function ValSparkline({ data }) {
     if (!data || data.length < 2) return null;
@@ -242,83 +262,177 @@ export default function DashboardPage() {
   if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading career dashboard...</span></div>;
 
   if (!franchise) {
+    const pickerStep = selectedCountry ? 2 : 1;
     return (
-      <div className="db-page">
+      <div className="db-page fp-page">
         {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
 
-        <div className="db-header">
-          <h2 className="db-title">🏏 Pick Your Franchise Home</h2>
-          <span className="db-subtitle">Start from the bottom and build a global powerhouse. Every new club starts at <strong>$100.00</strong>.</span>
-        </div>
-
-        <div className="db-picker-stats">
-          <div className="db-picker-stat"><span className="db-picker-stat-val">{countries.length}</span><span className="db-picker-stat-lbl">Countries</span></div>
-          <div className="db-picker-stat"><span className="db-picker-stat-val">{availableCities.length}</span><span className="db-picker-stat-lbl">Cities</span></div>
-          <div className="db-picker-stat db-picker-stat--active"><span className="db-picker-stat-val">{selectedCountry || '—'}</span><span className="db-picker-stat-lbl">Selected</span></div>
-        </div>
-
-        <div className="db-picker-grid">
-          {/* Step 1: Country */}
-          <div className="db-picker-step">
-            <div className="db-picker-step-head">
-              <div>
-                <h3 className="db-step-title">1. Select Country</h3>
-                <span className="db-step-sub">Filter the global market and pick your base nation.</span>
-              </div>
-              {selectedCountry && <button type="button" className="db-step-clear" onClick={() => { setSelectedCountry(''); setCitySearch(''); }}>Clear</button>}
+        {/* ── Hero banner ── */}
+        <div className="fp-hero">
+          <div className="fp-hero-icon">🏏</div>
+          <h2 className="fp-hero-title">Claim Your City</h2>
+          <p className="fp-hero-sub">
+            Choose a city, build a franchise, and rise through the global cricket pyramid.
+            <br />Every club begins at <strong className="fp-price-tag">$100.00</strong>.
+          </p>
+          <div className="fp-hero-stats">
+            <div className="fp-stat">
+              <span className="fp-stat-val">{countries.length}</span>
+              <span className="fp-stat-lbl">Countries</span>
             </div>
-            <input type="search" className="sq-search" value={countrySearch} onChange={(e) => setCountrySearch(e.target.value)} placeholder="Search country..." />
-            <div className="db-country-list">
+            <div className="fp-stat-divider" />
+            <div className="fp-stat">
+              <span className="fp-stat-val">{availableCities.length}</span>
+              <span className="fp-stat-lbl">Open Cities</span>
+            </div>
+            <div className="fp-stat-divider" />
+            <div className="fp-stat fp-stat--active">
+              <span className="fp-stat-val">{selectedCountry || '—'}</span>
+              <span className="fp-stat-lbl">Selected</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Step indicator ── */}
+        <div className="fp-steps-bar">
+          <div className={`fp-steps-dot ${pickerStep >= 1 ? 'fp-steps-dot--done' : ''}`}>
+            <span>1</span>
+          </div>
+          <div className={`fp-steps-line ${pickerStep >= 2 ? 'fp-steps-line--done' : ''}`} />
+          <div className={`fp-steps-dot ${pickerStep >= 2 ? 'fp-steps-dot--done' : ''}`}>
+            <span>2</span>
+          </div>
+        </div>
+
+        <div className="fp-picker-grid">
+          {/* ── Step 1: Country ── */}
+          <div className={`fp-card ${pickerStep === 1 ? 'fp-card--active' : ''}`}>
+            <div className="fp-card-head">
+              <div className="fp-card-num">1</div>
+              <div>
+                <h3 className="fp-card-title">Select Country</h3>
+                <span className="fp-card-sub">Pick the nation where your franchise will be based.</span>
+              </div>
+              {selectedCountry && (
+                <button type="button" className="fp-clear-btn" onClick={() => { setSelectedCountry(''); setCitySearch(''); }}>
+                  ✕ Clear
+                </button>
+              )}
+            </div>
+
+            <div className="fp-search-wrap">
+              <span className="fp-search-icon">🔍</span>
+              <input
+                type="search"
+                className="fp-search"
+                value={countrySearch}
+                onChange={(e) => setCountrySearch(e.target.value)}
+                placeholder="Search countries…"
+              />
+              {countrySearch && (
+                <span className="fp-search-count">{filteredCountries.length} found</span>
+              )}
+            </div>
+
+            <div className="fp-country-list">
               {filteredCountries.map((item) => (
-                <button key={item.country} type="button"
-                  className={`db-country-pill ${selectedCountry === item.country ? 'db-country-pill--active' : ''}`}
-                  onClick={() => { setSelectedCountry(item.country); setCitySearch(''); }}>
-                  <strong>{item.country}</strong><span>{item.count}</span>
+                <button
+                  key={item.country}
+                  type="button"
+                  className={`fp-country-row ${selectedCountry === item.country ? 'fp-country-row--active' : ''}`}
+                  onClick={() => { setSelectedCountry(item.country); setCitySearch(''); }}
+                >
+                  <span className="fp-country-name">{item.country}</span>
+                  <span className="fp-country-badge">{item.count}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Step 2: City */}
-          <div className="db-picker-step">
-            <div className="db-picker-step-head">
+          {/* ── Step 2: City ── */}
+          <div className={`fp-card ${pickerStep === 2 ? 'fp-card--active' : ''} ${!selectedCountry ? 'fp-card--disabled' : ''}`}>
+            <div className="fp-card-head">
+              <div className="fp-card-num">2</div>
               <div>
-                <h3 className="db-step-title">2. Select City</h3>
-                <span className="db-step-sub">{selectedCountry ? `${countryCities.length} cities in ${selectedCountry}` : 'Choose a country first.'}</span>
+                <h3 className="fp-card-title">Select City</h3>
+                <span className="fp-card-sub">
+                  {selectedCountry
+                    ? <>{countryCities.length} {countryCities.length === 1 ? 'city' : 'cities'} available in <strong>{selectedCountry}</strong></>
+                    : 'Select a country first to see available cities.'}
+                </span>
               </div>
             </div>
-            <input type="search" className="sq-search" value={citySearch} disabled={!selectedCountry}
-              onChange={(e) => setCitySearch(e.target.value)}
-              placeholder={selectedCountry ? `Search in ${selectedCountry}...` : 'Select a country first'} />
+
+            {selectedCountry && (
+              <div className="fp-search-wrap">
+                <span className="fp-search-icon">🔍</span>
+                <input
+                  type="search"
+                  className="fp-search"
+                  value={citySearch}
+                  onChange={(e) => setCitySearch(e.target.value)}
+                  placeholder={`Search in ${selectedCountry}…`}
+                />
+              </div>
+            )}
 
             {!selectedCountry ? (
-              <div className="sq-empty">Choose a country first, then pick your franchise city.</div>
+              <div className="fp-empty">
+                <div className="fp-empty-icon">🌍</div>
+                <span>Choose your country on the left to unlock city selection.</span>
+              </div>
             ) : filteredCities.length === 0 ? (
-              <div className="sq-empty">No matching cities in {selectedCountry}.</div>
+              <div className="fp-empty">
+                <div className="fp-empty-icon">🔎</div>
+                <span>No matching cities in {selectedCountry}.</span>
+              </div>
             ) : (
-              <div className="db-city-grid">
+              <div className="fp-city-grid">
                 {filteredCities.map((city) => (
-                  <button key={city.id} type="button" className="db-city-card" onClick={() => claimCity(city.id, city.name)}>
-                    <strong>{city.name}</strong>
-                    <span>{city.country}</span>
-                    <span className="db-city-price">$100.00</span>
+                  <button
+                    key={city.id}
+                    type="button"
+                    className="fp-city-card"
+                    onClick={() => claimCity(city.id, city.name)}
+                  >
+                    <span className="fp-city-name">{city.name}</span>
+                    <span className="fp-city-country">{city.country}</span>
+                    <span className="fp-city-price">$100</span>
+                    <span className="fp-city-cta">Claim →</span>
                   </button>
                 ))}
               </div>
             )}
 
-            {/* Add missing city */}
-            <div className="db-add-city">
-              <div className="db-add-city-head">
-                <strong>Can&apos;t find your city?</strong>
-                <span>We verify and add it instantly.</span>
+            {/* ── Add missing city ── */}
+            <div className="fp-add-city">
+              <div className="fp-add-city-head">
+                <span className="fp-add-city-icon">📍</span>
+                <div>
+                  <strong>Can&apos;t find your city?</strong>
+                  <span>We&apos;ll verify and add it to the global database instantly.</span>
+                </div>
               </div>
-              <form className="db-add-city-form" onSubmit={addMissingCity}>
-                <input type="text" value={newCityName} onChange={(e) => setNewCityName(e.target.value)} placeholder="City name" required />
-                <input type="text" value={newCityCountry} onChange={(e) => setNewCityCountry(e.target.value)} placeholder="Country" required />
-                <button type="submit" className="sq-btn" disabled={addingCity}>{addingCity ? 'Verifying...' : 'Verify & Add'}</button>
+              <form className="fp-add-city-form" onSubmit={addMissingCity}>
+                <input
+                  type="text"
+                  value={newCityName}
+                  onChange={(e) => setNewCityName(e.target.value)}
+                  placeholder="City name"
+                  required
+                />
+                <input
+                  type="text"
+                  value={newCityCountry}
+                  onChange={(e) => setNewCityCountry(e.target.value)}
+                  placeholder="Country"
+                  required
+                />
+                <button type="submit" className="fp-add-btn" disabled={addingCity}>
+                  {addingCity ? '⏳ Verifying…' : '✓ Verify & Add'}
+                </button>
               </form>
-              {addCityNote && <span className="db-add-city-note">{addCityNote}</span>}
+              {addCityNote && <span className="fp-add-city-note">✅ {addCityNote}</span>}
             </div>
           </div>
         </div>
@@ -495,6 +609,56 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* ── Danger Zone ── */}
+      <div className="db-card db-card--danger">
+        <h3 className="db-section-title db-section-title--danger">Danger Zone</h3>
+        <p className="db-danger-desc">
+          Start a brand-new career from scratch. This permanently wipes all franchises, players, seasons, and match history. Your user account stays intact.
+        </p>
+        <button type="button" className="sq-btn sq-btn--danger" onClick={() => { setShowResetConfirm(true); setResetTyped(''); }}>
+          🔄 New Game
+        </button>
+      </div>
+
+      {/* ── Reset confirmation modal ── */}
+      {showResetConfirm && (
+        <div className="sq-modal-backdrop" role="presentation" onClick={() => setShowResetConfirm(false)}>
+          <div className="db-reset-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h3 className="db-reset-modal-title">⚠️ Reset Entire Game?</h3>
+            <p className="db-reset-modal-body">
+              This will <strong>permanently delete</strong> all game data:
+            </p>
+            <ul className="db-reset-modal-list">
+              <li>All franchises, squads &amp; player stats</li>
+              <li>All seasons, matches &amp; fixtures</li>
+              <li>All trophies, financials &amp; transfer history</li>
+            </ul>
+            <p className="db-reset-modal-body">
+              Type <strong>RESET</strong> below to confirm:
+            </p>
+            <input
+              type="text"
+              className="db-reset-input"
+              value={resetTyped}
+              onChange={(e) => setResetTyped(e.target.value.toUpperCase())}
+              placeholder="Type RESET"
+              autoFocus
+            />
+            <div className="db-reset-modal-actions">
+              <button type="button" className="sq-btn" onClick={() => setShowResetConfirm(false)}>Cancel</button>
+              <button
+                type="button"
+                className="sq-btn sq-btn--danger"
+                disabled={resetTyped !== 'RESET' || resetting}
+                onClick={resetGame}
+              >
+                {resetting ? 'Resetting…' : 'Confirm Reset'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

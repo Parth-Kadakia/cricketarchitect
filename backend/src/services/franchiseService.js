@@ -3,6 +3,7 @@ import { randomInt } from '../utils/gameMath.js';
 import { buildAcademyName, buildNameKey, getDefaultRegionLabels, pickUniquePlayerName } from './nameService.js';
 import { ensureActiveSeason, generateDoubleRoundRobinFixtures } from './leagueService.js';
 import { calculateFranchiseValuation } from './valuationService.js';
+import { ensureProminentCricketCities } from '../db/seedWorldCities.js';
 
 const ROLE_TEMPLATE = [
   'BATTER',
@@ -26,25 +27,191 @@ const ROLE_TEMPLATE = [
 ];
 
 const LEAGUE_TEAM_TARGET = 52;
+const CRICKET_PRIORITY_COUNTRIES = [
+  'India',
+  'Pakistan',
+  'Sri Lanka',
+  'Australia',
+  'Bangladesh',
+  'Afghanistan',
+  'Zimbabwe',
+  'New Zealand',
+  'England',
+  'Scotland',
+  'Ireland',
+  'Netherlands',
+  'South Africa'
+];
+
+const PREFERRED_CITY_NAMES_BY_COUNTRY = {
+  India: ['Mumbai', 'Delhi', 'Bengaluru', 'Chennai', 'Kolkata', 'Hyderabad', 'Ahmedabad', 'Pune'],
+  Pakistan: ['Karachi', 'Lahore', 'Islamabad', 'Rawalpindi', 'Multan'],
+  'Sri Lanka': ['Colombo', 'Kandy', 'Galle', 'Dambulla'],
+  Australia: ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide'],
+  Bangladesh: ['Dhaka', 'Chittagong', 'Sylhet', 'Khulna'],
+  Afghanistan: ['Kabul', 'Kandahar', 'Herat'],
+  Zimbabwe: ['Harare', 'Bulawayo'],
+  'New Zealand': ['Auckland', 'Wellington', 'Christchurch'],
+  England: ['London', 'Manchester', 'Birmingham', 'Leeds', 'Nottingham'],
+  Scotland: ['Edinburgh', 'Glasgow', 'Aberdeen'],
+  Ireland: ['Dublin', 'Cork', 'Limerick'],
+  Netherlands: ['Amsterdam', 'Rotterdam', 'The Hague'],
+  'South Africa': ['Cape Town', 'Johannesburg', 'Durban', 'Pretoria'],
+  'United States': [
+    'New York',
+    'Los Angeles',
+    'Chicago',
+    'Houston',
+    'Dallas',
+    'Miami',
+    'San Francisco',
+    'Seattle',
+    'Atlanta',
+    'Washington'
+  ],
+  'United Kingdom': ['London', 'Manchester', 'Birmingham', 'Leeds', 'Glasgow']
+};
 
 function getBaseSkill(role) {
   if (role === 'BATTER') {
-    return { batting: [20, 38], bowling: [10, 26] };
+    return {
+      batting: [28, 44],
+      bowling: [0, 8],
+      fielding: [22, 36],
+      fitness: [24, 42],
+      temperament: [24, 42],
+      potential: [32, 58]
+    };
   }
 
   if (role === 'BOWLER') {
-    return { batting: [10, 26], bowling: [20, 38] };
+    return {
+      batting: [4, 20],
+      bowling: [34, 50],
+      fielding: [20, 36],
+      fitness: [26, 46],
+      temperament: [22, 42],
+      potential: [32, 58]
+    };
   }
 
   if (role === 'WICKET_KEEPER') {
-    return { batting: [18, 34], bowling: [8, 20] };
+    return {
+      batting: [26, 42],
+      bowling: [0, 2],
+      fielding: [34, 52],
+      fitness: [26, 46],
+      temperament: [24, 46],
+      potential: [32, 58]
+    };
   }
 
-  return { batting: [16, 32], bowling: [16, 32] };
+  return {
+    batting: [22, 38],
+    bowling: [24, 42],
+    fielding: [24, 40],
+    fitness: [26, 46],
+    temperament: [24, 44],
+    potential: [32, 58]
+  };
 }
 
 function randomBetween(range) {
   return randomInt(range[0], range[1]);
+}
+
+function shuffleRows(rows) {
+  const list = [...rows];
+  for (let i = list.length - 1; i > 0; i -= 1) {
+    const j = randomInt(0, i);
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list;
+}
+
+function normalizeCountry(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function pickCityForCountry(country, cities) {
+  if (!Array.isArray(cities) || !cities.length) {
+    return null;
+  }
+
+  const preferredNames = (PREFERRED_CITY_NAMES_BY_COUNTRY[country] || []).map((name) => name.toLowerCase());
+  if (preferredNames.length) {
+    const ranked = [...cities].sort((a, b) => {
+      const aIndex = preferredNames.indexOf(String(a.name || '').toLowerCase());
+      const bIndex = preferredNames.indexOf(String(b.name || '').toLowerCase());
+      const aRank = aIndex >= 0 ? aIndex : 999;
+      const bRank = bIndex >= 0 ? bIndex : 999;
+      if (aRank !== bRank) {
+        return aRank - bRank;
+      }
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+    return ranked[0];
+  }
+
+  return shuffleRows(cities)[0];
+}
+
+async function normalizeRoleSkillBands(franchiseId, dbClient = pool) {
+  await dbClient.query(
+    `WITH normalized AS (
+       SELECT id,
+              potential,
+              CASE role
+                WHEN 'BATTER' THEN GREATEST(24, LEAST(96, batting))
+                WHEN 'BOWLER' THEN GREATEST(0, LEAST(36, batting))
+                WHEN 'ALL_ROUNDER' THEN GREATEST(20, LEAST(90, batting))
+                WHEN 'WICKET_KEEPER' THEN GREATEST(20, LEAST(90, batting))
+                ELSE GREATEST(18, LEAST(90, batting))
+              END AS batting_n,
+              CASE role
+                WHEN 'BATTER' THEN GREATEST(0, LEAST(22, bowling))
+                WHEN 'BOWLER' THEN GREATEST(24, LEAST(96, bowling))
+                WHEN 'ALL_ROUNDER' THEN GREATEST(22, LEAST(90, bowling))
+                WHEN 'WICKET_KEEPER' THEN GREATEST(0, LEAST(4, bowling))
+                ELSE GREATEST(0, LEAST(90, bowling))
+              END AS bowling_n,
+              CASE role
+                WHEN 'BATTER' THEN GREATEST(20, LEAST(84, fielding))
+                WHEN 'BOWLER' THEN GREATEST(20, LEAST(86, fielding))
+                WHEN 'ALL_ROUNDER' THEN GREATEST(20, LEAST(88, fielding))
+                WHEN 'WICKET_KEEPER' THEN GREATEST(30, LEAST(97, fielding))
+                ELSE GREATEST(20, LEAST(90, fielding))
+              END AS fielding_n,
+              CASE role
+                WHEN 'BATTER' THEN GREATEST(24, LEAST(90, fitness))
+                WHEN 'BOWLER' THEN GREATEST(24, LEAST(92, fitness))
+                WHEN 'ALL_ROUNDER' THEN GREATEST(24, LEAST(92, fitness))
+                WHEN 'WICKET_KEEPER' THEN GREATEST(24, LEAST(90, fitness))
+                ELSE GREATEST(24, LEAST(92, fitness))
+              END AS fitness_n,
+              CASE role
+                WHEN 'BATTER' THEN GREATEST(20, LEAST(90, temperament))
+                WHEN 'BOWLER' THEN GREATEST(20, LEAST(90, temperament))
+                WHEN 'ALL_ROUNDER' THEN GREATEST(20, LEAST(92, temperament))
+                WHEN 'WICKET_KEEPER' THEN GREATEST(22, LEAST(93, temperament))
+                ELSE GREATEST(20, LEAST(92, temperament))
+              END AS temperament_n
+       FROM players
+       WHERE franchise_id = $1
+         AND squad_status IN ('MAIN_SQUAD', 'YOUTH', 'LOANED')
+     )
+     UPDATE players p
+     SET batting = n.batting_n,
+         bowling = n.bowling_n,
+         fielding = n.fielding_n,
+         fitness = n.fitness_n,
+         temperament = n.temperament_n,
+         market_value = ROUND((5 + ((n.batting_n * 0.26 + n.bowling_n * 0.26 + n.fielding_n * 0.2 + n.fitness_n * 0.14 + n.temperament_n * 0.14) * 0.11) + n.potential * 0.05)::numeric, 2),
+         salary = ROUND((0.5 + (5 + ((n.batting_n * 0.26 + n.bowling_n * 0.26 + n.fielding_n * 0.2 + n.fitness_n * 0.14 + n.temperament_n * 0.14) * 0.11) + n.potential * 0.05) * 0.06)::numeric, 2)
+     FROM normalized n
+     WHERE p.id = n.id`,
+    [franchiseId]
+  );
 }
 
 export async function createDefaultRegions(franchiseId, cityName, country, dbClient = pool) {
@@ -70,6 +237,7 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool) 
   const existingPlayersResult = await dbClient.query('SELECT COUNT(*)::int AS count FROM players WHERE franchise_id = $1', [franchiseId]);
   const existingCount = Number(existingPlayersResult.rows[0].count || 0);
   if (existingCount >= minimumSquadSize) {
+    await normalizeRoleSkillBands(franchiseId, dbClient);
     return;
   }
 
@@ -95,10 +263,10 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool) 
 
     const batting = randomBetween(base.batting);
     const bowling = randomBetween(base.bowling);
-    const fielding = randomInt(20, 42);
-    const fitness = randomInt(22, 45);
-    const temperament = randomInt(20, 40);
-    const potential = randomInt(30, 58);
+    const fielding = randomBetween(base.fielding);
+    const fitness = randomBetween(base.fitness);
+    const temperament = randomBetween(base.temperament);
+    const potential = randomBetween(base.potential);
     const age = randomInt(16, 24);
 
     const marketValue = Number((5 + (batting + bowling + fielding + potential) * 0.08).toFixed(2));
@@ -155,6 +323,8 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool) 
       ]
     );
   }
+
+  await normalizeRoleSkillBands(franchiseId, dbClient);
 }
 
 export async function ensureFranchiseInfrastructure(franchiseId, dbClient = pool) {
@@ -273,6 +443,8 @@ async function createFranchiseRecord(
 }
 
 async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, dbClient) {
+  await ensureProminentCricketCities(dbClient);
+
   const managerFranchise = await createFranchiseRecord(
     {
       cityId: city.id,
@@ -286,23 +458,85 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
   );
 
   const cpuCities = await dbClient.query(
-    `SELECT id, name
+    `SELECT id, name, country
      FROM cities
      WHERE id <> $1
-     ORDER BY random()
-     LIMIT $2`,
-    [city.id, LEAGUE_TEAM_TARGET - 1]
+     ORDER BY country, name`,
+    [city.id]
   );
 
-  if (cpuCities.rows.length < LEAGUE_TEAM_TARGET - 1) {
+  const selectedCountryKey = normalizeCountry(city.country);
+  const citiesByCountry = new Map();
+
+  for (const candidate of cpuCities.rows) {
+    const country = String(candidate.country || '').trim();
+    if (!country || normalizeCountry(country) === selectedCountryKey) {
+      continue;
+    }
+
+    if (!citiesByCountry.has(country)) {
+      citiesByCountry.set(country, []);
+    }
+    citiesByCountry.get(country).push(candidate);
+  }
+
+  const requiredCountries = CRICKET_PRIORITY_COUNTRIES.filter((countryName) => normalizeCountry(countryName) !== selectedCountryKey);
+  const missingRequired = requiredCountries.filter((countryName) => !citiesByCountry.has(countryName));
+  if (missingRequired.length) {
+    const error = new Error(
+      `Missing required cricket countries in city catalog: ${missingRequired.join(', ')}. Add cities and try again.`
+    );
+    error.status = 500;
+    throw error;
+  }
+
+  const cpuTarget = LEAGUE_TEAM_TARGET - 1;
+  if (citiesByCountry.size < cpuTarget) {
     const error = new Error(`Need at least ${LEAGUE_TEAM_TARGET} cities to start a career.`);
+    error.status = 500;
+    throw error;
+  }
+
+  const selectedCpuCities = [];
+  const selectedCountries = new Set();
+
+  const takeCountry = (countryName) => {
+    if (selectedCpuCities.length >= cpuTarget || selectedCountries.has(countryName)) {
+      return;
+    }
+    const cityPool = citiesByCountry.get(countryName);
+    const picked = pickCityForCountry(countryName, cityPool);
+    if (!picked) {
+      return;
+    }
+    selectedCpuCities.push(picked);
+    selectedCountries.add(countryName);
+  };
+
+  for (const countryName of requiredCountries) {
+    takeCountry(countryName);
+  }
+
+  const remainingCountries = shuffleRows(
+    [...citiesByCountry.keys()].filter((countryName) => !selectedCountries.has(countryName))
+  );
+
+  for (const countryName of remainingCountries) {
+    if (selectedCpuCities.length >= cpuTarget) {
+      break;
+    }
+    takeCountry(countryName);
+  }
+
+  if (selectedCpuCities.length < cpuTarget) {
+    const error = new Error(`Not enough unique countries to build ${cpuTarget} CPU clubs.`);
     error.status = 500;
     throw error;
   }
 
   const allFranchiseIds = [Number(managerFranchise.id)];
 
-  for (const cpuCity of cpuCities.rows) {
+  for (const cpuCity of selectedCpuCities) {
     const cpuFranchise = await createFranchiseRecord(
       {
         cityId: cpuCity.id,

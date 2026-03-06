@@ -82,6 +82,122 @@ router.get(
   })
 );
 
+/* ── All-time player leaderboards ── */
+router.get(
+  '/all-stats',
+  asyncHandler(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 100, 200);
+    const seasonFilter = Number(req.query.seasonId) || null;
+
+    const seasonClause = seasonFilter ? 'AND m.season_id = $1' : '';
+    const params = seasonFilter ? [seasonFilter] : [];
+    const limitParam = seasonFilter ? '$2' : '$1';
+
+    const batting = await pool.query(
+      `SELECT p.id AS player_id,
+              p.first_name,
+              p.last_name,
+              p.role,
+              p.age,
+              f.id AS franchise_id,
+              f.franchise_name,
+              COUNT(*)::int AS matches,
+              COUNT(*) FILTER (WHERE pms.batting_balls > 0)::int AS innings,
+              SUM(pms.batting_runs)::int AS runs,
+              SUM(pms.batting_balls)::int AS balls,
+              SUM(pms.fours)::int AS fours,
+              SUM(pms.sixes)::int AS sixes,
+              MAX(pms.batting_runs)::int AS highest_score,
+              COUNT(*) FILTER (WHERE pms.not_out)::int AS not_outs,
+              COALESCE(ROUND(SUM(pms.batting_runs)::numeric / NULLIF(COUNT(*) FILTER (WHERE NOT pms.not_out AND pms.batting_balls > 0), 0), 2), 0) AS average,
+              COALESCE(ROUND((SUM(pms.batting_runs)::numeric * 100) / NULLIF(SUM(pms.batting_balls), 0), 2), 0) AS strike_rate,
+              ROUND(AVG(pms.player_rating), 2) AS avg_rating
+       FROM player_match_stats pms
+       JOIN matches m ON m.id = pms.match_id
+       JOIN players p ON p.id = pms.player_id
+       JOIN franchises f ON f.id = p.franchise_id
+       WHERE m.status = 'COMPLETED' ${seasonClause}
+       GROUP BY p.id, p.first_name, p.last_name, p.role, p.age, f.id, f.franchise_name
+       HAVING SUM(pms.batting_balls) > 0
+       ORDER BY runs DESC, strike_rate DESC
+       LIMIT ${limitParam}`,
+      [...params, limit]
+    );
+
+    const bowling = await pool.query(
+      `SELECT p.id AS player_id,
+              p.first_name,
+              p.last_name,
+              p.role,
+              p.age,
+              f.id AS franchise_id,
+              f.franchise_name,
+              COUNT(*)::int AS matches,
+              SUM(pms.bowling_balls)::int AS bowling_balls,
+              SUM(pms.bowling_runs)::int AS runs_conceded,
+              SUM(pms.bowling_wickets)::int AS wickets,
+              SUM(pms.maiden_overs)::int AS maidens,
+              MAX(pms.bowling_wickets)::int AS best_wickets,
+              COALESCE(ROUND(SUM(pms.bowling_runs)::numeric / NULLIF(SUM(pms.bowling_wickets), 0), 2), 0) AS average,
+              COALESCE(ROUND((SUM(pms.bowling_runs)::numeric * 6) / NULLIF(SUM(pms.bowling_balls), 0), 2), 0) AS economy,
+              ROUND(AVG(pms.player_rating), 2) AS avg_rating
+       FROM player_match_stats pms
+       JOIN matches m ON m.id = pms.match_id
+       JOIN players p ON p.id = pms.player_id
+       JOIN franchises f ON f.id = p.franchise_id
+       WHERE m.status = 'COMPLETED' ${seasonClause}
+         AND p.role IN ('BOWLER', 'ALL_ROUNDER')
+       GROUP BY p.id, p.first_name, p.last_name, p.role, p.age, f.id, f.franchise_name
+       HAVING SUM(pms.bowling_balls) > 0
+       ORDER BY wickets DESC, economy ASC
+       LIMIT ${limitParam}`,
+      [...params, limit]
+    );
+
+    const allRounders = await pool.query(
+      `SELECT p.id AS player_id,
+              p.first_name,
+              p.last_name,
+              p.role,
+              p.age,
+              f.id AS franchise_id,
+              f.franchise_name,
+              COUNT(*)::int AS matches,
+              SUM(pms.batting_runs)::int AS runs,
+              SUM(pms.batting_balls)::int AS balls,
+              SUM(pms.bowling_wickets)::int AS wickets,
+              SUM(pms.bowling_balls)::int AS bowling_balls,
+              SUM(pms.bowling_runs)::int AS runs_conceded,
+              COALESCE(ROUND((SUM(pms.batting_runs)::numeric * 100) / NULLIF(SUM(pms.batting_balls), 0), 2), 0) AS strike_rate,
+              COALESCE(ROUND((SUM(pms.bowling_runs)::numeric * 6) / NULLIF(SUM(pms.bowling_balls), 0), 2), 0) AS economy,
+              SUM(pms.catches)::int AS catches,
+              ROUND(AVG(pms.player_rating), 2) AS avg_rating
+       FROM player_match_stats pms
+       JOIN matches m ON m.id = pms.match_id
+       JOIN players p ON p.id = pms.player_id
+       JOIN franchises f ON f.id = p.franchise_id
+       WHERE m.status = 'COMPLETED' ${seasonClause}
+         AND p.role = 'ALL_ROUNDER'
+       GROUP BY p.id, p.first_name, p.last_name, p.role, p.age, f.id, f.franchise_name
+       HAVING SUM(pms.batting_balls) > 0 AND SUM(pms.bowling_balls) > 0
+       ORDER BY (SUM(pms.batting_runs) + SUM(pms.bowling_wickets) * 25) DESC
+       LIMIT ${limitParam}`,
+      [...params, limit]
+    );
+
+    const seasons = await pool.query(
+      `SELECT id, season_number, name, status FROM seasons ORDER BY season_number`
+    );
+
+    return res.json({
+      batting: batting.rows,
+      bowling: bowling.rows,
+      allRounders: allRounders.rows,
+      seasons: seasons.rows
+    });
+  })
+);
+
 router.post(
   '/seasons',
   requireAuth,
