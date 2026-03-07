@@ -35,6 +35,7 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
   await dbClient.query("ALTER TABLE season_teams ADD COLUMN IF NOT EXISTS league_position INTEGER");
 
   await dbClient.query("ALTER TABLE matches ADD COLUMN IF NOT EXISTS league_tier INTEGER");
+  await dbClient.query("ALTER TABLE matches ADD COLUMN IF NOT EXISTS ai_match_analysis TEXT");
   await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS lineup_slot INTEGER");
   await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS career_fifties INTEGER DEFAULT 0");
   await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS career_hundreds INTEGER DEFAULT 0");
@@ -55,6 +56,96 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
     `CREATE UNIQUE INDEX IF NOT EXISTS players_franchise_lineup_slot_uidx
      ON players(franchise_id, lineup_slot)
      WHERE lineup_slot IS NOT NULL`
+  );
+
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS match_innings_stats (
+       id BIGSERIAL PRIMARY KEY,
+       match_id BIGINT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+       innings INTEGER NOT NULL CHECK (innings IN (1, 2)),
+       batting_franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+       bowling_franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+       total_runs INTEGER NOT NULL DEFAULT 0,
+       wickets INTEGER NOT NULL DEFAULT 0,
+       balls INTEGER NOT NULL DEFAULT 0,
+       run_rate NUMERIC(7, 2) NOT NULL DEFAULT 0,
+       target_runs INTEGER,
+       required_rate NUMERIC(7, 2),
+       summary_text TEXT,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       UNIQUE (match_id, innings)
+     )`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS match_innings_stats_match_idx
+     ON match_innings_stats(match_id, innings)`
+  );
+
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS match_over_stats (
+       id BIGSERIAL PRIMARY KEY,
+       match_id BIGINT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+       innings INTEGER NOT NULL CHECK (innings IN (1, 2)),
+       over_number INTEGER NOT NULL CHECK (over_number BETWEEN 1 AND 50),
+       runs_in_over INTEGER NOT NULL DEFAULT 0,
+       wickets_in_over INTEGER NOT NULL DEFAULT 0,
+       cumulative_runs INTEGER NOT NULL DEFAULT 0,
+       cumulative_wickets INTEGER NOT NULL DEFAULT 0,
+       required_runs INTEGER,
+       balls_remaining INTEGER,
+       required_rate NUMERIC(7, 2),
+       summary_text TEXT,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       UNIQUE (match_id, innings, over_number)
+     )`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS match_over_stats_match_idx
+     ON match_over_stats(match_id, innings, over_number)`
+  );
+
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS match_fall_of_wickets (
+       id BIGSERIAL PRIMARY KEY,
+       match_id BIGINT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+       innings INTEGER NOT NULL CHECK (innings IN (1, 2)),
+       wicket_no INTEGER NOT NULL CHECK (wicket_no BETWEEN 1 AND 10),
+       score_at_fall INTEGER NOT NULL DEFAULT 0,
+       ball_number INTEGER,
+       over_label TEXT,
+       batter_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL,
+       batter_name TEXT,
+       dismissal_text TEXT,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       UNIQUE (match_id, innings, wicket_no)
+     )`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS match_fow_match_idx
+     ON match_fall_of_wickets(match_id, innings, wicket_no)`
+  );
+
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS match_partnerships (
+       id BIGSERIAL PRIMARY KEY,
+       match_id BIGINT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+       innings INTEGER NOT NULL CHECK (innings IN (1, 2)),
+       partnership_no INTEGER NOT NULL CHECK (partnership_no BETWEEN 1 AND 10),
+       runs INTEGER NOT NULL DEFAULT 0,
+       balls INTEGER NOT NULL DEFAULT 0,
+       batter_one_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL,
+       batter_one_name TEXT,
+       batter_one_runs INTEGER NOT NULL DEFAULT 0,
+       batter_two_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL,
+       batter_two_name TEXT,
+       batter_two_runs INTEGER NOT NULL DEFAULT 0,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       UNIQUE (match_id, innings, partnership_no)
+     )`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS match_partnerships_match_idx
+     ON match_partnerships(match_id, innings, partnership_no)`
   );
 
   await dbClient.query("ALTER TABLE franchises DROP CONSTRAINT IF EXISTS franchises_current_league_tier_check");

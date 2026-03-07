@@ -2958,6 +2958,51 @@ table.stats-table tr:hover td {
   margin-top: 0.3rem;
 }
 
+/* Claim confirmation modal */
+.fp-confirm-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  max-width: 440px;
+  width: 92vw;
+  text-align: center;
+  box-shadow: var(--shadow-xl);
+  animation: fadeInUp 200ms var(--ease-out);
+}
+
+.fp-confirm-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.8rem;
+}
+
+.fp-confirm-text {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 0.4rem;
+}
+
+.fp-confirm-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 1.4rem;
+}
+
+.fp-confirm-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+}
+
+.fp-confirm-actions .sq-btn {
+  flex: 1;
+  min-height: 44px;
+  justify-content: center;
+}
+
 /* ═══════════════════════════════════════════════════════════
    STATS PAGE
    ═══════════════════════════════════════════════════════════ */
@@ -3094,6 +3139,122 @@ table.stats-table tr:hover td {
   font-size: 0.68rem;
   font-weight: 700;
   font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Statbook page ────────────────────────────────────── */
+.sb-page {
+  padding: 1.5rem 2rem;
+  animation: fadeInUp 350ms var(--ease-out);
+}
+
+.sb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.sb-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.sb-subtitle {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.sb-season {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.sb-season select {
+  padding: 0.42rem 0.7rem;
+  font-size: 0.78rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+
+.sb-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 0.9rem;
+}
+
+.sb-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 1rem;
+}
+
+.sb-quick-card h3 {
+  padding: 0.7rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+.sb-quick-card-body {
+  padding: 0.8rem 0.9rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sb-tabs {
+  margin-bottom: 1rem;
+}
+
+.sb-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.sb-subline {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.sb-h2h-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  padding: 0.8rem 0.9rem;
+}
+
+.sb-h2h-controls label {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.sb-h2h-controls select {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+
+.sb-h2h-summary {
+  padding: 0 0.9rem 0.9rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 /* ═══════════════════════════════════════════════════════════
    CHUNK 5: LEAGUE TABLE + FIXTURES/RESULTS
@@ -7647,5 +7808,39 @@ table.stats-table tr:hover td {
     .top-bar {
       padding-left: max(3rem, env(safe-area-inset-left));
     }
+  }
+}
+
+@media (max-width: 1200px) {
+  .sb-metrics-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sb-quick-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .sb-page {
+    padding: 1.1rem 1rem;
+  }
+
+  .sb-section-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sb-h2h-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .sb-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sb-quick-grid {
+    grid-template-columns: 1fr;
   }
 }

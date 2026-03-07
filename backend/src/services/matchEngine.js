@@ -571,6 +571,625 @@ function summarizeOverRuns(inningsPayload = {}) {
   return cumulative;
 }
 
+function safeRunRate(runs, balls) {
+  const numericRuns = Number(runs || 0);
+  const numericBalls = Number(balls || 0);
+  if (!numericBalls) {
+    return 0;
+  }
+  return Number(((numericRuns / numericBalls) * 6).toFixed(2));
+}
+
+function overBallToAbsoluteBall(overNumber, ballNumber) {
+  const over = Math.max(1, Number(overNumber || 1));
+  const ball = Math.max(0, Math.min(6, Number(ballNumber || 0)));
+  return (over - 1) * 6 + ball;
+}
+
+function extractDismissalTextFromCommentary(commentary) {
+  const text = String(commentary || '').trim();
+  if (!text) {
+    return null;
+  }
+
+  const runOut = text.match(/\brun out(?:\s+by\s+([A-Za-z .'-]{2,80}))?/i);
+  if (runOut) {
+    return runOut[1] ? `run out (${runOut[1].trim()})` : 'run out';
+  }
+
+  const caught = text.match(/\bc\s+([A-Za-z .'-]{2,80})\s+b\s+([A-Za-z .'-]{2,80})/i);
+  if (caught) {
+    return `c ${caught[1].trim()} b ${caught[2].trim()}`;
+  }
+
+  const lbw = text.match(/\blbw\b(?:\s+b\s+([A-Za-z .'-]{2,80}))?/i);
+  if (lbw) {
+    return lbw[1] ? `lbw b ${lbw[1].trim()}` : 'lbw';
+  }
+
+  const bowled = text.match(/\bbowled\b(?:\s+([A-Za-z .'-]{2,80}))?/i);
+  if (bowled) {
+    return bowled[1] ? `b ${bowled[1].trim()}` : 'b ?';
+  }
+
+  return 'out';
+}
+
+async function clearDeepMatchData(matchId, dbClient = pool) {
+  await dbClient.query('DELETE FROM match_partnerships WHERE match_id = $1', [matchId]);
+  await dbClient.query('DELETE FROM match_fall_of_wickets WHERE match_id = $1', [matchId]);
+  await dbClient.query('DELETE FROM match_over_stats WHERE match_id = $1', [matchId]);
+  await dbClient.query('DELETE FROM match_innings_stats WHERE match_id = $1', [matchId]);
+}
+
+async function saveInningsSummary({
+  matchId,
+  innings,
+  battingFranchiseId,
+  bowlingFranchiseId,
+  runs,
+  wickets,
+  balls,
+  targetRuns = null,
+  summaryText = null,
+  dbClient = pool
+}) {
+  const requiredRate =
+    targetRuns != null && Number(balls || 0) < 120
+      ? Number((((Math.max(0, Number(targetRuns) - Number(runs || 0)) / Math.max(1, 120 - Number(balls || 0))) * 6).toFixed(2)))
+      : null;
+
+  await dbClient.query(
+    `INSERT INTO match_innings_stats (
+       match_id,
+       innings,
+       batting_franchise_id,
+       bowling_franchise_id,
+       total_runs,
+       wickets,
+       balls,
+       run_rate,
+       target_runs,
+       required_rate,
+       summary_text
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+     )
+     ON CONFLICT (match_id, innings)
+     DO UPDATE SET
+       batting_franchise_id = EXCLUDED.batting_franchise_id,
+       bowling_franchise_id = EXCLUDED.bowling_franchise_id,
+       total_runs = EXCLUDED.total_runs,
+       wickets = EXCLUDED.wickets,
+       balls = EXCLUDED.balls,
+       run_rate = EXCLUDED.run_rate,
+       target_runs = EXCLUDED.target_runs,
+       required_rate = EXCLUDED.required_rate,
+       summary_text = EXCLUDED.summary_text`,
+    [
+      matchId,
+      innings,
+      battingFranchiseId,
+      bowlingFranchiseId,
+      Number(runs || 0),
+      Number(wickets || 0),
+      Number(balls || 0),
+      safeRunRate(runs, balls),
+      targetRuns == null ? null : Number(targetRuns),
+      requiredRate,
+      summaryText
+    ]
+  );
+}
+
+async function persistDeepStatsFromEvents({
+  matchId,
+  firstInnings,
+  secondInnings,
+  dbClient = pool
+}) {
+  await clearDeepMatchData(matchId, dbClient);
+
+  const chaseTarget = Number(firstInnings.runs || 0) + 1;
+  await saveInningsSummary({
+    matchId,
+    innings: 1,
+    battingFranchiseId: firstInnings.battingId,
+    bowlingFranchiseId: firstInnings.bowlingId,
+    runs: firstInnings.runs,
+    wickets: firstInnings.wickets,
+    balls: firstInnings.balls,
+    targetRuns: null,
+    summaryText: null,
+    dbClient
+  });
+  await saveInningsSummary({
+    matchId,
+    innings: 2,
+    battingFranchiseId: secondInnings.battingId,
+    bowlingFranchiseId: secondInnings.bowlingId,
+    runs: secondInnings.runs,
+    wickets: secondInnings.wickets,
+    balls: secondInnings.balls,
+    targetRuns: chaseTarget,
+    summaryText: null,
+    dbClient
+  });
+
+  const overBreakdown = await dbClient.query(
+    `SELECT innings,
+            over_number,
+            COUNT(*)::int AS balls_in_over,
+            COALESCE(SUM(runs + extras), 0)::int AS runs_in_over,
+            COALESCE(SUM(CASE WHEN is_wicket THEN 1 ELSE 0 END), 0)::int AS wickets_in_over
+     FROM match_events
+     WHERE match_id = $1
+     GROUP BY innings, over_number
+     ORDER BY innings, over_number`,
+    [matchId]
+  );
+
+  const inningState = new Map();
+  for (const row of overBreakdown.rows) {
+    const inningsNo = Number(row.innings || 0);
+    const previous = inningState.get(inningsNo) || { runs: 0, wickets: 0, balls: 0 };
+    const cumulativeRuns = previous.runs + Number(row.runs_in_over || 0);
+    const cumulativeWickets = previous.wickets + Number(row.wickets_in_over || 0);
+    const cumulativeBalls = previous.balls + Number(row.balls_in_over || 0);
+    inningState.set(inningsNo, {
+      runs: cumulativeRuns,
+      wickets: cumulativeWickets,
+      balls: cumulativeBalls
+    });
+
+    const targetRuns = inningsNo === 2 ? chaseTarget : null;
+    const ballsRemaining = inningsNo === 2 ? Math.max(0, 120 - cumulativeBalls) : null;
+    const requiredRuns = inningsNo === 2 ? Math.max(0, chaseTarget - cumulativeRuns) : null;
+    const requiredRate =
+      inningsNo === 2 && ballsRemaining
+        ? Number(((requiredRuns / ballsRemaining) * 6).toFixed(2))
+        : null;
+
+    await dbClient.query(
+      `INSERT INTO match_over_stats (
+         match_id,
+         innings,
+         over_number,
+         runs_in_over,
+         wickets_in_over,
+         cumulative_runs,
+         cumulative_wickets,
+         required_runs,
+         balls_remaining,
+         required_rate,
+         summary_text
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+       )
+       ON CONFLICT (match_id, innings, over_number)
+       DO UPDATE SET
+         runs_in_over = EXCLUDED.runs_in_over,
+         wickets_in_over = EXCLUDED.wickets_in_over,
+         cumulative_runs = EXCLUDED.cumulative_runs,
+         cumulative_wickets = EXCLUDED.cumulative_wickets,
+         required_runs = EXCLUDED.required_runs,
+         balls_remaining = EXCLUDED.balls_remaining,
+         required_rate = EXCLUDED.required_rate,
+         summary_text = EXCLUDED.summary_text`,
+      [
+        matchId,
+        inningsNo,
+        Number(row.over_number || 0),
+        Number(row.runs_in_over || 0),
+        Number(row.wickets_in_over || 0),
+        cumulativeRuns,
+        cumulativeWickets,
+        requiredRuns,
+        ballsRemaining,
+        requiredRate,
+        null
+      ]
+    );
+  }
+
+  const detailedEvents = await dbClient.query(
+    `SELECT me.id,
+            me.innings,
+            me.over_number,
+            me.ball_number,
+            me.runs,
+            me.extras,
+            me.is_wicket,
+            me.commentary,
+            me.striker_player_id,
+            p.first_name,
+            p.last_name
+     FROM match_events me
+     LEFT JOIN players p ON p.id = me.striker_player_id
+     WHERE me.match_id = $1
+     ORDER BY me.innings, me.over_number, me.ball_number, me.id`,
+    [matchId]
+  );
+
+  const runningScore = new Map();
+  const wicketCount = new Map();
+  const fowRowsByInnings = new Map();
+
+  for (const event of detailedEvents.rows) {
+    const inningsNo = Number(event.innings || 0);
+    const scoreSoFar = Number(runningScore.get(inningsNo) || 0) + Number(event.runs || 0) + Number(event.extras || 0);
+    runningScore.set(inningsNo, scoreSoFar);
+
+    if (!Number(event.is_wicket)) {
+      continue;
+    }
+
+    const wicketNo = Number(wicketCount.get(inningsNo) || 0) + 1;
+    wicketCount.set(inningsNo, wicketNo);
+
+    const batterName = `${event.first_name || ''} ${event.last_name || ''}`.trim() || null;
+    const fowRow = {
+      wicketNo,
+      scoreAtFall: scoreSoFar,
+      ballNumber: overBallToAbsoluteBall(event.over_number, event.ball_number),
+      overLabel: `${Number(event.over_number || 0)}.${Number(event.ball_number || 0)}`,
+      batterPlayerId: event.striker_player_id ? Number(event.striker_player_id) : null,
+      batterName,
+      dismissalText: extractDismissalTextFromCommentary(event.commentary)
+    };
+
+    const existing = fowRowsByInnings.get(inningsNo) || [];
+    existing.push(fowRow);
+    fowRowsByInnings.set(inningsNo, existing);
+
+    await dbClient.query(
+      `INSERT INTO match_fall_of_wickets (
+         match_id,
+         innings,
+         wicket_no,
+         score_at_fall,
+         ball_number,
+         over_label,
+         batter_player_id,
+         batter_name,
+         dismissal_text
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9
+       )
+       ON CONFLICT (match_id, innings, wicket_no)
+       DO UPDATE SET
+         score_at_fall = EXCLUDED.score_at_fall,
+         ball_number = EXCLUDED.ball_number,
+         over_label = EXCLUDED.over_label,
+         batter_player_id = EXCLUDED.batter_player_id,
+         batter_name = EXCLUDED.batter_name,
+         dismissal_text = EXCLUDED.dismissal_text`,
+      [
+        matchId,
+        inningsNo,
+        wicketNo,
+        fowRow.scoreAtFall,
+        fowRow.ballNumber,
+        fowRow.overLabel,
+        fowRow.batterPlayerId,
+        fowRow.batterName,
+        fowRow.dismissalText
+      ]
+    );
+  }
+
+  const inningsTotals = new Map([
+    [1, { runs: Number(firstInnings.runs || 0), balls: Number(firstInnings.balls || 0) }],
+    [2, { runs: Number(secondInnings.runs || 0), balls: Number(secondInnings.balls || 0) }]
+  ]);
+
+  for (const [inningsNo, totals] of inningsTotals.entries()) {
+    const wickets = [...(fowRowsByInnings.get(inningsNo) || [])].sort((a, b) => a.wicketNo - b.wicketNo);
+    let prevRuns = 0;
+    let prevBall = 0;
+    let partnershipNo = 1;
+
+    for (const wicket of wickets) {
+      const runs = Math.max(0, Number(wicket.scoreAtFall || 0) - prevRuns);
+      const balls = Math.max(0, Number(wicket.ballNumber || 0) - prevBall);
+      await dbClient.query(
+        `INSERT INTO match_partnerships (
+           match_id,
+           innings,
+           partnership_no,
+           runs,
+           balls,
+           batter_one_player_id,
+           batter_one_name,
+           batter_one_runs,
+           batter_two_player_id,
+           batter_two_name,
+           batter_two_runs
+         ) VALUES (
+           $1, $2, $3, $4, $5, NULL, NULL, 0, NULL, NULL, 0
+         )
+         ON CONFLICT (match_id, innings, partnership_no)
+         DO UPDATE SET
+           runs = EXCLUDED.runs,
+           balls = EXCLUDED.balls`,
+        [matchId, inningsNo, partnershipNo, runs, balls]
+      );
+
+      partnershipNo += 1;
+      prevRuns = Number(wicket.scoreAtFall || 0);
+      prevBall = Number(wicket.ballNumber || 0);
+    }
+
+    if (partnershipNo <= 10 && Number(totals.runs || 0) > prevRuns) {
+      const runs = Math.max(0, Number(totals.runs || 0) - prevRuns);
+      const balls = Math.max(0, Number(totals.balls || 0) - prevBall);
+      await dbClient.query(
+        `INSERT INTO match_partnerships (
+           match_id,
+           innings,
+           partnership_no,
+           runs,
+           balls,
+           batter_one_player_id,
+           batter_one_name,
+           batter_one_runs,
+           batter_two_player_id,
+           batter_two_name,
+           batter_two_runs
+         ) VALUES (
+           $1, $2, $3, $4, $5, NULL, NULL, 0, NULL, NULL, 0
+         )
+         ON CONFLICT (match_id, innings, partnership_no)
+         DO UPDATE SET
+           runs = EXCLUDED.runs,
+           balls = EXCLUDED.balls`,
+        [matchId, inningsNo, partnershipNo, runs, balls]
+      );
+    }
+  }
+}
+
+function buildOverSummaryMap(commentaryLines = []) {
+  const map = new Map();
+  for (const line of commentaryLines) {
+    const text = String(line || '').trim();
+    if (!text.startsWith('OVER_SUMMARY:')) {
+      continue;
+    }
+    const match = text.match(/^OVER_SUMMARY:\s*Over\s+(\d+):\s*(.+)$/i);
+    if (!match) {
+      continue;
+    }
+    map.set(Number(match[1] || 0), String(match[2] || '').trim());
+  }
+  return map;
+}
+
+async function persistDeepStatsFromApi({
+  matchId,
+  apiResult,
+  firstInnings,
+  secondInnings,
+  homeTeam,
+  awayTeam,
+  homeFranchiseId,
+  awayFranchiseId,
+  dbClient = pool
+}) {
+  await clearDeepMatchData(matchId, dbClient);
+
+  const firstPayload = apiResult?.first_innings || {};
+  const secondPayload = apiResult?.second_innings || {};
+  const chaseTarget = Number(firstInnings.runs || 0) + 1;
+
+  await saveInningsSummary({
+    matchId,
+    innings: 1,
+    battingFranchiseId: firstInnings.battingId,
+    bowlingFranchiseId: firstInnings.bowlingId,
+    runs: firstInnings.runs,
+    wickets: firstInnings.wickets,
+    balls: firstInnings.balls,
+    targetRuns: null,
+    summaryText: String(firstPayload.ai_innings_summary || '').trim() || null,
+    dbClient
+  });
+  await saveInningsSummary({
+    matchId,
+    innings: 2,
+    battingFranchiseId: secondInnings.battingId,
+    bowlingFranchiseId: secondInnings.bowlingId,
+    runs: secondInnings.runs,
+    wickets: secondInnings.wickets,
+    balls: secondInnings.balls,
+    targetRuns: chaseTarget,
+    summaryText: String(secondPayload.ai_innings_summary || '').trim() || null,
+    dbClient
+  });
+
+  const inningPayloads = [
+    { inningsNo: 1, payload: firstPayload, battingId: firstInnings.battingId, battingTeam: firstInnings.battingId === Number(homeFranchiseId) ? homeTeam : awayTeam },
+    { inningsNo: 2, payload: secondPayload, battingId: secondInnings.battingId, battingTeam: secondInnings.battingId === Number(homeFranchiseId) ? homeTeam : awayTeam }
+  ];
+
+  for (const inning of inningPayloads) {
+    const overScores = Array.isArray(inning.payload?.over_scores) ? inning.payload.over_scores : [];
+    const overSummaryMap = buildOverSummaryMap(Array.isArray(inning.payload?.commentary) ? inning.payload.commentary : []);
+    let prevRuns = 0;
+    let cumulativeWickets = 0;
+    let cumulativeBalls = 0;
+
+    for (const over of overScores) {
+      const overNo = Number(over?.over || 0);
+      if (!overNo) {
+        continue;
+      }
+
+      const cumulativeRuns =
+        Number.isFinite(Number(over?.cumulative))
+          ? Number(over.cumulative)
+          : prevRuns + Number(over?.runs || 0);
+      const runsInOver = Number.isFinite(Number(over?.runs))
+        ? Number(over.runs)
+        : Math.max(0, cumulativeRuns - prevRuns);
+      prevRuns = cumulativeRuns;
+
+      const wicketsInOver = Number(over?.wickets || 0);
+      cumulativeWickets += wicketsInOver;
+      cumulativeBalls = Math.min(120, overNo * 6);
+
+      const targetRuns = inning.inningsNo === 2 ? chaseTarget : null;
+      const ballsRemaining = inning.inningsNo === 2 ? Math.max(0, 120 - cumulativeBalls) : null;
+      const requiredRuns = inning.inningsNo === 2 ? Math.max(0, chaseTarget - cumulativeRuns) : null;
+      const requiredRate =
+        inning.inningsNo === 2 && ballsRemaining
+          ? Number(((requiredRuns / ballsRemaining) * 6).toFixed(2))
+          : null;
+
+      await dbClient.query(
+        `INSERT INTO match_over_stats (
+           match_id,
+           innings,
+           over_number,
+           runs_in_over,
+           wickets_in_over,
+           cumulative_runs,
+           cumulative_wickets,
+           required_runs,
+           balls_remaining,
+           required_rate,
+           summary_text
+         ) VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+         )
+         ON CONFLICT (match_id, innings, over_number)
+         DO UPDATE SET
+           runs_in_over = EXCLUDED.runs_in_over,
+           wickets_in_over = EXCLUDED.wickets_in_over,
+           cumulative_runs = EXCLUDED.cumulative_runs,
+           cumulative_wickets = EXCLUDED.cumulative_wickets,
+           required_runs = EXCLUDED.required_runs,
+           balls_remaining = EXCLUDED.balls_remaining,
+           required_rate = EXCLUDED.required_rate,
+           summary_text = EXCLUDED.summary_text`,
+        [
+          matchId,
+          inning.inningsNo,
+          overNo,
+          runsInOver,
+          wicketsInOver,
+          cumulativeRuns,
+          cumulativeWickets,
+          requiredRuns,
+          ballsRemaining,
+          requiredRate,
+          overSummaryMap.get(overNo) || null
+        ]
+      );
+    }
+
+    const fow = Array.isArray(inning.payload?.fall_of_wickets) ? inning.payload.fall_of_wickets : [];
+    const battingLookup = buildPlayerNameLookup(inning.battingTeam);
+    for (let i = 0; i < fow.length; i += 1) {
+      const row = fow[i] || {};
+      const wicketNo = Number(row.wicket || i + 1);
+      const batterName = String(row.batsman || '').trim() || null;
+      const batterPlayer = batterName ? resolvePlayerByName(batterName, inning.battingTeam, battingLookup) : null;
+      const absoluteBall = toInt(row.ball, overBallToAbsoluteBall(String(row.ov || '').split('.')[0], String(row.ov || '').split('.')[1]));
+      const overLabel = String(row.ov || '').trim() || null;
+      const scoreAtFall = toInt(row.score, 0);
+
+      await dbClient.query(
+        `INSERT INTO match_fall_of_wickets (
+           match_id,
+           innings,
+           wicket_no,
+           score_at_fall,
+           ball_number,
+           over_label,
+           batter_player_id,
+           batter_name,
+           dismissal_text
+         ) VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9
+         )
+         ON CONFLICT (match_id, innings, wicket_no)
+         DO UPDATE SET
+           score_at_fall = EXCLUDED.score_at_fall,
+           ball_number = EXCLUDED.ball_number,
+           over_label = EXCLUDED.over_label,
+           batter_player_id = EXCLUDED.batter_player_id,
+           batter_name = EXCLUDED.batter_name,
+           dismissal_text = EXCLUDED.dismissal_text`,
+        [
+          matchId,
+          inning.inningsNo,
+          wicketNo,
+          scoreAtFall,
+          absoluteBall || null,
+          overLabel,
+          batterPlayer ? Number(batterPlayer.id) : null,
+          batterName,
+          null
+        ]
+      );
+    }
+
+    const partnerships = Array.isArray(inning.payload?.partnerships) ? inning.payload.partnerships : [];
+    for (let i = 0; i < partnerships.length; i += 1) {
+      const row = partnerships[i] || {};
+      const batters = row.batsmen && typeof row.batsmen === 'object' ? Object.entries(row.batsmen) : [];
+      const [b1NameRaw, b1RunsRaw] = batters[0] || [null, 0];
+      const [b2NameRaw, b2RunsRaw] = batters[1] || [null, 0];
+      const b1Name = String(b1NameRaw || '').trim() || null;
+      const b2Name = String(b2NameRaw || '').trim() || null;
+      const b1 = b1Name ? resolvePlayerByName(b1Name, inning.battingTeam, battingLookup) : null;
+      const b2 = b2Name ? resolvePlayerByName(b2Name, inning.battingTeam, battingLookup) : null;
+
+      await dbClient.query(
+        `INSERT INTO match_partnerships (
+           match_id,
+           innings,
+           partnership_no,
+           runs,
+           balls,
+           batter_one_player_id,
+           batter_one_name,
+           batter_one_runs,
+           batter_two_player_id,
+           batter_two_name,
+           batter_two_runs
+         ) VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+         )
+         ON CONFLICT (match_id, innings, partnership_no)
+         DO UPDATE SET
+           runs = EXCLUDED.runs,
+           balls = EXCLUDED.balls,
+           batter_one_player_id = EXCLUDED.batter_one_player_id,
+           batter_one_name = EXCLUDED.batter_one_name,
+           batter_one_runs = EXCLUDED.batter_one_runs,
+           batter_two_player_id = EXCLUDED.batter_two_player_id,
+           batter_two_name = EXCLUDED.batter_two_name,
+           batter_two_runs = EXCLUDED.batter_two_runs`,
+        [
+          matchId,
+          inning.inningsNo,
+          i + 1,
+          toInt(row.runs, 0),
+          toInt(row.balls, 0),
+          b1 ? Number(b1.id) : null,
+          b1Name,
+          toInt(b1RunsRaw, 0),
+          b2 ? Number(b2.id) : null,
+          b2Name,
+          toInt(b2RunsRaw, 0)
+        ]
+      );
+    }
+  }
+}
+
 function buildInningsFromApiPayload({
   inningsNo,
   inningsPayload,
@@ -1746,6 +2365,7 @@ export async function simulateMatchLive(matchId, options = {}) {
 
     await pool.query('DELETE FROM match_events WHERE match_id = $1', [match.id]);
     await pool.query('DELETE FROM player_match_stats WHERE match_id = $1', [match.id]);
+    await clearDeepMatchData(match.id, pool);
 
     await pool.query(`UPDATE matches SET status = 'LIVE' WHERE id = $1`, [match.id]);
     const matchConditions = buildMatchConditions();
@@ -1818,6 +2438,7 @@ export async function simulateMatchLive(matchId, options = {}) {
     });
 
     firstInnings.battingId = firstBattingId;
+    firstInnings.bowlingId = firstBowlingId;
 
     broadcast(
       'match:innings_break',
@@ -1855,6 +2476,7 @@ export async function simulateMatchLive(matchId, options = {}) {
     });
 
     secondInnings.battingId = secondBattingId;
+    secondInnings.bowlingId = secondBowlingId;
 
     let winnerId = null;
     if (firstInnings.runs > secondInnings.runs) {
@@ -1875,6 +2497,13 @@ export async function simulateMatchLive(matchId, options = {}) {
 
     const summary = matchSummary(match.home_name, match.away_name, firstInnings, secondInnings, winnerId, homeFranchiseId, awayFranchiseId);
 
+    await persistDeepStatsFromEvents({
+      matchId: match.id,
+      firstInnings,
+      secondInnings,
+      dbClient: pool
+    });
+
     await pool.query(
       `UPDATE matches
        SET status = 'COMPLETED',
@@ -1887,7 +2516,8 @@ export async function simulateMatchLive(matchId, options = {}) {
            away_score = $8,
            away_wickets = $9,
            away_balls = $10,
-           result_summary = $11
+           result_summary = $11,
+           ai_match_analysis = NULL
        WHERE id = $1`,
       [match.id, tossWinnerId, tossDecision, winnerId, homeScore, homeWickets, homeBalls, awayScore, awayWickets, awayBalls, summary]
     );
@@ -2032,6 +2662,38 @@ export async function getMatchScorecard(matchId, dbClient = pool) {
     [matchId]
   );
 
+  const inningsStats = await dbClient.query(
+    `SELECT mis.*
+     FROM match_innings_stats mis
+     WHERE mis.match_id = $1
+     ORDER BY mis.innings`,
+    [matchId]
+  );
+
+  const overStats = await dbClient.query(
+    `SELECT mos.*
+     FROM match_over_stats mos
+     WHERE mos.match_id = $1
+     ORDER BY mos.innings, mos.over_number`,
+    [matchId]
+  );
+
+  const fallOfWickets = await dbClient.query(
+    `SELECT fow.*
+     FROM match_fall_of_wickets fow
+     WHERE fow.match_id = $1
+     ORDER BY fow.innings, fow.wicket_no`,
+    [matchId]
+  );
+
+  const partnerships = await dbClient.query(
+    `SELECT mp.*
+     FROM match_partnerships mp
+     WHERE mp.match_id = $1
+     ORDER BY mp.innings, mp.partnership_no`,
+    [matchId]
+  );
+
   const scorecard = {
     match: {
       ...match.rows[0],
@@ -2041,7 +2703,11 @@ export async function getMatchScorecard(matchId, dbClient = pool) {
     },
     stats: stats.rows,
     events: events.rows,
-    worm: wormByOver.rows
+    worm: wormByOver.rows,
+    innings_stats: inningsStats.rows,
+    over_stats: overStats.rows,
+    fall_of_wickets: fallOfWickets.rows,
+    partnerships: partnerships.rows
   };
 
   return scorecard;
@@ -2186,6 +2852,7 @@ async function simulateMatchUsingStreetMatchApi(matchId, options = {}) {
 
     await pool.query('DELETE FROM match_events WHERE match_id = $1', [match.id]);
     await pool.query('DELETE FROM player_match_stats WHERE match_id = $1', [match.id]);
+    await clearDeepMatchData(match.id, pool);
     await pool.query(
       `UPDATE matches
        SET status = 'LIVE',
@@ -2246,6 +2913,18 @@ async function simulateMatchUsingStreetMatchApi(matchId, options = {}) {
       );
     }
 
+    await persistDeepStatsFromApi({
+      matchId: match.id,
+      apiResult,
+      firstInnings,
+      secondInnings,
+      homeTeam,
+      awayTeam,
+      homeFranchiseId,
+      awayFranchiseId,
+      dbClient: pool
+    });
+
     await pool.query(
       `UPDATE matches
        SET status = 'COMPLETED',
@@ -2258,9 +2937,23 @@ async function simulateMatchUsingStreetMatchApi(matchId, options = {}) {
            away_score = $8,
            away_wickets = $9,
            away_balls = $10,
-           result_summary = $11
+           result_summary = $11,
+           ai_match_analysis = $12
        WHERE id = $1`,
-      [match.id, tossWinnerId, tossDecision, winnerId, homeScore, homeWickets, homeBalls, awayScore, awayWickets, awayBalls, resultSummary]
+      [
+        match.id,
+        tossWinnerId,
+        tossDecision,
+        winnerId,
+        homeScore,
+        homeWickets,
+        homeBalls,
+        awayScore,
+        awayWickets,
+        awayBalls,
+        resultSummary,
+        String(apiResult?.ai_match_analysis || '').trim() || null
+      ]
     );
 
     await persistScorecard({

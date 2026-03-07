@@ -16,6 +16,7 @@ export const INTERNATIONAL_COUNTRIES = [
   'Bermuda',
   'Bhutan',
   'Botswana',
+  'Bonaire',
   'Brazil',
   'Bulgaria',
   'Cambodia',
@@ -39,6 +40,7 @@ export const INTERNATIONAL_COUNTRIES = [
   'Germany',
   'Ghana',
   'Gibraltar',
+  'Guernsey',
   'Greece',
   'Hong Kong',
   'Hungary',
@@ -47,8 +49,10 @@ export const INTERNATIONAL_COUNTRIES = [
   'Iran',
   'Ireland',
   'Israel',
+  'Isle of Man',
   'Italy',
   'Japan',
+  'Jersey',
   'Kenya',
   'Kuwait',
   'Lesotho',
@@ -110,4 +114,3 @@ export function normalizeCareerMode(value) {
 export function isInternationalMode(value) {
   return normalizeCareerMode(value) === CAREER_MODES.INTERNATIONAL;
 }
-

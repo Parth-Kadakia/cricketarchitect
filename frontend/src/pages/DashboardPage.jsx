@@ -47,6 +47,7 @@ export default function DashboardPage() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetTyped, setResetTyped] = useState('');
   const [resetting, setResetting] = useState(false);
+  const [pendingClaim, setPendingClaim] = useState(null); // { type: 'CLUB'|'INTERNATIONAL', cityId?, cityName?, country? }
 
   async function loadData() {
     setError('');
@@ -132,24 +133,33 @@ export default function DashboardPage() {
     return () => { window.clearTimeout(timer); };
   }, [simulationProgress]);
 
-  /* ── City claim ── */
-  async function claimCity(cityId, cityName) {
-    try {
-      setError('');
-      await api.franchise.claim(token, { cityId, franchiseName: `${cityName} Rise`, mode: 'CLUB' });
-      await refreshProfile();
-      await loadData();
-    } catch (e) { setError(e.message); }
+  /* ── City / country claim ── */
+  function requestClaimCity(cityId, cityName) {
+    setPendingClaim({ type: 'CLUB', cityId, cityName });
   }
 
-  async function claimInternationalCountry(country) {
+  function requestClaimCountry(country) {
+    setPendingClaim({ type: 'INTERNATIONAL', country });
+  }
+
+  async function confirmClaim() {
+    if (!pendingClaim) return;
     try {
       setError('');
-      await api.franchise.claim(token, {
-        mode: 'INTERNATIONAL',
-        country,
-        franchiseName: country
-      });
+      if (pendingClaim.type === 'INTERNATIONAL') {
+        await api.franchise.claim(token, {
+          mode: 'INTERNATIONAL',
+          country: pendingClaim.country,
+          franchiseName: pendingClaim.country
+        });
+      } else {
+        await api.franchise.claim(token, {
+          cityId: pendingClaim.cityId,
+          franchiseName: `${pendingClaim.cityName} Rise`,
+          mode: 'CLUB'
+        });
+      }
+      setPendingClaim(null);
       await refreshProfile();
       await loadData();
     } catch (e) { setError(e.message); }
@@ -298,6 +308,7 @@ export default function DashboardPage() {
   if (!franchise) {
     const isInternationalCareer = careerMode === 'INTERNATIONAL';
     const pickerStep = selectedCountry ? 2 : 1;
+    const internationalTeamCount = internationalCountries.length || 100;
     return (
       <div className="db-page fp-page">
         {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
@@ -339,7 +350,7 @@ export default function DashboardPage() {
               : 'Choose a city, build a franchise, and rise through the global cricket pyramid.'}
             <br />
             {isInternationalCareer
-              ? <>100 national teams, 10 divisions, top-2 promotion and bottom-2 relegation.</>
+              ? <>{internationalTeamCount} national teams, 10 divisions, top-2 promotion and bottom-2 relegation.</>
               : <>Every club begins at <strong className="fp-price-tag">$100.00</strong>.</>}
           </p>
           <div className="fp-hero-stats">
@@ -393,7 +404,7 @@ export default function DashboardPage() {
                   onClick={() => {
                     setSelectedCountry(item.country);
                     if (item.available) {
-                      claimInternationalCountry(item.country);
+                      requestClaimCountry(item.country);
                     }
                   }}
                   disabled={!item.available}
@@ -507,7 +518,7 @@ export default function DashboardPage() {
                         key={city.id}
                         type="button"
                         className="fp-city-card"
-                        onClick={() => claimCity(city.id, city.name)}
+                        onClick={() => requestClaimCity(city.id, city.name)}
                       >
                         <span className="fp-city-name">{city.name}</span>
                         <span className="fp-city-country">{city.country}</span>
@@ -551,6 +562,27 @@ export default function DashboardPage() {
               </div>
             </div>
           </>
+        )}
+
+        {/* ── Confirmation modal ── */}
+        {pendingClaim && (
+          <div className="sq-modal-backdrop" onClick={() => setPendingClaim(null)}>
+            <div className="fp-confirm-modal" onClick={(e) => e.stopPropagation()}>
+              <h3 className="fp-confirm-title">Confirm Selection</h3>
+              <p className="fp-confirm-text">
+                {pendingClaim.type === 'INTERNATIONAL' ? (
+                  <>You are about to start an <strong>International Career</strong> managing <strong>{pendingClaim.country}</strong>.</>
+                ) : (
+                  <>You are about to start a <strong>Club T20 Career</strong> in <strong>{pendingClaim.cityName}, {selectedCountry}</strong>.</>
+                )}
+              </p>
+              <p className="fp-confirm-sub">This cannot be undone without resetting your save.</p>
+              <div className="fp-confirm-actions">
+                <button type="button" className="sq-btn" onClick={() => setPendingClaim(null)}>← Go Back</button>
+                <button type="button" className="sq-btn sq-btn--primary" onClick={confirmClaim}>Confirm & Start →</button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     );

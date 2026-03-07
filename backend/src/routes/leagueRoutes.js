@@ -399,6 +399,10 @@ router.post(
 
     await pool.query('DELETE FROM match_events WHERE match_id = $1', [matchId]);
     await pool.query('DELETE FROM player_match_stats WHERE match_id = $1', [matchId]);
+    await pool.query('DELETE FROM match_partnerships WHERE match_id = $1', [matchId]);
+    await pool.query('DELETE FROM match_fall_of_wickets WHERE match_id = $1', [matchId]);
+    await pool.query('DELETE FROM match_over_stats WHERE match_id = $1', [matchId]);
+    await pool.query('DELETE FROM match_innings_stats WHERE match_id = $1', [matchId]);
     await pool.query(
       `UPDATE matches
        SET status = 'SCHEDULED',
@@ -410,6 +414,7 @@ router.post(
            away_balls = NULL,
            winner_franchise_id = NULL,
            result_summary = NULL,
+           ai_match_analysis = NULL,
            player_of_match_id = NULL
        WHERE id = $1`,
       [matchId]

@@ -7,6 +7,10 @@ DROP TABLE IF EXISTS valuations CASCADE;
 DROP TABLE IF EXISTS transactions CASCADE;
 DROP TABLE IF EXISTS player_growth_logs CASCADE;
 DROP TABLE IF EXISTS player_match_stats CASCADE;
+DROP TABLE IF EXISTS match_partnerships CASCADE;
+DROP TABLE IF EXISTS match_fall_of_wickets CASCADE;
+DROP TABLE IF EXISTS match_over_stats CASCADE;
+DROP TABLE IF EXISTS match_innings_stats CASCADE;
 DROP TABLE IF EXISTS match_events CASCADE;
 DROP TABLE IF EXISTS matches CASCADE;
 DROP TABLE IF EXISTS season_teams CASCADE;
@@ -194,12 +198,87 @@ CREATE TABLE matches (
   away_wickets INTEGER,
   away_balls INTEGER,
   result_summary TEXT,
+  ai_match_analysis TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX matches_season_idx ON matches(season_id, round_no);
 CREATE INDEX matches_status_idx ON matches(status);
+
+CREATE TABLE match_innings_stats (
+  id BIGSERIAL PRIMARY KEY,
+  match_id BIGINT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  innings INTEGER NOT NULL CHECK (innings IN (1, 2)),
+  batting_franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+  bowling_franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+  total_runs INTEGER NOT NULL DEFAULT 0,
+  wickets INTEGER NOT NULL DEFAULT 0,
+  balls INTEGER NOT NULL DEFAULT 0,
+  run_rate NUMERIC(7, 2) NOT NULL DEFAULT 0,
+  target_runs INTEGER,
+  required_rate NUMERIC(7, 2),
+  summary_text TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (match_id, innings)
+);
+
+CREATE INDEX match_innings_stats_match_idx ON match_innings_stats(match_id, innings);
+
+CREATE TABLE match_over_stats (
+  id BIGSERIAL PRIMARY KEY,
+  match_id BIGINT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  innings INTEGER NOT NULL CHECK (innings IN (1, 2)),
+  over_number INTEGER NOT NULL CHECK (over_number BETWEEN 1 AND 50),
+  runs_in_over INTEGER NOT NULL DEFAULT 0,
+  wickets_in_over INTEGER NOT NULL DEFAULT 0,
+  cumulative_runs INTEGER NOT NULL DEFAULT 0,
+  cumulative_wickets INTEGER NOT NULL DEFAULT 0,
+  required_runs INTEGER,
+  balls_remaining INTEGER,
+  required_rate NUMERIC(7, 2),
+  summary_text TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (match_id, innings, over_number)
+);
+
+CREATE INDEX match_over_stats_match_idx ON match_over_stats(match_id, innings, over_number);
+
+CREATE TABLE match_fall_of_wickets (
+  id BIGSERIAL PRIMARY KEY,
+  match_id BIGINT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  innings INTEGER NOT NULL CHECK (innings IN (1, 2)),
+  wicket_no INTEGER NOT NULL CHECK (wicket_no BETWEEN 1 AND 10),
+  score_at_fall INTEGER NOT NULL DEFAULT 0,
+  ball_number INTEGER,
+  over_label TEXT,
+  batter_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL,
+  batter_name TEXT,
+  dismissal_text TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (match_id, innings, wicket_no)
+);
+
+CREATE INDEX match_fow_match_idx ON match_fall_of_wickets(match_id, innings, wicket_no);
+
+CREATE TABLE match_partnerships (
+  id BIGSERIAL PRIMARY KEY,
+  match_id BIGINT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  innings INTEGER NOT NULL CHECK (innings IN (1, 2)),
+  partnership_no INTEGER NOT NULL CHECK (partnership_no BETWEEN 1 AND 10),
+  runs INTEGER NOT NULL DEFAULT 0,
+  balls INTEGER NOT NULL DEFAULT 0,
+  batter_one_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL,
+  batter_one_name TEXT,
+  batter_one_runs INTEGER NOT NULL DEFAULT 0,
+  batter_two_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL,
+  batter_two_name TEXT,
+  batter_two_runs INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (match_id, innings, partnership_no)
+);
+
+CREATE INDEX match_partnerships_match_idx ON match_partnerships(match_id, innings, partnership_no);
 
 CREATE TABLE match_events (
   id BIGSERIAL PRIMARY KEY,

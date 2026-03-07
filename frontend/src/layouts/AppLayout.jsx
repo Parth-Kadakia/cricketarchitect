@@ -86,6 +86,7 @@ function getNavItems(mode) {
     { to: '/fixtures', label: 'Season Center', icon: 'fixtures' },
     { to: '/league', label: 'Table & Seasons', icon: 'league' },
     { to: '/stats', label: 'Rankings', icon: 'stats' },
+    { to: '/statbook', label: 'Statbook', icon: 'stats' },
     { to: '/squad', label: 'Player Cards', icon: 'squad' },
     { to: '/youth', label: 'Youth Academy', icon: 'youth' },
     ...(isInternational ? [] : [{ to: '/transfer-market', label: 'Transfers', icon: 'transfer' }]),

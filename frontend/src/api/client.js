@@ -220,6 +220,29 @@ export const api = {
     allStats: (seasonId = null) =>
       request(`/league/all-stats${seasonId ? `?seasonId=${seasonId}` : ''}`)
   },
+  statbook: {
+    overview: (seasonId = null) =>
+      request(`/statbook/overview${seasonId ? `?seasonId=${seasonId}` : ''}`),
+    playerRecords: (seasonId = null, limit = 20) =>
+      request(`/statbook/player-records?${[seasonId ? `seasonId=${seasonId}` : null, `limit=${limit}`].filter(Boolean).join('&')}`),
+    teamRecords: (seasonId = null, limit = 20) =>
+      request(`/statbook/team-records?${[seasonId ? `seasonId=${seasonId}` : null, `limit=${limit}`].filter(Boolean).join('&')}`),
+    headToHead: (teamAId, teamBId, seasonId = null, limit = 20) =>
+      request(`/statbook/head-to-head?${[
+        `teamAId=${teamAId}`,
+        `teamBId=${teamBId}`,
+        seasonId ? `seasonId=${seasonId}` : null,
+        `limit=${limit}`
+      ].filter(Boolean).join('&')}`),
+    matchArchive: ({ seasonId = null, teamId = null, limit = 30, offset = 0 } = {}) =>
+      request(`/statbook/match-archive?${[
+        seasonId ? `seasonId=${seasonId}` : null,
+        teamId ? `teamId=${teamId}` : null,
+        `limit=${limit}`,
+        `offset=${offset}`
+      ].filter(Boolean).join('&')}`),
+    matchDetail: (matchId) => request(`/statbook/match-archive/${matchId}`)
+  },
   marketplace: {
     overview: () => request('/marketplace'),
     cities: (q = '', limit = 600) => request(`/marketplace/cities?q=${encodeURIComponent(q)}&limit=${limit}`),
