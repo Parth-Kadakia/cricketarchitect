@@ -12,6 +12,12 @@ import {
 import { simulateBallViaStreetApi, simulateMatchViaStreetApi, simulateTossViaStreetApi } from './streetCricketService.js';
 import { calculateFranchiseValuation } from './valuationService.js';
 import { ensureFranchiseLineup } from './lineupService.js';
+import {
+  finalizeGlobalManagerSeasonLifecycle,
+  finalizeManagerSeasonEvaluations,
+  processCpuManagerLifecycleForRound,
+  processManagerAfterMatch
+} from './managerCareerService.js';
 
 const activeSimulations = new Set();
 const MATCH_WIN_CASH_REWARD = 10;
@@ -31,6 +37,45 @@ async function maybeEmitSimulationProgress(handler, payload) {
   } catch {
     // Progress callbacks are best-effort and must never break simulation flow.
   }
+}
+
+async function maybeRunCpuManagerLifecycleForRound(seasonId, roundNo, dbClient = pool) {
+  const safeSeasonId = Number(seasonId || 0);
+  const safeRoundNo = Number(roundNo || 0);
+  if (!safeSeasonId || !safeRoundNo) {
+    return null;
+  }
+
+  const roundScope = await dbClient.query(
+    `SELECT COUNT(*)::int AS total_regular,
+            COUNT(*) FILTER (WHERE status <> 'COMPLETED')::int AS pending_regular
+     FROM matches
+     WHERE season_id = $1
+       AND stage = 'REGULAR'
+       AND round_no = $2`,
+    [safeSeasonId, safeRoundNo]
+  );
+
+  const totalRegular = Number(roundScope.rows[0]?.total_regular || 0);
+  const pendingRegular = Number(roundScope.rows[0]?.pending_regular || 0);
+  if (!totalRegular || pendingRegular > 0) {
+    return null;
+  }
+
+  return processCpuManagerLifecycleForRound({
+    seasonId: safeSeasonId,
+    roundNo: safeRoundNo,
+    dbClient
+  });
+}
+
+async function finalizeManagerSeasonLifecycle(seasonId, dbClient = pool) {
+  const safeSeasonId = Number(seasonId || 0);
+  if (!safeSeasonId) {
+    return null;
+  }
+  await finalizeManagerSeasonEvaluations(safeSeasonId, dbClient);
+  return finalizeGlobalManagerSeasonLifecycle(safeSeasonId, dbClient);
 }
 
 function sortByBatting(players) {
@@ -2561,8 +2606,19 @@ export async function simulateMatchLive(matchId, options = {}) {
     }
 
     await updateFranchiseResults(homeFranchiseId, awayFranchiseId, winnerId, pool);
+    await processManagerAfterMatch({
+      seasonId: Number(match.season_id),
+      roundNo: Number(match.round_no || 0),
+      homeFranchiseId,
+      awayFranchiseId,
+      winnerFranchiseId: winnerId,
+      dbClient: pool
+    });
 
     const table = await updateSeasonTableWithMatch(match.id, pool);
+    if (String(match.stage || '').toUpperCase() === 'REGULAR') {
+      await maybeRunCpuManagerLifecycleForRound(Number(match.season_id), Number(match.round_no || 0), pool);
+    }
     let seasonState = { state: 'DEFERRED' };
     if (!deferSeasonProgression) {
       seasonState = await progressSeasonStructure(match.season_id, pool);
@@ -2571,8 +2627,11 @@ export async function simulateMatchLive(matchId, options = {}) {
     await calculateFranchiseValuation(homeFranchiseId, match.season_id, pool);
     await calculateFranchiseValuation(awayFranchiseId, match.season_id, pool);
 
-    if (!deferSeasonProgression && seasonState.state === 'SEASON_COMPLETED' && autoCreateNextSeason) {
-      await createNextSeasonFromCompleted(match.season_id, pool);
+    if (!deferSeasonProgression && seasonState.state === 'SEASON_COMPLETED') {
+      await finalizeManagerSeasonLifecycle(Number(match.season_id), pool);
+      if (autoCreateNextSeason) {
+        await createNextSeasonFromCompleted(match.season_id, pool);
+      }
     }
 
     const scorecard = await getMatchScorecard(match.id);
@@ -3005,7 +3064,18 @@ async function simulateMatchUsingStreetMatchApi(matchId, options = {}) {
     }
 
     await updateFranchiseResults(homeFranchiseId, awayFranchiseId, winnerId, pool);
+    await processManagerAfterMatch({
+      seasonId: Number(match.season_id),
+      roundNo: Number(match.round_no || 0),
+      homeFranchiseId,
+      awayFranchiseId,
+      winnerFranchiseId: winnerId,
+      dbClient: pool
+    });
     const table = await updateSeasonTableWithMatch(match.id, pool);
+    if (String(match.stage || '').toUpperCase() === 'REGULAR') {
+      await maybeRunCpuManagerLifecycleForRound(Number(match.season_id), Number(match.round_no || 0), pool);
+    }
     let seasonState = { state: 'DEFERRED' };
     if (!deferSeasonProgression) {
       seasonState = await progressSeasonStructure(match.season_id, pool);
@@ -3014,8 +3084,11 @@ async function simulateMatchUsingStreetMatchApi(matchId, options = {}) {
     await calculateFranchiseValuation(homeFranchiseId, match.season_id, pool);
     await calculateFranchiseValuation(awayFranchiseId, match.season_id, pool);
 
-    if (!deferSeasonProgression && seasonState.state === 'SEASON_COMPLETED' && autoCreateNextSeason) {
-      await createNextSeasonFromCompleted(match.season_id, pool);
+    if (!deferSeasonProgression && seasonState.state === 'SEASON_COMPLETED') {
+      await finalizeManagerSeasonLifecycle(Number(match.season_id), pool);
+      if (autoCreateNextSeason) {
+        await createNextSeasonFromCompleted(match.season_id, pool);
+      }
     }
 
     const scorecard = await getMatchScorecard(match.id);
@@ -3238,7 +3311,16 @@ export async function simulateRound(roundNo, options = {}) {
     }
   }
 
+  const cpuLifecycle = await maybeRunCpuManagerLifecycleForRound(
+    Number(activeSeason.id),
+    Number(targetRound || 0),
+    pool
+  );
+
   const seasonState = await progressSeasonStructure(activeSeason.id, pool);
+  if (seasonState.state === 'SEASON_COMPLETED') {
+    await finalizeManagerSeasonLifecycle(Number(activeSeason.id), pool);
+  }
   if (seasonState.state === 'SEASON_COMPLETED' && autoCreateNextSeason) {
     await createNextSeasonFromCompleted(activeSeason.id, pool);
   }
@@ -3261,6 +3343,7 @@ export async function simulateRound(roundNo, options = {}) {
     seasonId: activeSeason.id,
     seasonState: seasonState.state,
     leagueTier: leagueTier ? Number(leagueTier) : null,
+    managerLifecycle: cpuLifecycle,
     operationId: simulationOperationId
   };
 }
@@ -3512,6 +3595,9 @@ export async function simulateSeasonToEnd(options = {}) {
 
   const seasonResult = await pool.query('SELECT id, status FROM seasons WHERE id = $1', [targetSeasonId]);
   const completedSeasonId = seasonResult.rows[0]?.status === 'COMPLETED' ? targetSeasonId : null;
+  if (completedSeasonId) {
+    await finalizeManagerSeasonLifecycle(Number(completedSeasonId), pool);
+  }
   const nextSeason = completedSeasonId ? await createNextSeasonFromCompleted(completedSeasonId, pool) : null;
 
   await maybeEmitSimulationProgress(onSimulationProgress, {

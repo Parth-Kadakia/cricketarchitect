@@ -1,6 +1,12 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 DROP TABLE IF EXISTS transfer_feed CASCADE;
+DROP TABLE IF EXISTS manager_team_stints CASCADE;
+DROP TABLE IF EXISTS managers CASCADE;
+DROP TABLE IF EXISTS manager_offers CASCADE;
+DROP TABLE IF EXISTS board_expectations CASCADE;
+DROP TABLE IF EXISTS board_profiles CASCADE;
+DROP TABLE IF EXISTS manager_stints CASCADE;
 DROP TABLE IF EXISTS franchise_sales CASCADE;
 DROP TABLE IF EXISTS trophy_cabinet CASCADE;
 DROP TABLE IF EXISTS valuations CASCADE;
@@ -37,10 +43,42 @@ CREATE TABLE users (
   display_name TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
   career_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (career_mode IN ('CLUB', 'INTERNATIONAL')),
+  manager_status TEXT NOT NULL DEFAULT 'UNEMPLOYED' CHECK (manager_status IN ('ACTIVE', 'UNEMPLOYED', 'RETIRED')),
+  manager_points INTEGER NOT NULL DEFAULT 0,
+  manager_unemployed_since TIMESTAMPTZ,
+  manager_retired_at TIMESTAMPTZ,
+  manager_firings INTEGER NOT NULL DEFAULT 0,
+  manager_titles INTEGER NOT NULL DEFAULT 0,
+  manager_matches_managed INTEGER NOT NULL DEFAULT 0,
+  manager_wins_managed INTEGER NOT NULL DEFAULT 0,
+  manager_losses_managed INTEGER NOT NULL DEFAULT 0,
   last_active_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE managers (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+  display_name TEXT NOT NULL,
+  nationality TEXT,
+  competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
+  is_cpu BOOLEAN NOT NULL DEFAULT TRUE,
+  level INTEGER NOT NULL DEFAULT 1 CHECK (level BETWEEN 1 AND 100),
+  xp INTEGER NOT NULL DEFAULT 0,
+  reputation INTEGER NOT NULL DEFAULT 10,
+  seasons_managed INTEGER NOT NULL DEFAULT 0,
+  matches_managed INTEGER NOT NULL DEFAULT 0,
+  wins_managed INTEGER NOT NULL DEFAULT 0,
+  losses_managed INTEGER NOT NULL DEFAULT 0,
+  titles_won INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX managers_mode_idx ON managers(competition_mode, level DESC, reputation DESC);
+CREATE INDEX managers_cpu_idx ON managers(is_cpu, competition_mode);
+CREATE UNIQUE INDEX managers_cpu_display_name_uidx ON managers(display_name) WHERE is_cpu = TRUE;
 
 CREATE TABLE cities (
   id BIGSERIAL PRIMARY KEY,
@@ -71,6 +109,7 @@ CREATE TABLE franchises (
   youth_development_rating NUMERIC(5, 2) NOT NULL DEFAULT 20,
   prospect_points INTEGER NOT NULL DEFAULT 0,
   growth_points INTEGER NOT NULL DEFAULT 0,
+  current_manager_id BIGINT REFERENCES managers(id) ON DELETE SET NULL,
   current_league_tier INTEGER NOT NULL DEFAULT 4 CHECK (current_league_tier BETWEEN 1 AND 20),
   competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
   promotions INTEGER NOT NULL DEFAULT 0,
@@ -130,6 +169,104 @@ CREATE TABLE season_teams (
   position INTEGER,
   UNIQUE (season_id, franchise_id)
 );
+
+CREATE TABLE manager_team_stints (
+  id BIGSERIAL PRIMARY KEY,
+  manager_id BIGINT NOT NULL REFERENCES managers(id) ON DELETE CASCADE,
+  franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+  competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
+  season_id BIGINT REFERENCES seasons(id) ON DELETE SET NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ended_at TIMESTAMPTZ,
+  end_reason TEXT,
+  matches_managed INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX manager_team_stints_active_manager_uidx
+ON manager_team_stints(manager_id)
+WHERE ended_at IS NULL;
+
+CREATE UNIQUE INDEX manager_team_stints_active_franchise_uidx
+ON manager_team_stints(franchise_id)
+WHERE ended_at IS NULL;
+
+CREATE INDEX manager_team_stints_franchise_idx ON manager_team_stints(franchise_id, started_at DESC);
+CREATE INDEX manager_team_stints_manager_idx ON manager_team_stints(manager_id, started_at DESC);
+
+CREATE TABLE manager_stints (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  franchise_id BIGINT REFERENCES franchises(id) ON DELETE SET NULL,
+  competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ended_at TIMESTAMPTZ,
+  end_reason TEXT,
+  matches_managed INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX manager_stints_active_user_uidx
+ON manager_stints(user_id)
+WHERE ended_at IS NULL;
+
+CREATE INDEX manager_stints_user_idx ON manager_stints(user_id, started_at DESC);
+
+CREATE TABLE board_profiles (
+  id BIGSERIAL PRIMARY KEY,
+  season_id BIGINT NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+  franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  confidence INTEGER NOT NULL DEFAULT 62 CHECK (confidence BETWEEN 0 AND 100),
+  last_checkpoint_round INTEGER NOT NULL DEFAULT 0,
+  consecutive_failed_checkpoints INTEGER NOT NULL DEFAULT 0,
+  season_evaluated_at TIMESTAMPTZ,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (season_id, franchise_id, user_id)
+);
+
+CREATE INDEX board_profiles_user_idx ON board_profiles(user_id, season_id DESC);
+CREATE INDEX board_profiles_active_idx ON board_profiles(user_id, is_active);
+
+CREATE TABLE board_expectations (
+  id BIGSERIAL PRIMARY KEY,
+  board_profile_id BIGINT NOT NULL REFERENCES board_profiles(id) ON DELETE CASCADE,
+  objective_code TEXT NOT NULL,
+  is_major BOOLEAN NOT NULL DEFAULT FALSE,
+  target_value NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  progress_value NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  weight NUMERIC(6, 2) NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (board_profile_id, objective_code)
+);
+
+CREATE INDEX board_expectations_profile_idx ON board_expectations(board_profile_id);
+
+CREATE TABLE manager_offers (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+  season_id BIGINT REFERENCES seasons(id) ON DELETE SET NULL,
+  offer_score NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  generated_round INTEGER,
+  expires_round INTEGER,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ACCEPTED', 'DECLINED', 'EXPIRED', 'WITHDRAWN')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX manager_offers_user_idx ON manager_offers(user_id, status, created_at DESC);
+CREATE INDEX manager_offers_team_idx ON manager_offers(franchise_id, status);
 
 CREATE TABLE players (
   id BIGSERIAL PRIMARY KEY,
@@ -421,5 +558,35 @@ EXECUTE FUNCTION set_updated_at();
 
 CREATE TRIGGER matches_set_updated_at
 BEFORE UPDATE ON matches
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER manager_stints_set_updated_at
+BEFORE UPDATE ON manager_stints
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER board_profiles_set_updated_at
+BEFORE UPDATE ON board_profiles
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER board_expectations_set_updated_at
+BEFORE UPDATE ON board_expectations
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER manager_offers_set_updated_at
+BEFORE UPDATE ON manager_offers
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER managers_set_updated_at
+BEFORE UPDATE ON managers
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER manager_team_stints_set_updated_at
+BEFORE UPDATE ON manager_team_stints
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();

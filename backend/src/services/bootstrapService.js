@@ -1,6 +1,7 @@
 import pool from '../config/db.js';
 import { initializeAllFranchises } from './franchiseService.js';
 import { ensureActiveSeason, generateDoubleRoundRobinFixtures, getActiveSeason } from './leagueService.js';
+import { ensureFranchiseManagers } from './managerCareerService.js';
 
 export async function bootstrapGameWorld(dbClient = pool) {
   const franchiseCount = Number((await dbClient.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
@@ -9,6 +10,7 @@ export async function bootstrapGameWorld(dbClient = pool) {
   }
 
   await initializeAllFranchises(dbClient);
+  await ensureFranchiseManagers(dbClient);
 
   const season = await ensureActiveSeason(dbClient);
   if (!season) {

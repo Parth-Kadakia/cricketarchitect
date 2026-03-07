@@ -7844,3 +7844,11 @@ table.stats-table tr:hover td {
     grid-template-columns: 1fr;
   }
 }
+
+/* Manager Directory */
+.manager-modal {
+  width: min(1200px, 95vw);
+  max-height: 88vh;
+  overflow: auto;
+  padding: 1.2rem 1.5rem 1.5rem;
+}

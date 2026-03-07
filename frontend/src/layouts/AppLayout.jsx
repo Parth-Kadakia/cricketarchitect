@@ -37,6 +37,13 @@ const Icons = {
       <circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   ),
+  managers: (p) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <circle cx="12" cy="7" r="4" />
+      <path d="M5.5 21a6.5 6.5 0 0 1 13 0" />
+      <path d="M18.5 9.5a3 3 0 1 0 0 6" />
+    </svg>
+  ),
   youth: (p) => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
@@ -86,6 +93,7 @@ function getNavItems(mode) {
     { to: '/fixtures', label: 'Season Center', icon: 'fixtures' },
     { to: '/league', label: 'Table & Seasons', icon: 'league' },
     { to: '/stats', label: 'Rankings', icon: 'stats' },
+    { to: '/managers', label: 'Managers', icon: 'managers' },
     { to: '/statbook', label: 'Statbook', icon: 'stats' },
     { to: '/squad', label: 'Player Cards', icon: 'squad' },
     { to: '/youth', label: 'Youth Academy', icon: 'youth' },

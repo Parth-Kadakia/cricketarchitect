@@ -22,8 +22,18 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
   await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS promotions INTEGER DEFAULT 0");
   await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS relegations INTEGER DEFAULT 0");
   await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS competition_mode TEXT DEFAULT 'CLUB'");
+  await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS current_manager_id BIGINT");
 
   await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS career_mode TEXT DEFAULT 'CLUB'");
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_status TEXT DEFAULT 'UNEMPLOYED'");
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_points INTEGER DEFAULT 0");
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_unemployed_since TIMESTAMPTZ");
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_retired_at TIMESTAMPTZ");
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_firings INTEGER DEFAULT 0");
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_titles INTEGER DEFAULT 0");
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_matches_managed INTEGER DEFAULT 0");
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_wins_managed INTEGER DEFAULT 0");
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_losses_managed INTEGER DEFAULT 0");
 
   await dbClient.query("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS league_count INTEGER DEFAULT 4");
   await dbClient.query("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS teams_per_league INTEGER DEFAULT 13");
@@ -56,6 +66,184 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
     `CREATE UNIQUE INDEX IF NOT EXISTS players_franchise_lineup_slot_uidx
      ON players(franchise_id, lineup_slot)
      WHERE lineup_slot IS NOT NULL`
+  );
+
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS managers (
+       id BIGSERIAL PRIMARY KEY,
+       user_id BIGINT UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+       display_name TEXT NOT NULL,
+       nationality TEXT,
+       competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
+       is_cpu BOOLEAN NOT NULL DEFAULT TRUE,
+       level INTEGER NOT NULL DEFAULT 1 CHECK (level BETWEEN 1 AND 100),
+       xp INTEGER NOT NULL DEFAULT 0,
+       reputation INTEGER NOT NULL DEFAULT 10,
+       seasons_managed INTEGER NOT NULL DEFAULT 0,
+       matches_managed INTEGER NOT NULL DEFAULT 0,
+       wins_managed INTEGER NOT NULL DEFAULT 0,
+       losses_managed INTEGER NOT NULL DEFAULT 0,
+       titles_won INTEGER NOT NULL DEFAULT 0,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS managers_mode_idx
+     ON managers(competition_mode, level DESC, reputation DESC)`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS managers_cpu_idx
+     ON managers(is_cpu, competition_mode)`
+  );
+  await dbClient.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS managers_cpu_display_name_uidx
+     ON managers(display_name) WHERE is_cpu = TRUE`
+  );
+
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS manager_team_stints (
+       id BIGSERIAL PRIMARY KEY,
+       manager_id BIGINT NOT NULL REFERENCES managers(id) ON DELETE CASCADE,
+       franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+       competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
+       season_id BIGINT REFERENCES seasons(id) ON DELETE SET NULL,
+       started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       ended_at TIMESTAMPTZ,
+       end_reason TEXT,
+       matches_managed INTEGER NOT NULL DEFAULT 0,
+       wins INTEGER NOT NULL DEFAULT 0,
+       losses INTEGER NOT NULL DEFAULT 0,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )`
+  );
+  await dbClient.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS manager_team_stints_active_manager_uidx
+     ON manager_team_stints(manager_id)
+     WHERE ended_at IS NULL`
+  );
+  await dbClient.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS manager_team_stints_active_franchise_uidx
+     ON manager_team_stints(franchise_id)
+     WHERE ended_at IS NULL`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS manager_team_stints_franchise_idx
+     ON manager_team_stints(franchise_id, started_at DESC)`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS manager_team_stints_manager_idx
+     ON manager_team_stints(manager_id, started_at DESC)`
+  );
+
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS manager_stints (
+       id BIGSERIAL PRIMARY KEY,
+       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+       franchise_id BIGINT REFERENCES franchises(id) ON DELETE SET NULL,
+       competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
+       started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       ended_at TIMESTAMPTZ,
+       end_reason TEXT,
+       matches_managed INTEGER NOT NULL DEFAULT 0,
+       wins INTEGER NOT NULL DEFAULT 0,
+       losses INTEGER NOT NULL DEFAULT 0,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )`
+  );
+  await dbClient.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS manager_stints_active_user_uidx
+     ON manager_stints(user_id)
+     WHERE ended_at IS NULL`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS manager_stints_user_idx
+     ON manager_stints(user_id, started_at DESC)`
+  );
+
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS board_profiles (
+       id BIGSERIAL PRIMARY KEY,
+       season_id BIGINT NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+       franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+       confidence INTEGER NOT NULL DEFAULT 62 CHECK (confidence BETWEEN 0 AND 100),
+       last_checkpoint_round INTEGER NOT NULL DEFAULT 0,
+       consecutive_failed_checkpoints INTEGER NOT NULL DEFAULT 0,
+       season_evaluated_at TIMESTAMPTZ,
+       is_active BOOLEAN NOT NULL DEFAULT TRUE,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       UNIQUE (season_id, franchise_id, user_id)
+     )`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS board_profiles_user_idx
+     ON board_profiles(user_id, season_id DESC)`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS board_profiles_active_idx
+     ON board_profiles(user_id, is_active)`
+  );
+
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS board_expectations (
+       id BIGSERIAL PRIMARY KEY,
+       board_profile_id BIGINT NOT NULL REFERENCES board_profiles(id) ON DELETE CASCADE,
+       objective_code TEXT NOT NULL,
+       is_major BOOLEAN NOT NULL DEFAULT FALSE,
+       target_value NUMERIC(10, 2) NOT NULL DEFAULT 0,
+       progress_value NUMERIC(10, 2) NOT NULL DEFAULT 0,
+       weight NUMERIC(6, 2) NOT NULL DEFAULT 1,
+       status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED')),
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       UNIQUE (board_profile_id, objective_code)
+     )`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS board_expectations_profile_idx
+     ON board_expectations(board_profile_id)`
+  );
+
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS manager_offers (
+       id BIGSERIAL PRIMARY KEY,
+       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+       franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+       season_id BIGINT REFERENCES seasons(id) ON DELETE SET NULL,
+       offer_score NUMERIC(10, 2) NOT NULL DEFAULT 0,
+       generated_round INTEGER,
+       expires_round INTEGER,
+       status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ACCEPTED', 'DECLINED', 'EXPIRED', 'WITHDRAWN')),
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS manager_offers_user_idx
+     ON manager_offers(user_id, status, created_at DESC)`
+  );
+  await dbClient.query(
+    `CREATE INDEX IF NOT EXISTS manager_offers_team_idx
+     ON manager_offers(franchise_id, status)`
+  );
+
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF NOT EXISTS (
+         SELECT 1
+         FROM pg_constraint
+         WHERE conname = 'franchises_current_manager_fk'
+       ) THEN
+         ALTER TABLE franchises
+         ADD CONSTRAINT franchises_current_manager_fk
+         FOREIGN KEY (current_manager_id) REFERENCES managers(id) ON DELETE SET NULL;
+       END IF;
+     END $$;`
   );
 
   await dbClient.query(
@@ -173,6 +361,20 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
        IF NOT EXISTS (
          SELECT 1
          FROM pg_constraint
+         WHERE conname = 'users_manager_status_check'
+       ) THEN
+         ALTER TABLE users
+         ADD CONSTRAINT users_manager_status_check CHECK (manager_status IN ('ACTIVE', 'UNEMPLOYED', 'RETIRED'));
+       END IF;
+     END $$;`
+  );
+
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF NOT EXISTS (
+         SELECT 1
+         FROM pg_constraint
          WHERE conname = 'season_teams_league_tier_check'
        ) THEN
          ALTER TABLE season_teams
@@ -267,6 +469,53 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
   );
 
   await dbClient.query(
+    `UPDATE users u
+     SET manager_status = CASE
+       WHEN COALESCE(NULLIF(u.manager_status, ''), 'UNEMPLOYED') = 'RETIRED' THEN 'RETIRED'
+       WHEN EXISTS (
+         SELECT 1 FROM franchises f
+         WHERE f.owner_user_id = u.id
+       ) THEN 'ACTIVE'
+       ELSE 'UNEMPLOYED'
+     END,
+     manager_points = COALESCE(u.manager_points, 0),
+     manager_firings = COALESCE(u.manager_firings, 0),
+     manager_titles = COALESCE(u.manager_titles, 0),
+     manager_matches_managed = COALESCE(u.manager_matches_managed, 0),
+     manager_wins_managed = COALESCE(u.manager_wins_managed, 0),
+     manager_losses_managed = COALESCE(u.manager_losses_managed, 0),
+     manager_unemployed_since = CASE
+       WHEN COALESCE(NULLIF(u.manager_status, ''), 'UNEMPLOYED') = 'RETIRED' THEN NULL
+       WHEN EXISTS (SELECT 1 FROM franchises f WHERE f.owner_user_id = u.id) THEN NULL
+       ELSE COALESCE(u.manager_unemployed_since, NOW())
+     END`
+  );
+
+  await dbClient.query(
+    `INSERT INTO managers (user_id, display_name, nationality, competition_mode, is_cpu, level, xp, reputation)
+     SELECT u.id,
+            u.display_name,
+            NULL,
+            COALESCE(NULLIF(u.career_mode, ''), 'CLUB'),
+            FALSE,
+            1,
+            0,
+            10
+     FROM users u
+     LEFT JOIN managers m ON m.user_id = u.id
+     WHERE m.id IS NULL
+       AND u.role <> 'admin'`
+  );
+
+  await dbClient.query(
+    `UPDATE franchises f
+     SET current_manager_id = m.id
+     FROM managers m
+     WHERE f.owner_user_id = m.user_id
+       AND f.current_manager_id IS NULL`
+  );
+
+  await dbClient.query(
     `UPDATE seasons
      SET competition_mode = COALESCE(NULLIF(competition_mode, ''), 'CLUB'),
          league_count = COALESCE(league_count, CASE WHEN COALESCE(NULLIF(competition_mode, ''), 'CLUB') = 'INTERNATIONAL' THEN 10 ELSE 4 END),
@@ -293,18 +542,21 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
        AND st.franchise_id = m.home_franchise_id`
   );
 
-  // Clear all lineup slots first to avoid unique-constraint conflicts during reassignment
   await dbClient.query(
-    `UPDATE players SET lineup_slot = NULL WHERE lineup_slot IS NOT NULL`
-  );
-
-  await dbClient.query(
-    `WITH ordered AS (
-       SELECT id,
-              franchise_id,
-              ROW_NUMBER() OVER (PARTITION BY franchise_id ORDER BY id ASC) AS slot
+    `WITH needs_rebuild AS (
+       SELECT franchise_id
        FROM players
-       WHERE starting_xi = TRUE
+       GROUP BY franchise_id
+       HAVING COUNT(*) FILTER (WHERE starting_xi = TRUE) > 0
+          AND COUNT(*) FILTER (WHERE starting_xi = TRUE AND lineup_slot IS NOT NULL) = 0
+     ),
+     ordered AS (
+       SELECT p.id,
+              p.franchise_id,
+              ROW_NUMBER() OVER (PARTITION BY p.franchise_id ORDER BY p.id ASC) AS slot
+       FROM players p
+       JOIN needs_rebuild nr ON nr.franchise_id = p.franchise_id
+       WHERE p.starting_xi = TRUE
      )
      UPDATE players p
      SET lineup_slot = o.slot::int
@@ -345,6 +597,39 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
        WHERE p.id = m.player_id`
     );
   }
+
+  await dbClient.query(
+    `INSERT INTO manager_stints (user_id, franchise_id, competition_mode, started_at, matches_managed, wins, losses)
+     SELECT u.id,
+            f.id,
+            COALESCE(NULLIF(f.competition_mode, ''), COALESCE(NULLIF(u.career_mode, ''), 'CLUB')),
+            COALESCE(f.updated_at, NOW()),
+            0,
+            0,
+            0
+     FROM users u
+     JOIN franchises f ON f.owner_user_id = u.id
+     LEFT JOIN manager_stints ms ON ms.user_id = u.id AND ms.ended_at IS NULL
+     WHERE ms.id IS NULL
+       AND COALESCE(NULLIF(u.manager_status, ''), 'UNEMPLOYED') = 'ACTIVE'`
+  );
+
+  await dbClient.query(
+    `INSERT INTO manager_team_stints (manager_id, franchise_id, competition_mode, season_id, started_at, matches_managed, wins, losses)
+     SELECT f.current_manager_id,
+            f.id,
+            COALESCE(NULLIF(f.competition_mode, ''), 'CLUB'),
+            s.id,
+            COALESCE(f.updated_at, NOW()),
+            0,
+            0,
+            0
+     FROM franchises f
+     LEFT JOIN seasons s ON s.status = 'ACTIVE'
+     LEFT JOIN manager_team_stints mts ON mts.franchise_id = f.id AND mts.ended_at IS NULL
+     WHERE f.current_manager_id IS NOT NULL
+       AND mts.id IS NULL`
+  );
 
   await dbClient.query(
     `UPDATE franchises f

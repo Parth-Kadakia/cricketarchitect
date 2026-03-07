@@ -5,6 +5,12 @@ import { ensureActiveSeason, generateDoubleRoundRobinFixtures } from './leagueSe
 import { calculateFranchiseValuation } from './valuationService.js';
 import { ensureProminentCricketCities } from '../db/seedWorldCities.js';
 import { CAREER_MODES, INTERNATIONAL_COUNTRIES, normalizeCareerMode } from '../constants/gameModes.js';
+import {
+  activateManagerForFranchise,
+  assertManagerCanTakeJobs,
+  ensureFranchiseManagers,
+  transitionManagerToUnemployed
+} from './managerCareerService.js';
 
 const ROLE_TEMPLATE = [
   'BATTER',
@@ -58,7 +64,7 @@ const PREFERRED_CITY_NAMES_BY_COUNTRY = {
   Ireland: ['Dublin', 'Cork', 'Limerick'],
   Netherlands: ['Amsterdam', 'Rotterdam', 'The Hague'],
   'South Africa': ['Cape Town', 'Johannesburg', 'Durban', 'Pretoria'],
-  'United States': [
+  'United States of America': [
     'New York',
     'Los Angeles',
     'Chicago',
@@ -69,8 +75,7 @@ const PREFERRED_CITY_NAMES_BY_COUNTRY = {
     'Seattle',
     'Atlanta',
     'Washington'
-  ],
-  'United Kingdom': ['London', 'Manchester', 'Birmingham', 'Leeds', 'Glasgow']
+  ]
 };
 
 function getBaseSkill(role, competitionMode = CAREER_MODES.CLUB) {
@@ -339,6 +344,26 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool, 
 
   const deficit = Math.max(0, minimumSquadSize - existingCount);
   const seedFreshLineup = existingCount === 0;
+  const existingLineupSlots = new Set(
+    (
+      await dbClient.query(
+        `SELECT lineup_slot
+         FROM players
+         WHERE franchise_id = $1
+           AND lineup_slot IS NOT NULL`,
+        [franchiseId]
+      )
+    ).rows.map((row) => Number(row.lineup_slot)).filter((value) => Number.isInteger(value) && value > 0)
+  );
+
+  function takeNextLineupSlot() {
+    let slot = 1;
+    while (existingLineupSlots.has(slot)) {
+      slot += 1;
+    }
+    existingLineupSlots.add(slot);
+    return slot;
+  }
 
   for (let offset = 0; offset < deficit; offset += 1) {
     const templateIndex = (existingCount + offset) % ROLE_TEMPLATE.length;
@@ -356,6 +381,9 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool, 
 
     const marketValue = Number((5 + (batting + bowling + fielding + potential) * 0.08).toFixed(2));
     const salary = Number((0.5 + marketValue * 0.06).toFixed(2));
+
+    const isStartingXi = seedFreshLineup && offset < 11;
+    const lineupSlot = isStartingXi ? takeNextLineupSlot() : null;
 
     await dbClient.query(
       `INSERT INTO players (
@@ -402,8 +430,8 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool, 
         marketValue,
         salary,
         seedFreshLineup ? offset >= 11 : true,
-        seedFreshLineup ? offset < 11 : false,
-        seedFreshLineup && offset < 11 ? offset + 1 : null,
+        isStartingXi,
+        lineupSlot,
         seedFreshLineup && offset < 11 ? 'MAIN_SQUAD' : 'YOUTH'
       ]
     );
@@ -689,6 +717,8 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
     await generateDoubleRoundRobinFixtures(season.id, dbClient);
   }
 
+  await ensureFranchiseManagers(dbClient);
+
   return managerFranchise;
 }
 
@@ -812,11 +842,15 @@ async function initializeInternationalCareerWithCountry({ userId, country, franc
     await generateDoubleRoundRobinFixtures(season.id, dbClient);
   }
 
+  await ensureFranchiseManagers(dbClient);
+
   return managerFranchise;
 }
 
 export async function claimFranchise({ userId, cityId, franchiseName, mode = CAREER_MODES.CLUB, country = null }) {
   return withTransaction(async (client) => {
+    const managerUser = await assertManagerCanTakeJobs(userId, client);
+
     const careerMode = normalizeCareerMode(mode);
     const owned = await getOwnedFranchise(userId, client);
     if (owned) {
@@ -847,7 +881,20 @@ export async function claimFranchise({ userId, cityId, franchiseName, mode = CAR
         [created.id]
       );
 
+      await activateManagerForFranchise({
+        userId,
+        franchiseId: Number(created.id),
+        competitionMode: careerMode,
+        dbClient: client
+      });
+
       return refreshed.rows[0];
+    }
+
+    if (String(managerUser.manager_status || '').toUpperCase() === 'UNEMPLOYED') {
+      const error = new Error('You are currently unemployed. Review board offers or use the manager apply market.');
+      error.status = 403;
+      throw error;
     }
 
     const worldModesResult = await client.query(
@@ -962,6 +1009,12 @@ export async function claimFranchise({ userId, cityId, franchiseName, mode = CAR
 
     await ensureFranchiseInfrastructure(franchise.id, client);
     await markCpuAndHumanOwnership(franchise.id, client);
+    await activateManagerForFranchise({
+      userId,
+      franchiseId: Number(franchise.id),
+      competitionMode: worldMode,
+      dbClient: client
+    });
 
     await calculateFranchiseValuation(franchise.id, null, client);
 
@@ -997,38 +1050,47 @@ export async function listFranchiseForSale({ userId, franchiseId }) {
 }
 
 export async function sellFranchiseToMarketplace({ userId, franchiseId }) {
-  const franchise = await getOwnedFranchise(userId);
-  if (!franchise || Number(franchise.id) !== Number(franchiseId)) {
-    const error = new Error('You can only sell your own franchise.');
-    error.status = 403;
-    throw error;
-  }
+  return withTransaction(async (client) => {
+    const franchise = await getOwnedFranchise(userId, client);
+    if (!franchise || Number(franchise.id) !== Number(franchiseId)) {
+      const error = new Error('You can only sell your own franchise.');
+      error.status = 403;
+      throw error;
+    }
 
-  await pool.query(
-    `UPDATE franchises
-     SET owner_user_id = NULL,
-         status = 'AI_CONTROLLED',
-         listed_for_sale_at = NULL,
-         win_streak = 0
-     WHERE id = $1`,
-    [franchiseId]
-  );
+    await transitionManagerToUnemployed({
+      userId,
+      franchiseId: Number(franchiseId),
+      endReason: 'RESIGNED',
+      incrementFirings: false,
+      generateOffers: true,
+      dbClient: client
+    });
 
-  await pool.query(
-    `INSERT INTO transfer_feed (action_type, source_franchise_id, message)
-     VALUES ('SEASON_NOTE', $1, 'Franchise returned to CPU control.')`,
-    [franchiseId]
-  );
+    await client.query(
+      `INSERT INTO transfer_feed (action_type, source_franchise_id, message)
+       VALUES ('SEASON_NOTE', $1, 'Franchise returned to CPU control and manager resigned.')`,
+      [franchiseId]
+    );
 
-  return (await pool.query('SELECT * FROM franchises WHERE id = $1', [franchiseId])).rows[0];
+    return (await client.query('SELECT * FROM franchises WHERE id = $1', [franchiseId])).rows[0];
+  });
 }
 
 export async function purchaseFranchise({ buyerUserId, franchiseId, newFranchiseName }) {
   return withTransaction(async (client) => {
+    const managerUser = await assertManagerCanTakeJobs(buyerUserId, client);
+
     const owned = await getOwnedFranchise(buyerUserId, client);
     if (owned) {
       const error = new Error('Single-player mode allows one franchise per save.');
       error.status = 400;
+      throw error;
+    }
+
+    if (String(managerUser.manager_status || '').toUpperCase() === 'UNEMPLOYED') {
+      const error = new Error('Use manager offers or the apply market while unemployed.');
+      error.status = 403;
       throw error;
     }
 
@@ -1067,6 +1129,12 @@ export async function purchaseFranchise({ buyerUserId, franchiseId, newFranchise
     );
 
     await markCpuAndHumanOwnership(franchiseId, client);
+    await activateManagerForFranchise({
+      userId: buyerUserId,
+      franchiseId: Number(franchiseId),
+      competitionMode: normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB),
+      dbClient: client
+    });
 
     await client.query(
       `INSERT INTO franchise_sales (franchise_id, seller_user_id, buyer_user_id, sale_value)

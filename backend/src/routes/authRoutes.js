@@ -28,7 +28,9 @@ router.post(
     const inserted = await pool.query(
       `INSERT INTO users (email, password_hash, display_name, role)
        VALUES ($1, $2, $3, 'user')
-       RETURNING id, email, display_name, role, career_mode, last_active_at`,
+       RETURNING id, email, display_name, role, career_mode, last_active_at,
+                 manager_status, manager_points, manager_unemployed_since, manager_retired_at,
+                 manager_firings, manager_titles, manager_matches_managed, manager_wins_managed, manager_losses_managed`,
       [normalizedEmail, passwordHash, String(displayName).trim()]
     );
 
@@ -51,7 +53,9 @@ router.post(
     const normalizedEmail = String(email).trim().toLowerCase();
 
     const userResult = await pool.query(
-      `SELECT id, email, password_hash, display_name, role, career_mode, last_active_at
+      `SELECT id, email, password_hash, display_name, role, career_mode, last_active_at,
+              manager_status, manager_points, manager_unemployed_since, manager_retired_at,
+              manager_firings, manager_titles, manager_matches_managed, manager_wins_managed, manager_losses_managed
        FROM users
        WHERE email = $1`,
       [normalizedEmail]
@@ -76,7 +80,16 @@ router.post(
       display_name: userRow.display_name,
       role: userRow.role,
       career_mode: userRow.career_mode,
-      last_active_at: new Date().toISOString()
+      last_active_at: new Date().toISOString(),
+      manager_status: userRow.manager_status,
+      manager_points: userRow.manager_points,
+      manager_unemployed_since: userRow.manager_unemployed_since,
+      manager_retired_at: userRow.manager_retired_at,
+      manager_firings: userRow.manager_firings,
+      manager_titles: userRow.manager_titles,
+      manager_matches_managed: userRow.manager_matches_managed,
+      manager_wins_managed: userRow.manager_wins_managed,
+      manager_losses_managed: userRow.manager_losses_managed
     };
 
     const token = signToken(user);
@@ -115,6 +128,34 @@ router.get(
       user: req.user,
       franchise: franchiseResult.rows[0] || null
     });
+  })
+);
+
+router.patch(
+  '/profile',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const nextDisplayName = String(req.body?.displayName || '').trim();
+    if (!nextDisplayName) {
+      return res.status(400).json({ message: 'displayName is required.' });
+    }
+
+    if (nextDisplayName.length > 60) {
+      return res.status(400).json({ message: 'displayName must be 60 characters or fewer.' });
+    }
+
+    const updated = await pool.query(
+      `UPDATE users
+       SET display_name = $2,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, email, display_name, role, career_mode, last_active_at,
+                 manager_status, manager_points, manager_unemployed_since, manager_retired_at,
+                 manager_firings, manager_titles, manager_matches_managed, manager_wins_managed, manager_losses_managed`,
+      [req.user.id, nextDisplayName]
+    );
+
+    return res.json({ user: updated.rows[0] });
   })
 );
 

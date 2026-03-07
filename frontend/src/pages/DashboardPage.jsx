@@ -29,6 +29,7 @@ export default function DashboardPage() {
   const [seasonSummary, setSeasonSummary] = useState(null);
   const [valuations, setValuations] = useState([]);
   const [transferFeed, setTransferFeed] = useState([]);
+  const [managerCareer, setManagerCareer] = useState(null);
   const [countrySearch, setCountrySearch] = useState('');
   const [careerMode, setCareerMode] = useState('CLUB');
   const [selectedCountry, setSelectedCountry] = useState('');
@@ -43,6 +44,7 @@ export default function DashboardPage() {
   const [simulatingHalfSeason, setSimulatingHalfSeason] = useState(false);
   const [simulatingSeason, setSimulatingSeason] = useState(false);
   const [simulationProgress, setSimulationProgress] = useState(null);
+  const [managerActionBusy, setManagerActionBusy] = useState(false);
   const [error, setError] = useState('');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetTyped, setResetTyped] = useState('');
@@ -52,12 +54,13 @@ export default function DashboardPage() {
   async function loadData() {
     setError('');
     try {
-      const [franchiseResponse, marketCities, intlCountriesResponse, activeSeason, feedResponse] = await Promise.all([
+      const [franchiseResponse, marketCities, intlCountriesResponse, activeSeason, feedResponse, managerResponse] = await Promise.all([
         api.franchise.me(token),
         api.marketplace.cities('', 1200),
         api.cities.internationalCountries(),
         api.league.activeSeason(),
-        api.marketplace.transferFeed(40)
+        api.marketplace.transferFeed(40),
+        api.manager.me(token)
       ]);
       setFranchiseData(franchiseResponse.franchise || null);
       setSquadSummary(franchiseResponse.squadSummary || null);
@@ -65,6 +68,7 @@ export default function DashboardPage() {
       setAvailableCities(marketCities.cities || []);
       setInternationalCountries(intlCountriesResponse.countries || []);
       setTransferFeed(feedResponse.feed || []);
+      setManagerCareer(managerResponse || null);
       if (activeSeason.season?.id) {
         const summary = await api.league.seasonSummary(activeSeason.season.id);
         setSeasonSummary(summary);
@@ -163,6 +167,67 @@ export default function DashboardPage() {
       await refreshProfile();
       await loadData();
     } catch (e) { setError(e.message); }
+  }
+
+  async function acceptManagerOffer(offerId) {
+    try {
+      setError('');
+      setManagerActionBusy(true);
+      await api.manager.acceptOffer(token, offerId);
+      await refreshProfile();
+      await loadData();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setManagerActionBusy(false);
+    }
+  }
+
+  async function declineManagerOffer(offerId) {
+    try {
+      setError('');
+      setManagerActionBusy(true);
+      await api.manager.declineOffer(token, offerId);
+      await loadData();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setManagerActionBusy(false);
+    }
+  }
+
+  async function applyForJob(franchiseId) {
+    try {
+      setError('');
+      setManagerActionBusy(true);
+      const result = await api.manager.apply(token, franchiseId);
+      if (!result?.accepted && result?.message) {
+        setError(result.message);
+      }
+      await refreshProfile();
+      await loadData();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setManagerActionBusy(false);
+    }
+  }
+
+  async function retireCareer() {
+    const confirmed = window.confirm('Retire this manager permanently for the current save? This cannot be undone.');
+    if (!confirmed) return;
+
+    try {
+      setError('');
+      setManagerActionBusy(true);
+      await api.manager.retire(token);
+      await refreshProfile();
+      await loadData();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setManagerActionBusy(false);
+    }
   }
 
   async function addMissingCity(event) {
@@ -306,6 +371,137 @@ export default function DashboardPage() {
   if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading career dashboard...</span></div>;
 
   if (!franchise) {
+    const managerStatus = String(managerCareer?.manager?.status || user?.manager_status || 'UNEMPLOYED').toUpperCase();
+    const hasWorld = Number(managerCareer?.worldFranchiseCount || 0) > 0;
+    const unemployedState = managerCareer?.unemployed || {};
+    const pendingOffers = Array.isArray(unemployedState.offers)
+      ? unemployedState.offers.filter((offer) => String(offer.status || '').toUpperCase() === 'PENDING')
+      : [];
+    const applyMarket = Array.isArray(unemployedState.applyMarket) ? unemployedState.applyMarket : [];
+
+    if (managerStatus === 'RETIRED') {
+      return (
+        <div className="db-page">
+          {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
+          <div className="db-card">
+            <h3 className="db-section-title">Manager Career Closed</h3>
+            <p className="db-danger-desc">
+              This save is permanently retired. Start a new game to take another managerial role.
+            </p>
+            <div className="db-season-meta">
+              <span><strong>Career Points:</strong> {managerCareer?.manager?.points || 0}</span>
+              <span><strong>Titles:</strong> {managerCareer?.manager?.titles || 0}</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (hasWorld && managerStatus === 'UNEMPLOYED') {
+      return (
+        <div className="db-page">
+          {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
+          <div className="db-card">
+            <h3 className="db-section-title">Manager Job Market</h3>
+            <p className="db-danger-desc">
+              You are currently unemployed. Review board offers first, then apply to open teams after the cooldown.
+            </p>
+            <div className="db-season-meta">
+              <span><strong>Manager Points:</strong> {managerCareer?.manager?.points || 0}</span>
+              <span><strong>Firings:</strong> {managerCareer?.manager?.firings || 0}</span>
+              <span><strong>Career Mode:</strong> {managerCareer?.manager?.careerMode || 'CLUB'}</span>
+            </div>
+            <div className="db-sim-buttons" style={{ marginTop: 10 }}>
+              <button type="button" className="sq-btn sq-btn--primary" disabled={isBusy} onClick={simulateNextRound}>
+                {simulatingRound ? '⏳ Simulating...' : '▶ Simulate Next Round'}
+              </button>
+              <button type="button" className="sq-btn" disabled={isBusy} onClick={simulateHalfSeason}>
+                {simulatingHalfSeason ? '⏳ Half Season...' : '⏩ Simulate Half Season'}
+              </button>
+            </div>
+          </div>
+
+          <div className="db-two-col">
+            <div className="db-card">
+              <h3 className="db-section-title">Board Offers</h3>
+              {pendingOffers.length === 0 ? (
+                <div className="sq-empty">No pending offers right now. Simulate another round or check apply market.</div>
+              ) : (
+                <div className="db-results-list">
+                  {pendingOffers.map((offer) => (
+                    <div key={offer.id} className="db-result-item" style={{ display: 'block' }}>
+                      <div className="db-season-meta" style={{ marginBottom: 6 }}>
+                        <span><strong>{offer.franchise_name}</strong></span>
+                        <span>{offer.city_name}, {offer.country}</span>
+                      </div>
+                      <div className="db-season-meta" style={{ marginBottom: 8 }}>
+                        <span>League {offer.current_league_tier}</span>
+                        <span>{offer.won || 0}W-{offer.lost || 0}L</span>
+                        <span>Score {Number(offer.offer_score || 0).toFixed(1)}</span>
+                      </div>
+                      <div className="db-sim-buttons">
+                        <button
+                          type="button"
+                          className="sq-btn sq-btn--primary"
+                          disabled={managerActionBusy}
+                          onClick={() => acceptManagerOffer(offer.id)}
+                        >
+                          Accept Offer
+                        </button>
+                        <button
+                          type="button"
+                          className="sq-btn"
+                          disabled={managerActionBusy}
+                          onClick={() => declineManagerOffer(offer.id)}
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="db-card">
+              <h3 className="db-section-title">Apply Market</h3>
+              {!unemployedState.unlocked ? (
+                <div className="sq-empty">
+                  Unlocks after {Number(unemployedState.roundsRemaining || 0)} more completed round(s).
+                </div>
+              ) : applyMarket.length === 0 ? (
+                <div className="sq-empty">No teams are currently accepting applications.</div>
+              ) : (
+                <div className="db-results-list">
+                  {applyMarket.map((team) => (
+                    <div key={team.id} className="db-result-item" style={{ display: 'block' }}>
+                      <div className="db-season-meta" style={{ marginBottom: 6 }}>
+                        <span><strong>{team.franchise_name}</strong></span>
+                        <span>{team.city_name}, {team.country}</span>
+                      </div>
+                      <div className="db-season-meta" style={{ marginBottom: 8 }}>
+                        <span>League {team.current_league_tier}</span>
+                        <span>{team.won || 0}W-{team.lost || 0}L</span>
+                        <span>{money(team.total_valuation)}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="sq-btn"
+                        disabled={managerActionBusy}
+                        onClick={() => applyForJob(team.id)}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     const isInternationalCareer = careerMode === 'INTERNATIONAL';
     const pickerStep = selectedCountry ? 2 : 1;
     const internationalTeamCount = internationalCountries.length || 100;
@@ -599,6 +795,8 @@ export default function DashboardPage() {
   const isInternationalMode = String(fd?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
   const teamStrength = Number(fd?.strength_rating ?? squadSummary?.avg_team_rating ?? 0);
   const teamsPerLeague = Number(ss?.season?.teams_per_league || 0);
+  const boardConfidence = Number(managerCareer?.board?.confidence || 0);
+  const boardObjectives = Array.isArray(managerCareer?.board?.objectives) ? managerCareer.board.objectives : [];
 
   return (
     <div className="db-page">
@@ -649,6 +847,61 @@ export default function DashboardPage() {
           <span className="db-hero-value">{fd?.growth_points || 0}</span>
           <span className="db-hero-hint">+5 win / +2 loss</span>
         </div>
+      </div>
+
+      <div className="db-card">
+        <div className="db-season-meta" style={{ marginBottom: 10 }}>
+          <h3 className="db-section-title" style={{ margin: 0 }}>Manager Career</h3>
+          <button
+            type="button"
+            className="sq-btn sq-btn--danger"
+            disabled={managerActionBusy}
+            onClick={retireCareer}
+          >
+            Retire Manager
+          </button>
+        </div>
+        <div className="db-season-meta" style={{ marginBottom: 10 }}>
+          <span><strong>Points:</strong> {managerCareer?.manager?.points || 0}</span>
+          <span><strong>Status:</strong> {managerCareer?.manager?.status || 'ACTIVE'}</span>
+          <span><strong>Career Record:</strong> {managerCareer?.manager?.winsManaged || 0}W-{managerCareer?.manager?.lossesManaged || 0}L</span>
+          <span><strong>Titles:</strong> {managerCareer?.manager?.titles || 0}</span>
+        </div>
+        <div className="db-sim-progress" style={{ marginBottom: 8 }}>
+          <div className="db-sim-progress-head">
+            <strong>Board Confidence</strong>
+            <span>{boardConfidence.toFixed(0)} / 100</span>
+          </div>
+          <div className="db-sim-track">
+            <div className="db-sim-fill" style={{ width: `${Math.max(0, Math.min(100, Math.round(boardConfidence)))}%` }} />
+          </div>
+        </div>
+        {boardObjectives.length > 0 ? (
+          <div className="db-results-list">
+            {boardObjectives.map((objective) => (
+              <div key={objective.id || objective.objective_code} className="db-result-item">
+                <span className={`db-result-badge ${
+                  objective.status === 'COMPLETED'
+                    ? 'db-result-badge--win'
+                    : objective.status === 'FAILED'
+                      ? 'db-result-badge--loss'
+                      : 'db-result-badge--draw'
+                }`}
+                >
+                  {objective.status === 'COMPLETED' ? '✓' : objective.status === 'FAILED' ? '✕' : '…'}
+                </span>
+                <div className="db-result-body">
+                  <span className="db-result-summary">{String(objective.objective_code || '').replace(/_/g, ' ')}</span>
+                  <span className="db-result-time">
+                    Target {Number(objective.target_value || 0).toFixed(1)} • Progress {Number(objective.progress_value || 0).toFixed(1)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="sq-empty">Board objectives will appear after your current season context is initialized.</div>
+        )}
       </div>
 
       {/* ── Simulation controls ── */}

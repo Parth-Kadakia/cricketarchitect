@@ -1,6 +1,7 @@
 import pool from '../config/db.js';
 import { processSeasonRetirements } from './retirementService.js';
 import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
+import { ensureManagerBoardProfilesForSeason } from './managerCareerService.js';
 
 const DEFAULT_LEAGUE_TEAM_COUNT = 52;
 const DEFAULT_INTERNATIONAL_TEAM_COUNT = 100;
@@ -376,6 +377,7 @@ export async function createSeason({
 
   await applyFranchiseTierUpdates(assignments, dbClient);
   await refreshPositions(season.id, dbClient);
+  await ensureManagerBoardProfilesForSeason(season.id, dbClient);
 
   return season;
 }

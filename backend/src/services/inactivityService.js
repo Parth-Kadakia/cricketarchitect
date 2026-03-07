@@ -1,4 +1,5 @@
 import pool from '../config/db.js';
+import { handleManagerInactivityRelease } from './managerCareerService.js';
 
 let inactivityIntervalRef = null;
 
@@ -32,6 +33,12 @@ export async function releaseInactiveFranchises(dbClient = pool) {
        WHERE id = $1`,
       [owner.franchise_id]
     );
+
+    await handleManagerInactivityRelease({
+      userId: Number(owner.user_id),
+      franchiseId: Number(owner.franchise_id),
+      dbClient
+    });
 
     await dbClient.query(
       `INSERT INTO transactions (franchise_id, transaction_type, amount, description)

@@ -55,6 +55,12 @@ export const api = {
       request('/auth/me', {
         method: 'GET',
         headers: buildHeaders(token, false)
+      }),
+    updateProfile: (token, payload) =>
+      request('/auth/profile', {
+        method: 'PATCH',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload)
       })
   },
   cities: {
@@ -254,6 +260,42 @@ export const api = {
         headers: buildHeaders(token)
       }),
     transferFeed: (limit = 100) => request(`/marketplace/transfer-feed?limit=${limit}`)
+  },
+  manager: {
+    me: (token) => request('/manager/me', { headers: buildHeaders(token, false) }),
+    directory: (token, { seasonId = null, mode = null, limit = 220 } = {}) =>
+      request(
+        `/manager/directory?${[
+          seasonId ? `seasonId=${seasonId}` : null,
+          mode ? `mode=${encodeURIComponent(mode)}` : null,
+          `limit=${limit}`
+        ].filter(Boolean).join('&')}`,
+        { headers: buildHeaders(token, false) }
+      ),
+    profile: (token, managerId) =>
+      request(`/manager/profile/${managerId}`, { headers: buildHeaders(token, false) }),
+    offers: (token) => request('/manager/offers', { headers: buildHeaders(token, false) }),
+    acceptOffer: (token, offerId) =>
+      request(`/manager/offers/${offerId}/accept`, {
+        method: 'POST',
+        headers: buildHeaders(token)
+      }),
+    declineOffer: (token, offerId) =>
+      request(`/manager/offers/${offerId}/decline`, {
+        method: 'POST',
+        headers: buildHeaders(token)
+      }),
+    apply: (token, franchiseId) =>
+      request('/manager/apply', {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify({ franchiseId })
+      }),
+    retire: (token) =>
+      request('/manager/retire', {
+        method: 'POST',
+        headers: buildHeaders(token)
+      })
   },
   admin: {
     resetGame: (token) =>

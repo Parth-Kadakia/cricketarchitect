@@ -109,6 +109,10 @@ router.post(
     await pool.query(`
       TRUNCATE TABLE
         transfer_feed,
+        manager_offers,
+        board_expectations,
+        board_profiles,
+        manager_stints,
         franchise_sales,
         trophy_cabinet,
         valuations,
@@ -124,6 +128,19 @@ router.post(
         franchises
       RESTART IDENTITY CASCADE
     `);
+
+    await pool.query(
+      `UPDATE users
+       SET manager_status = 'UNEMPLOYED',
+           manager_points = 0,
+           manager_unemployed_since = NOW(),
+           manager_retired_at = NULL,
+           manager_firings = 0,
+           manager_titles = 0,
+           manager_matches_managed = 0,
+           manager_wins_managed = 0,
+           manager_losses_managed = 0`
+    );
 
     /* Re-seed the welcome note */
     await pool.query(

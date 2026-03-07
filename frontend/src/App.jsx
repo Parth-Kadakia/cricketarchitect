@@ -7,6 +7,7 @@ import FixturesResultsPage from './pages/FixturesResultsPage';
 import FranchiseMarketplacePage from './pages/FranchiseMarketplacePage';
 import LeagueTablePage from './pages/LeagueTablePage';
 import LoginPage from './pages/LoginPage';
+import ManagersPage from './pages/ManagersPage';
 import MatchCenterPage from './pages/MatchCenterPage';
 import StatbookPage from './pages/StatbookPage';
 import SquadManagementPage from './pages/SquadManagementPage';
@@ -30,6 +31,7 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="squad" element={<SquadManagementPage />} />
         <Route path="stats" element={<StatsPage />} />
+        <Route path="managers" element={<ManagersPage />} />
         <Route path="statbook" element={<StatbookPage />} />
         <Route path="youth" element={<YouthAcademyPage />} />
         <Route path="league" element={<LeagueTablePage />} />
