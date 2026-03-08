@@ -115,7 +115,13 @@ router.get(
               f.status,
               f.owner_user_id
        FROM country_cities cc
-       LEFT JOIN franchises f ON f.city_id = cc.id
+       LEFT JOIN LATERAL (
+         SELECT id, status, owner_user_id
+         FROM franchises
+         WHERE city_id = cc.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) f ON TRUE
        ORDER BY cc.country ASC`,
       [INTERNATIONAL_COUNTRIES]
     );
