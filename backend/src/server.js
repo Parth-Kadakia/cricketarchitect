@@ -17,8 +17,12 @@ const __dirname = path.dirname(__filename);
 const server = createServer(app);
 createRealtimeServer(server);
 
-server.listen(env.port, async () => {
-  console.log(`Global T20 API listening on http://localhost:${env.port}`);
+// Render requires binding to 0.0.0.0; increase timeouts for free-tier stability
+server.keepAliveTimeout = 120_000;
+server.headersTimeout = 120_000;
+
+server.listen(env.port, '0.0.0.0', async () => {
+  console.log(`Global T20 API listening on 0.0.0.0:${env.port}`);
 
   try {
     // Auto-init DB on first boot: if the users table doesn't exist, run full schema + seed
