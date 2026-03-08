@@ -120,6 +120,64 @@ router.post(
   })
 );
 
+/* ── Global Wipe: delete ALL game data, reset every user to fresh state ── */
+router.post(
+  '/wipe-all',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const confirmText = String(req.body?.confirm || '').trim();
+    if (confirmText !== 'WIPE_ALL') {
+      return res.status(400).json({ message: 'You must send { confirm: "WIPE_ALL" } to proceed.' });
+    }
+
+    /* Delete all worlds — cascades to franchises, seasons, matches, players, etc. */
+    await pool.query('DELETE FROM transfer_feed');
+    await pool.query('DELETE FROM manager_offers');
+    await pool.query('DELETE FROM board_expectations');
+    await pool.query('DELETE FROM board_profiles');
+    await pool.query('DELETE FROM manager_stints');
+    await pool.query('DELETE FROM franchise_sales');
+    await pool.query('DELETE FROM trophy_cabinet');
+    await pool.query('DELETE FROM valuations');
+    await pool.query('DELETE FROM transactions');
+    await pool.query('DELETE FROM player_growth_logs');
+    await pool.query('DELETE FROM player_match_stats');
+    await pool.query('DELETE FROM match_partnerships');
+    await pool.query('DELETE FROM match_fall_of_wickets');
+    await pool.query('DELETE FROM match_over_stats');
+    await pool.query('DELETE FROM match_innings_stats');
+    await pool.query('DELETE FROM match_events');
+    await pool.query('DELETE FROM matches');
+    await pool.query('DELETE FROM season_teams');
+    await pool.query('DELETE FROM seasons');
+    await pool.query('DELETE FROM players');
+    await pool.query('DELETE FROM regions');
+    await pool.query('DELETE FROM manager_team_stints');
+    await pool.query('DELETE FROM managers');
+    await pool.query('DELETE FROM franchises');
+    await pool.query('DELETE FROM worlds');
+
+    /* Reset every user to fresh unemployed state (keep accounts) */
+    await pool.query(
+      `UPDATE users
+       SET manager_status = 'UNEMPLOYED',
+           manager_points = 0,
+           manager_unemployed_since = NOW(),
+           manager_retired_at = NULL,
+           manager_firings = 0,
+           manager_titles = 0,
+           manager_matches_managed = 0,
+           manager_wins_managed = 0,
+           manager_losses_managed = 0,
+           active_world_id = NULL,
+           updated_at = NOW()`
+    );
+
+    return res.json({ message: 'All game data wiped. Every user is now fresh.' });
+  })
+);
+
 /* ── Reset Career (resets ONLY the requesting user's career) ── */
 router.post(
   '/reset-game',

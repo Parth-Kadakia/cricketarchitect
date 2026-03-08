@@ -1669,6 +1669,91 @@ img { max-width: 100%; display: block; }
   font-size: 0.82rem;
 }
 
+/* ── Danger action tile ── */
+.admin-action-danger {
+  border-color: rgba(248, 113, 113, 0.25);
+  color: var(--danger);
+}
+.admin-action-danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+/* ── Wipe confirmation modal ── */
+.admin-wipe-modal {
+  background: var(--bg-elevated);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  max-width: 440px;
+  width: 92%;
+  box-shadow: var(--shadow-xl);
+}
+.admin-wipe-modal h3 {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--danger);
+  margin-bottom: 0.6rem;
+}
+.admin-wipe-warn {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 1rem;
+}
+.admin-wipe-warn strong {
+  color: var(--danger);
+}
+.admin-wipe-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+.admin-wipe-label code {
+  background: var(--danger-bg);
+  color: var(--danger);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-xs);
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+.admin-wipe-input {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color var(--transition-fast);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.08em;
+}
+.admin-wipe-input:focus {
+  border-color: var(--danger);
+}
+.admin-wipe-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+.admin-action-danger-btn {
+  background: var(--danger);
+  color: #fff;
+  font-weight: 700;
+}
+.admin-action-danger-btn:hover:not(:disabled) {
+  background: #ef4444;
+  box-shadow: 0 2px 12px rgba(248, 113, 113, 0.35);
+}
+.admin-action-danger-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .admin-summary {

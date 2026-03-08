@@ -333,6 +333,12 @@ export const api = {
       request('/admin/retirements/run', {
         method: 'POST',
         headers: buildHeaders(token)
+      }),
+    wipeAll: (token) =>
+      request('/admin/wipe-all', {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify({ confirm: 'WIPE_ALL' })
       })
   },
   financials: {

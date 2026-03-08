@@ -87,6 +87,8 @@ export default function AdminConsolePage() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [actionBusy, setActionBusy] = useState(null);
   const [expandedRow, setExpandedRow] = useState(null);
+  const [showWipeConfirm, setShowWipeConfirm] = useState(false);
+  const [wipeTyped, setWipeTyped] = useState('');
 
   useEffect(() => { setPageTitle('Admin Console'); }, []);
 
@@ -245,8 +247,59 @@ export default function AdminConsolePage() {
             {Icons.retire}
             <span>{actionBusy === 'Run Retirements' ? 'Running…' : 'Run Retirements'}</span>
           </button>
+          <button
+            className="admin-action-tile admin-action-danger"
+            disabled={!!actionBusy}
+            onClick={() => setShowWipeConfirm(true)}
+          >
+            {Icons.retire}
+            <span>Wipe All Data</span>
+          </button>
         </div>
       </div>
+
+      {/* ── Wipe confirmation modal ── */}
+      {showWipeConfirm && (
+        <div className="sq-modal-backdrop" role="presentation" onClick={() => { setShowWipeConfirm(false); setWipeTyped(''); }}>
+          <div className="admin-wipe-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h3>Wipe All Game Data</h3>
+            <p className="admin-wipe-warn">
+              This will <strong>permanently delete</strong> all worlds, franchises, players, seasons, matches, and stats.
+              User accounts will be kept but reset to unemployed.
+            </p>
+            <label className="admin-wipe-label">
+              Type <code>WIPE</code> to confirm:
+              <input
+                type="text"
+                className="admin-wipe-input"
+                value={wipeTyped}
+                onChange={(e) => setWipeTyped(e.target.value)}
+                placeholder="WIPE"
+                autoFocus
+              />
+            </label>
+            <div className="admin-wipe-actions">
+              <button
+                className="admin-action-btn"
+                onClick={() => { setShowWipeConfirm(false); setWipeTyped(''); }}
+              >
+                Cancel
+              </button>
+              <button
+                className="admin-action-btn admin-action-danger-btn"
+                disabled={wipeTyped.trim() !== 'WIPE' || !!actionBusy}
+                onClick={async () => {
+                  setShowWipeConfirm(false);
+                  setWipeTyped('');
+                  await runAction('Wipe All Data', () => api.admin.wipeAll(token));
+                }}
+              >
+                {actionBusy === 'Wipe All Data' ? 'Wiping…' : 'Wipe Everything'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Users section ── */}
       <div className="admin-users-section">
