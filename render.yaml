@@ -3,7 +3,7 @@ services:
     name: global-t20
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build -w frontend
+    buildCommand: npm install --include=dev && npm run build -w frontend
     startCommand: node backend/src/server.js
     envVars:
       - key: NODE_ENV
