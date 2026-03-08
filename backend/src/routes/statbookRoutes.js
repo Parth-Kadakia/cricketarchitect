@@ -36,7 +36,9 @@ router.get(
     const seasonId = parseSeasonId(req.query.seasonId);
     const worldId = req.user?.active_world_id || null;
 
-    if (seasonId && worldId) {
+    if (!worldId) return res.json({ seasonId: null, seasons: [], teams: [], totals: {}, records: {}, milestones: {} });
+
+    if (seasonId) {
       const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
@@ -290,7 +292,9 @@ router.get(
     const limit = parseLimit(req.query.limit, 20, 100);
     const worldId = req.user?.active_world_id || null;
 
-    if (seasonId && worldId) {
+    if (!worldId) return res.json({ seasonId: null, most_runs: [], most_wickets: [], best_batting_average: [], best_strike_rate: [], best_economy: [], most_fifties: [], most_hundreds: [], most_sixes: [], best_bowling_innings: [], fastest_fifty: null, fastest_hundred: null });
+
+    if (seasonId) {
       const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
@@ -449,7 +453,9 @@ router.get(
     const limit = parseLimit(req.query.limit, 20, 100);
     const worldId = req.user?.active_world_id || null;
 
-    if (seasonId && worldId) {
+    if (!worldId) return res.json({ seasonId: null, top_teams: [], highest_totals: [], lowest_totals: [], biggest_wins_by_runs: [], biggest_wins_by_wickets: [] });
+
+    if (seasonId) {
       const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
@@ -614,11 +620,13 @@ router.get(
     const limit = parseLimit(req.query.limit, 20, 50);
     const worldId = req.user?.active_world_id || null;
 
-    if (seasonId && worldId) {
+    if (!worldId) return res.json({ seasonId: null, teams: [], summary: null, matches: [] });
+
+    if (seasonId) {
       const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
-    if (worldId && teamAId) {
+    if (teamAId) {
       const check = await pool.query('SELECT id FROM franchises WHERE id = $1 AND world_id = $2', [teamAId, worldId]);
       if (!check.rows.length) return res.status(403).json({ message: 'Team not found in your world.' });
     }
@@ -705,7 +713,9 @@ router.get(
     const offset = Math.max(0, Number(req.query.offset || 0));
     const worldId = req.user?.active_world_id || null;
 
-    if (seasonId && worldId) {
+    if (!worldId) return res.json({ seasonId: null, teamId: null, total: 0, limit, offset, matches: [] });
+
+    if (seasonId) {
       const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
@@ -784,13 +794,12 @@ router.get(
     }
 
     const worldId = req.user?.active_world_id || null;
-    if (worldId) {
-      const check = await pool.query(
-        'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
-        [matchId, worldId]
-      );
-      if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
-    }
+    if (!worldId) return res.status(403).json({ message: 'Claim a franchise to view match data.' });
+    const check = await pool.query(
+      'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
+      [matchId, worldId]
+    );
+    if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
 
     const scorecard = await getMatchScorecard(matchId, pool);
     if (!scorecard) {

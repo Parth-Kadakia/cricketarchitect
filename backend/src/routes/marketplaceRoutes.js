@@ -14,6 +14,7 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const worldId = req.user?.active_world_id || null;
+    if (!worldId) return res.json({ availableCities: [], franchisesForSale: [], allFranchises: [], recentSales: [] });
     const data = await getMarketplaceData(worldId);
     return res.json(data);
   })
@@ -26,12 +27,10 @@ router.get(
     const q = String(req.query.q || '').trim().toLowerCase();
     const limit = Math.max(20, Math.min(2000, Number(req.query.limit || 600)));
     const worldId = req.user?.active_world_id || null;
-    const franchiseCount = Number(
-      (await pool.query(
-        'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
-        [worldId]
-      )).rows[0].count
-    );
+    /* New user (no world) → franchise count is 0 so they see all cities */
+    const franchiseCount = worldId
+      ? Number((await pool.query('SELECT COUNT(*)::int AS count FROM franchises WHERE world_id = $1', [worldId])).rows[0].count)
+      : 0;
 
     const cities = franchiseCount === 0
       ? await pool.query(
@@ -48,8 +47,8 @@ router.get(
          JOIN franchises f ON f.city_id = c.id
          WHERE f.owner_user_id IS NULL
            AND f.status IN ('AVAILABLE', 'AI_CONTROLLED')
+           AND f.world_id = $3
            AND ($1 = '' OR LOWER(c.name) LIKE '%' || $1 || '%' OR LOWER(c.country) LIKE '%' || $1 || '%')
-           AND ($3::bigint IS NULL OR f.world_id = $3)
          ORDER BY c.country, c.name
          LIMIT $2`,
         [q, limit, worldId]
@@ -64,6 +63,7 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const worldId = req.user?.active_world_id || null;
+    if (!worldId) return res.json({ franchises: [] });
     const franchises = await pool.query(
         `SELECT
          f.id,
@@ -112,6 +112,7 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const worldId = req.user?.active_world_id || null;
+    if (!worldId) return res.json({ players: [] });
     const activeSeason = await pool.query(
       `SELECT competition_mode
        FROM seasons
@@ -252,6 +253,7 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const worldId = req.user?.active_world_id || null;
+    if (!worldId) return res.json({ feed: [] });
     const activeSeason = await pool.query(
       `SELECT competition_mode
        FROM seasons

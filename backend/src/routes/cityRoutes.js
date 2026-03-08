@@ -94,6 +94,37 @@ router.get(
     await ensureInternationalCountryCities(pool);
     const worldId = req.user?.active_world_id || null;
 
+    /* ── New user with no world: every country is available ── */
+    if (!worldId) {
+      const rows = await pool.query(
+        `SELECT DISTINCT ON (country)
+                id AS city_id,
+                name AS city_name,
+                country
+         FROM cities
+         WHERE country = ANY($1::text[])
+         ORDER BY country,
+                  CASE
+                    WHEN LOWER(name) = LOWER(country) THEN 0
+                    WHEN LOWER(name) = LOWER(country || ' National Cricket Ground') THEN 1
+                    ELSE 2
+                  END,
+                  name ASC`,
+        [INTERNATIONAL_COUNTRIES]
+      );
+
+      const countries = rows.rows.map((row) => ({
+        country: row.country,
+        cityId: Number(row.city_id),
+        cityName: row.city_name,
+        franchiseId: null,
+        available: true
+      }));
+
+      return res.json({ countries });
+    }
+
+    /* ── Existing world: check franchise ownership within THIS world only ── */
     const rows = await pool.query(
       `WITH country_cities AS (
          SELECT DISTINCT ON (country)
@@ -121,7 +152,7 @@ router.get(
          SELECT id, status, owner_user_id
          FROM franchises
          WHERE city_id = cc.id
-           AND ($2::bigint IS NULL OR world_id = $2)
+           AND world_id = $2
          ORDER BY created_at DESC
          LIMIT 1
        ) f ON TRUE
@@ -149,12 +180,10 @@ router.get(
     const q = String(req.query.q || '').trim().toLowerCase();
     const limit = Math.max(20, Math.min(2000, Number(req.query.limit || 600)));
     const worldId = req.user?.active_world_id || null;
-    const franchiseCount = Number(
-      (await pool.query(
-        'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
-        [worldId]
-      )).rows[0].count
-    );
+    /* New user (no world) → franchise count is 0 so they see all cities */
+    const franchiseCount = worldId
+      ? Number((await pool.query('SELECT COUNT(*)::int AS count FROM franchises WHERE world_id = $1', [worldId])).rows[0].count)
+      : 0;
 
     if (franchiseCount === 0) {
       await ensureProminentCricketCities(pool);
@@ -179,7 +208,7 @@ router.get(
                JOIN franchises f ON f.city_id = c.id
                WHERE f.owner_user_id IS NULL
                  AND f.status IN ('AVAILABLE', 'AI_CONTROLLED')
-                 AND ($3::bigint IS NULL OR f.world_id = $3)
+                 AND f.world_id = $3
                  AND ($1 = '' OR LOWER(c.name) LIKE '%' || $1 || '%' OR LOWER(c.country) LIKE '%' || $1 || '%')
                ORDER BY c.country, c.name
                LIMIT $2`;
@@ -188,7 +217,7 @@ router.get(
       query = `SELECT c.*, f.id AS franchise_id, f.status AS franchise_status, f.owner_user_id
                FROM cities c
                JOIN franchises f ON f.city_id = c.id
-               WHERE ($3::bigint IS NULL OR f.world_id = $3)
+               WHERE f.world_id = $3
                  AND ($1 = '' OR LOWER(c.name) LIKE '%' || $1 || '%' OR LOWER(c.country) LIKE '%' || $1 || '%')
                ORDER BY c.country, c.name
                LIMIT $2`;
@@ -218,12 +247,10 @@ router.post(
     }
 
     const worldId = req.user?.active_world_id || null;
-    const franchiseCount = Number(
-      (await pool.query(
-        'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
-        [worldId]
-      )).rows[0].count
-    );
+    /* New user (no world) → franchise count is 0 */
+    const franchiseCount = worldId
+      ? Number((await pool.query('SELECT COUNT(*)::int AS count FROM franchises WHERE world_id = $1', [worldId])).rows[0].count)
+      : 0;
     if (franchiseCount > 0) {
       return res.status(409).json({
         message: 'Custom city add is available before career kickoff only. Start a new save to add cities, then select one.'

@@ -166,10 +166,9 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const worldId = req.user?.active_world_id || null;
-    if (worldId) {
-      const check = await pool.query('SELECT id FROM franchises WHERE id = $1 AND world_id = $2', [req.params.franchiseId, worldId]);
-      if (!check.rows.length) return res.status(403).json({ message: 'Franchise not found in your world.' });
-    }
+    if (!worldId) return res.status(403).json({ message: 'Claim a franchise to view trophy data.' });
+    const check = await pool.query('SELECT id FROM franchises WHERE id = $1 AND world_id = $2', [req.params.franchiseId, worldId]);
+    if (!check.rows.length) return res.status(403).json({ message: 'Franchise not found in your world.' });
     const trophies = await pool.query(
       `SELECT tc.id, tc.title, tc.won_at, s.name AS season_name
        FROM trophy_cabinet tc

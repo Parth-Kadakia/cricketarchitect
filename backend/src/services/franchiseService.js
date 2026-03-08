@@ -1209,9 +1209,13 @@ export async function purchaseFranchise({ buyerUserId, franchiseId, newFranchise
 }
 
 export async function getMarketplaceData(worldId = null) {
+  if (!worldId) {
+    return { availableCities: [], franchisesForSale: [], allFranchises: [], recentSales: [] };
+  }
+
   const franchiseCount = Number(
     (await pool.query(
-      'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+      'SELECT COUNT(*)::int AS count FROM franchises WHERE world_id = $1',
       [worldId]
     )).rows[0].count
   );
@@ -1225,7 +1229,7 @@ export async function getMarketplaceData(worldId = null) {
          JOIN franchises f ON f.city_id = c.id
          WHERE f.owner_user_id IS NULL
            AND f.status = 'AVAILABLE'
-           AND ($1::bigint IS NULL OR f.world_id = $1)
+           AND f.world_id = $1
          ORDER BY c.country, c.name`,
     [worldId]
   );
@@ -1249,7 +1253,7 @@ export async function getMarketplaceData(worldId = null) {
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
      LEFT JOIN users u ON u.id = f.owner_user_id
-     WHERE ($1::bigint IS NULL OR f.world_id = $1)
+     WHERE f.world_id = $1
      ORDER BY f.total_valuation DESC, c.name ASC`,
     [worldId]
   );
@@ -1260,7 +1264,7 @@ export async function getMarketplaceData(worldId = null) {
     `SELECT fs.id, fs.franchise_id, fs.sale_value, fs.sold_at, f.franchise_name
      FROM franchise_sales fs
      JOIN franchises f ON f.id = fs.franchise_id
-     WHERE ($1::bigint IS NULL OR f.world_id = $1)
+     WHERE f.world_id = $1
      ORDER BY fs.sold_at DESC
      LIMIT 20`,
     [worldId]

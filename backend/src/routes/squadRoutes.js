@@ -56,10 +56,9 @@ router.get(
     }
 
     const worldId = req.user?.active_world_id || null;
-    if (worldId) {
-      const check = await pool.query('SELECT id FROM franchises WHERE id = $1 AND world_id = $2', [franchiseId, worldId]);
-      if (!check.rows.length) return res.status(403).json({ message: 'Franchise not found in your world.' });
-    }
+    if (!worldId) return res.status(403).json({ message: 'Claim a franchise to view squad data.' });
+    const check = await pool.query('SELECT id FROM franchises WHERE id = $1 AND world_id = $2', [franchiseId, worldId]);
+    if (!check.rows.length) return res.status(403).json({ message: 'Franchise not found in your world.' });
 
     const franchiseResult = await pool.query(
       `SELECT f.id,

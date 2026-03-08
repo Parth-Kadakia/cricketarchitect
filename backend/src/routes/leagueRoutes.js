@@ -58,6 +58,7 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const worldId = req.user?.active_world_id || null;
+    if (!worldId) return res.json({ seasons: [] });
     const seasons = await listSeasons(Math.max(5, Math.min(30, Number(req.query.limit || 12))), worldId);
     return res.json({ seasons });
   })
@@ -68,6 +69,7 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const worldId = req.user?.active_world_id || null;
+    if (!worldId) return res.json({ season: null });
     const season = await ensureActiveSeason(pool, worldId);
     return res.json({ season });
   })
@@ -78,10 +80,9 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const worldId = req.user?.active_world_id || null;
-    if (worldId) {
-      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [req.params.seasonId, worldId]);
-      if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
-    }
+    if (!worldId) return res.status(403).json({ message: 'Claim a franchise to view season data.' });
+    const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [req.params.seasonId, worldId]);
+    if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     const summary = await getSeasonSummary(req.params.seasonId, pool);
     if (!summary) {
       return res.status(404).json({ message: 'Season not found.' });
@@ -99,10 +100,9 @@ router.get(
       return res.status(400).json({ message: 'Invalid season id.' });
     }
     const worldId = req.user?.active_world_id || null;
-    if (worldId) {
-      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
-      if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
-    }
+    if (!worldId) return res.status(403).json({ message: 'Claim a franchise to view stats.' });
+    const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+    if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
 
     const leaders = await getSeasonPlayerLeaders(seasonId, pool);
     return res.json(leaders);
@@ -118,7 +118,9 @@ router.get(
     const seasonFilter = Number(req.query.seasonId) || null;
     const worldId = req.user?.active_world_id || null;
 
-    if (seasonFilter && worldId) {
+    if (!worldId) return res.json({ batting: [], bowling: [], allRounders: [], seasons: [] });
+
+    if (seasonFilter) {
       const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonFilter, worldId]);
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
@@ -128,7 +130,7 @@ router.get(
     if (seasonFilter) {
       params.push(seasonFilter);
       conditions.push(`AND m.season_id = $${params.length}`);
-    } else if (worldId) {
+    } else {
       params.push(worldId);
       conditions.push(`AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $${params.length})`);
     }
@@ -228,7 +230,7 @@ router.get(
     );
 
     const seasons = await pool.query(
-      `SELECT id, season_number, name, status FROM seasons WHERE ($1::bigint IS NULL OR world_id = $1) ORDER BY season_number`,
+      `SELECT id, season_number, name, status FROM seasons WHERE world_id = $1 ORDER BY season_number`,
       [worldId]
     );
 
@@ -282,13 +284,15 @@ router.get(
     let seasonId = Number(req.query.seasonId || 0);
     const worldId = req.user?.active_world_id || null;
 
+    if (!worldId) return res.status(404).json({ message: 'Claim a franchise to view the league table.' });
+
     if (!seasonId) {
       const activeSeason = await ensureActiveSeason(pool, worldId);
       if (!activeSeason) {
         return res.status(404).json({ message: 'No active season yet. Claim a city franchise to start your career.' });
       }
       seasonId = activeSeason.id;
-    } else if (worldId) {
+    } else {
       const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
@@ -307,13 +311,15 @@ router.get(
     let seasonId = Number(req.query.seasonId || 0);
     const worldId = req.user?.active_world_id || null;
 
+    if (!worldId) return res.json({ seasonId: null, rounds: [] });
+
     if (!seasonId) {
       const activeSeason = await ensureActiveSeason(pool, worldId);
       if (!activeSeason) {
         return res.status(404).json({ message: 'No active season yet. Claim a city franchise to start your career.' });
       }
       seasonId = activeSeason.id;
-    } else if (worldId) {
+    } else {
       const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
@@ -330,13 +336,15 @@ router.get(
     let seasonId = Number(req.query.seasonId || 0);
     const worldId = req.user?.active_world_id || null;
 
+    if (!worldId) return res.json({ seasonId: null, fixtures: [] });
+
     if (!seasonId) {
       const activeSeason = await ensureActiveSeason(pool, worldId);
       if (!activeSeason) {
         return res.status(404).json({ message: 'No active season yet. Claim a city franchise to start your career.' });
       }
       seasonId = activeSeason.id;
-    } else if (worldId) {
+    } else {
       const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
@@ -394,13 +402,12 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const worldId = req.user?.active_world_id || null;
-    if (worldId) {
-      const check = await pool.query(
-        'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
-        [req.params.matchId, worldId]
-      );
-      if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
-    }
+    if (!worldId) return res.status(403).json({ message: 'Claim a franchise to view match data.' });
+    const check = await pool.query(
+      'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
+      [req.params.matchId, worldId]
+    );
+    if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
     const events = await pool.query(
       `SELECT *
        FROM match_events
@@ -418,13 +425,12 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const worldId = req.user?.active_world_id || null;
-    if (worldId) {
-      const check = await pool.query(
-        'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
-        [req.params.matchId, worldId]
-      );
-      if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
-    }
+    if (!worldId) return res.status(403).json({ message: 'Claim a franchise to view match data.' });
+    const check = await pool.query(
+      'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
+      [req.params.matchId, worldId]
+    );
+    if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
     const scorecard = await getMatchScorecard(req.params.matchId, pool);
 
     if (!scorecard) {
@@ -445,13 +451,12 @@ router.post(
     }
 
     const worldId = req.user?.active_world_id || null;
-    if (worldId) {
-      const check = await pool.query(
-        'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
-        [matchId, worldId]
-      );
-      if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
-    }
+    if (!worldId) return res.status(403).json({ message: 'No active world.' });
+    const check = await pool.query(
+      'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
+      [matchId, worldId]
+    );
+    if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
 
     if (isMatchSimulationRunning(matchId)) {
       return res.status(409).json({ message: 'Cannot reset a match while its simulation is actively running.' });
@@ -512,13 +517,12 @@ router.post(
     }
 
     const worldId = req.user?.active_world_id || null;
-    if (worldId) {
-      const check = await pool.query(
-        'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
-        [matchId, worldId]
-      );
-      if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
-    }
+    if (!worldId) return res.status(403).json({ message: 'No active world.' });
+    const matchLiveCheck = await pool.query(
+      'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
+      [matchId, worldId]
+    );
+    if (!matchLiveCheck.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
 
     if (isMatchSimulationRunning(matchId)) {
       return res.status(409).json({ message: 'This match simulation is already in progress.' });
@@ -545,13 +549,12 @@ router.post(
     const useExternalFullMatchApi = Boolean(req.body?.useExternalFullMatchApi);
 
     const worldId = req.user?.active_world_id || null;
-    if (worldId) {
-      const check = await pool.query(
-        'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
-        [matchId, worldId]
-      );
-      if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
-    }
+    if (!worldId) return res.status(403).json({ message: 'No active world.' });
+    const matchCheck2 = await pool.query(
+      'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
+      [matchId, worldId]
+    );
+    if (!matchCheck2.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
 
     const result = useExternalFullMatchApi
       ? await simulateMatchOutsideCenter(matchId, {

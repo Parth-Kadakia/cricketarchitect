@@ -339,6 +339,7 @@ export async function runCpuMarketCycle(seasonId, dbClient = pool) {
 }
 
 export async function getTransferFeed(limit = 100, dbClient = pool, worldId = null) {
+  if (!worldId) return [];
   const feed = await dbClient.query(
     `SELECT tf.*, sf.franchise_name AS source_franchise_name, tf2.franchise_name AS target_franchise_name,
             p.first_name, p.last_name
@@ -346,8 +347,7 @@ export async function getTransferFeed(limit = 100, dbClient = pool, worldId = nu
      LEFT JOIN franchises sf ON sf.id = tf.source_franchise_id
      LEFT JOIN franchises tf2 ON tf2.id = tf.target_franchise_id
      LEFT JOIN players p ON p.id = tf.player_id
-     WHERE ($2::bigint IS NULL
-            OR sf.world_id = $2
+     WHERE (sf.world_id = $2
             OR tf2.world_id = $2
             OR tf.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
      ORDER BY tf.created_at DESC
