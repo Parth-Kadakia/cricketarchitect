@@ -78,10 +78,10 @@ export default function DashboardPage() {
     try {
       const [franchiseResponse, marketCities, intlCountriesResponse, activeSeason, feedResponse, managerResponse] = await Promise.all([
         api.franchise.me(token),
-        api.marketplace.cities('', 1200),
-        api.cities.internationalCountries(),
-        api.league.activeSeason(),
-        api.marketplace.transferFeed(40),
+        api.marketplace.cities(token, '', 1200),
+        api.cities.internationalCountries(token),
+        api.league.activeSeason(token),
+        api.marketplace.transferFeed(token, 40),
         api.manager.me(token)
       ]);
       setFranchiseData(franchiseResponse.franchise || null);
@@ -92,7 +92,7 @@ export default function DashboardPage() {
       setTransferFeed(feedResponse.feed || []);
       setManagerCareer(managerResponse || null);
       if (activeSeason.season?.id) {
-        const summary = await api.league.seasonSummary(activeSeason.season.id);
+        const summary = await api.league.seasonSummary(token, activeSeason.season.id);
         setSeasonSummary(summary);
       }
       if (franchiseResponse.franchise && String(franchiseResponse.franchise.competition_mode || '').toUpperCase() !== 'INTERNATIONAL') {

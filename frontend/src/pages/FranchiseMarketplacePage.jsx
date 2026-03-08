@@ -61,7 +61,7 @@ export default function FranchiseMarketplacePage() {
   async function load() {
     setError('');
     try {
-      const response = await api.marketplace.overview();
+      const response = await api.marketplace.overview(token);
       setData(response);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }

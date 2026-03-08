@@ -1090,8 +1090,8 @@ export async function claimFranchise({ userId, cityId, franchiseName, mode = CAR
   });
 }
 
-export async function listFranchiseForSale({ userId, franchiseId }) {
-  const franchise = await getOwnedFranchise(userId);
+export async function listFranchiseForSale({ userId, franchiseId, worldId = null }) {
+  const franchise = await getOwnedFranchise(userId, undefined, worldId);
   if (!franchise || Number(franchise.id) !== Number(franchiseId)) {
     const error = new Error('You can only list your own franchise.');
     error.status = 403;
@@ -1109,9 +1109,9 @@ export async function listFranchiseForSale({ userId, franchiseId }) {
   return (await pool.query('SELECT * FROM franchises WHERE id = $1', [franchiseId])).rows[0];
 }
 
-export async function sellFranchiseToMarketplace({ userId, franchiseId }) {
+export async function sellFranchiseToMarketplace({ userId, franchiseId, worldId = null }) {
   return withTransaction(async (client) => {
-    const franchise = await getOwnedFranchise(userId, client);
+    const franchise = await getOwnedFranchise(userId, client, worldId);
     if (!franchise || Number(franchise.id) !== Number(franchiseId)) {
       const error = new Error('You can only sell your own franchise.');
       error.status = 403;
@@ -1137,11 +1137,11 @@ export async function sellFranchiseToMarketplace({ userId, franchiseId }) {
   });
 }
 
-export async function purchaseFranchise({ buyerUserId, franchiseId, newFranchiseName }) {
+export async function purchaseFranchise({ buyerUserId, franchiseId, newFranchiseName, worldId = null }) {
   return withTransaction(async (client) => {
     const managerUser = await assertManagerCanTakeJobs(buyerUserId, client);
 
-    const owned = await getOwnedFranchise(buyerUserId, client);
+    const owned = await getOwnedFranchise(buyerUserId, client, worldId);
     if (owned) {
       const error = new Error('Single-player mode allows one franchise per save.');
       error.status = 400;

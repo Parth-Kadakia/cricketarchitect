@@ -37,7 +37,7 @@ export default function StatsPage() {
     setLoading(true);
     setError('');
     try {
-      const result = await api.league.allStats(sid || null);
+      const result = await api.league.allStats(token, sid || null);
       setData(result);
     } catch (e) {
       setError(e.message);

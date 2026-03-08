@@ -66,10 +66,10 @@ export const api = {
       })
   },
   cities: {
-    list: (availableOnly = false, q = '', limit = 600) =>
-      request(`/cities?available=${availableOnly}&q=${encodeURIComponent(q)}&limit=${limit}`),
-    internationalCountries: () =>
-      request('/cities/international-countries'),
+    list: (token, availableOnly = false, q = '', limit = 600) =>
+      request(`/cities?available=${availableOnly}&q=${encodeURIComponent(q)}&limit=${limit}`, { headers: buildHeaders(token, false) }),
+    internationalCountries: (token) =>
+      request('/cities/international-countries', { headers: buildHeaders(token, false) }),
     add: (token, payload) =>
       request('/cities', {
         method: 'POST',
@@ -107,7 +107,7 @@ export const api = {
         headers: buildHeaders(token),
         body: JSON.stringify({ mode })
       }),
-    trophies: (franchiseId) => request(`/franchises/${franchiseId}/trophies`)
+    trophies: (token, franchiseId) => request(`/franchises/${franchiseId}/trophies`, { headers: buildHeaders(token, false) })
   },
   squad: {
     get: (token) => request('/squad', { headers: buildHeaders(token, false) }),
@@ -168,16 +168,16 @@ export const api = {
     growthHistory: (token, playerId) => request(`/youth/growth-history/${playerId}`, { headers: buildHeaders(token, false) })
   },
   league: {
-    seasons: () => request('/league/seasons'),
-    activeSeason: () => request('/league/seasons/active'),
-    seasonSummary: (seasonId) => request(`/league/seasons/${seasonId}/summary`),
-    seasonStats: (seasonId) => request(`/league/seasons/${seasonId}/stats`),
-    table: (seasonId) => request(`/league/table${seasonId ? `?seasonId=${seasonId}` : ''}`),
-    rounds: (seasonId) => request(`/league/rounds${seasonId ? `?seasonId=${seasonId}` : ''}`),
-    fixtures: (seasonId, roundNo = null) =>
-      request(`/league/fixtures${seasonId || roundNo ? `?${[seasonId ? `seasonId=${seasonId}` : null, roundNo ? `roundNo=${roundNo}` : null].filter(Boolean).join('&')}` : ''}`),
-    events: (matchId) => request(`/league/matches/${matchId}/events`),
-    scorecard: (matchId) => request(`/league/matches/${matchId}/scorecard`),
+    seasons: (token) => request('/league/seasons', { headers: buildHeaders(token, false) }),
+    activeSeason: (token) => request('/league/seasons/active', { headers: buildHeaders(token, false) }),
+    seasonSummary: (token, seasonId) => request(`/league/seasons/${seasonId}/summary`, { headers: buildHeaders(token, false) }),
+    seasonStats: (token, seasonId) => request(`/league/seasons/${seasonId}/stats`, { headers: buildHeaders(token, false) }),
+    table: (token, seasonId) => request(`/league/table${seasonId ? `?seasonId=${seasonId}` : ''}`, { headers: buildHeaders(token, false) }),
+    rounds: (token, seasonId) => request(`/league/rounds${seasonId ? `?seasonId=${seasonId}` : ''}`, { headers: buildHeaders(token, false) }),
+    fixtures: (token, seasonId, roundNo = null) =>
+      request(`/league/fixtures${seasonId || roundNo ? `?${[seasonId ? `seasonId=${seasonId}` : null, roundNo ? `roundNo=${roundNo}` : null].filter(Boolean).join('&')}` : ''}`, { headers: buildHeaders(token, false) }),
+    events: (token, matchId) => request(`/league/matches/${matchId}/events`, { headers: buildHeaders(token, false) }),
+    scorecard: (token, matchId) => request(`/league/matches/${matchId}/scorecard`, { headers: buildHeaders(token, false) }),
     simulateLive: (token, matchId, ballDelayMs = 120, operationId = null) =>
       request(`/league/matches/${matchId}/simulate-live`, {
         method: 'POST',
@@ -225,43 +225,43 @@ export const api = {
         headers: buildHeaders(token),
         body: JSON.stringify(payload || {})
       }),
-    allStats: (seasonId = null) =>
-      request(`/league/all-stats${seasonId ? `?seasonId=${seasonId}` : ''}`)
+    allStats: (token, seasonId = null) =>
+      request(`/league/all-stats${seasonId ? `?seasonId=${seasonId}` : ''}`, { headers: buildHeaders(token, false) })
   },
   statbook: {
-    overview: (seasonId = null) =>
-      request(`/statbook/overview${seasonId ? `?seasonId=${seasonId}` : ''}`),
-    playerRecords: (seasonId = null, limit = 20) =>
-      request(`/statbook/player-records?${[seasonId ? `seasonId=${seasonId}` : null, `limit=${limit}`].filter(Boolean).join('&')}`),
-    teamRecords: (seasonId = null, limit = 20) =>
-      request(`/statbook/team-records?${[seasonId ? `seasonId=${seasonId}` : null, `limit=${limit}`].filter(Boolean).join('&')}`),
-    headToHead: (teamAId, teamBId, seasonId = null, limit = 20) =>
+    overview: (token, seasonId = null) =>
+      request(`/statbook/overview${seasonId ? `?seasonId=${seasonId}` : ''}`, { headers: buildHeaders(token, false) }),
+    playerRecords: (token, seasonId = null, limit = 20) =>
+      request(`/statbook/player-records?${[seasonId ? `seasonId=${seasonId}` : null, `limit=${limit}`].filter(Boolean).join('&')}`, { headers: buildHeaders(token, false) }),
+    teamRecords: (token, seasonId = null, limit = 20) =>
+      request(`/statbook/team-records?${[seasonId ? `seasonId=${seasonId}` : null, `limit=${limit}`].filter(Boolean).join('&')}`, { headers: buildHeaders(token, false) }),
+    headToHead: (token, teamAId, teamBId, seasonId = null, limit = 20) =>
       request(`/statbook/head-to-head?${[
         `teamAId=${teamAId}`,
         `teamBId=${teamBId}`,
         seasonId ? `seasonId=${seasonId}` : null,
         `limit=${limit}`
-      ].filter(Boolean).join('&')}`),
-    matchArchive: ({ seasonId = null, teamId = null, limit = 30, offset = 0 } = {}) =>
+      ].filter(Boolean).join('&')}`, { headers: buildHeaders(token, false) }),
+    matchArchive: (token, { seasonId = null, teamId = null, limit = 30, offset = 0 } = {}) =>
       request(`/statbook/match-archive?${[
         seasonId ? `seasonId=${seasonId}` : null,
         teamId ? `teamId=${teamId}` : null,
         `limit=${limit}`,
         `offset=${offset}`
-      ].filter(Boolean).join('&')}`),
-    matchDetail: (matchId) => request(`/statbook/match-archive/${matchId}`)
+      ].filter(Boolean).join('&')}`, { headers: buildHeaders(token, false) }),
+    matchDetail: (token, matchId) => request(`/statbook/match-archive/${matchId}`, { headers: buildHeaders(token, false) })
   },
   marketplace: {
-    overview: () => request('/marketplace'),
-    cities: (q = '', limit = 600) => request(`/marketplace/cities?q=${encodeURIComponent(q)}&limit=${limit}`),
-    franchises: () => request('/marketplace/franchises'),
-    auctionPool: () => request('/marketplace/auction-pool'),
+    overview: (token) => request('/marketplace', { headers: buildHeaders(token, false) }),
+    cities: (token, q = '', limit = 600) => request(`/marketplace/cities?q=${encodeURIComponent(q)}&limit=${limit}`, { headers: buildHeaders(token, false) }),
+    franchises: (token) => request('/marketplace/franchises', { headers: buildHeaders(token, false) }),
+    auctionPool: (token) => request('/marketplace/auction-pool', { headers: buildHeaders(token, false) }),
     buyAuctionPlayer: (token, playerId) =>
       request(`/marketplace/auction-pool/${playerId}/buy`, {
         method: 'POST',
         headers: buildHeaders(token)
       }),
-    transferFeed: (limit = 100) => request(`/marketplace/transfer-feed?limit=${limit}`)
+    transferFeed: (token, limit = 100) => request(`/marketplace/transfer-feed?limit=${limit}`, { headers: buildHeaders(token, false) })
   },
   manager: {
     me: (token) => request('/manager/me', { headers: buildHeaders(token, false) }),

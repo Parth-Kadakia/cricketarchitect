@@ -55,6 +55,12 @@ router.get(
       return res.status(400).json({ message: 'Invalid franchise id.' });
     }
 
+    const worldId = req.user?.active_world_id || null;
+    if (worldId) {
+      const check = await pool.query('SELECT id FROM franchises WHERE id = $1 AND world_id = $2', [franchiseId, worldId]);
+      if (!check.rows.length) return res.status(403).json({ message: 'Franchise not found in your world.' });
+    }
+
     const franchiseResult = await pool.query(
       `SELECT f.id,
               f.franchise_name,
@@ -193,13 +199,15 @@ router.get(
   '/player/:playerId',
   requireAuth,
   asyncHandler(async (req, res) => {
+    const worldId = req.user?.active_world_id || null;
     const playerResult = await pool.query(
       `SELECT p.*, ROUND((p.batting + p.bowling + p.fielding + p.fitness + p.temperament) / 5.0, 1) AS overall,
               f.franchise_name
        FROM players p
        LEFT JOIN franchises f ON f.id = p.franchise_id
-       WHERE p.id = $1`,
-      [req.params.playerId]
+       WHERE p.id = $1
+         AND ($2::bigint IS NULL OR f.world_id = $2)`,
+      [req.params.playerId, worldId]
     );
 
     if (!playerResult.rows.length) {

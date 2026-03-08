@@ -57,9 +57,14 @@ async function cpuBuyAuctionPlayer(franchiseId, franchiseName, seasonId, dbClien
          WHERE tf.player_id = p.id
            AND tf.season_id = $1
        )
+       AND EXISTS (
+         SELECT 1 FROM seasons s
+         WHERE s.id = $1
+           AND s.world_id = (SELECT world_id FROM franchises WHERE id = $2)
+       )
      ORDER BY p.market_value DESC
      LIMIT 12`,
-    [seasonId]
+    [seasonId, franchiseId]
   );
 
   if (!auctionPlayers.rows.length) {

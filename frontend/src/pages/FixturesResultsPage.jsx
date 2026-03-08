@@ -85,7 +85,7 @@ export default function FixturesResultsPage() {
     setError('');
     setLoading(true);
     try {
-      const seasonResponse = await api.league.seasons();
+      const seasonResponse = await api.league.seasons(token);
       const seasonRows = seasonResponse.seasons || [];
       setSeasons(seasonRows);
       const querySeason = Number(searchParams.get('season') || 0) || null;
@@ -97,7 +97,7 @@ export default function FixturesResultsPage() {
       }
       const sId = Number(resolvedSeason.id);
       setSelectedSeasonId(sId);
-      const [roundsResp, allFixResp] = await Promise.all([api.league.rounds(sId), api.league.fixtures(sId)]);
+      const [roundsResp, allFixResp] = await Promise.all([api.league.rounds(token, sId), api.league.fixtures(token, sId)]);
       const roundRows = roundsResp.rounds || [];
       const fixtureRows = allFixResp.fixtures || [];
       setRounds(roundRows);
@@ -138,7 +138,7 @@ export default function FixturesResultsPage() {
   async function refreshCurrentSeasonData() {
     const currentSId = Number(selectedSeasonId || 0);
     if (!currentSId) return;
-    const [roundsResp, allFixResp] = await Promise.all([api.league.rounds(currentSId), api.league.fixtures(currentSId)]);
+    const [roundsResp, allFixResp] = await Promise.all([api.league.rounds(token, currentSId), api.league.fixtures(token, currentSId)]);
     const roundRows = roundsResp.rounds || [];
     const fixtureRows = allFixResp.fixtures || [];
     setRounds(roundRows);
@@ -198,7 +198,7 @@ export default function FixturesResultsPage() {
       const cur = Number(selectedSeasonId || 0);
       if (!sSeason || !cur || sSeason !== cur) return;
       try {
-        const [rResp, fResp] = await Promise.all([api.league.rounds(cur), api.league.fixtures(cur)]);
+        const [rResp, fResp] = await Promise.all([api.league.rounds(token, cur), api.league.fixtures(token, cur)]);
         setRounds(rResp.rounds || []);
         const fix = fResp.fixtures || [];
         setAllFixtures(fix);

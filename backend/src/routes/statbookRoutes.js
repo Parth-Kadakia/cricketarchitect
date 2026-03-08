@@ -36,6 +36,11 @@ router.get(
     const seasonId = parseSeasonId(req.query.seasonId);
     const worldId = req.user?.active_world_id || null;
 
+    if (seasonId && worldId) {
+      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
+    }
+
     const [seasons, teams, totals, boundaries, highestTeamTotal, lowestTeamTotal, highestIndividual, bestBowling, milestones] = await Promise.all([
       pool.query(
         `SELECT id, season_number, name, status
@@ -50,11 +55,13 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
            UNION
            SELECT DISTINCT away_franchise_id
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
          )
          SELECT f.id AS franchise_id,
                 f.franchise_name,
@@ -64,7 +71,7 @@ router.get(
          JOIN franchises f ON f.id = flt.franchise_id
          JOIN cities c ON c.id = f.city_id
          ORDER BY c.country, f.franchise_name`,
-        [seasonId]
+        [seasonId, worldId]
       ),
       pool.query(
         `WITH filtered_matches AS (
@@ -72,6 +79,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
          )
          SELECT COUNT(*)::int AS completed_matches,
                 COALESCE(SUM(COALESCE(home_score, 0) + COALESCE(away_score, 0)), 0)::int AS total_runs,
@@ -82,7 +90,7 @@ router.get(
                  FROM player_match_stats pms
                  JOIN filtered_matches fm ON fm.id = pms.match_id) AS players_involved
          FROM filtered_matches`,
-        [seasonId]
+        [seasonId, worldId]
       ),
       pool.query(
         `WITH filtered_matches AS (
@@ -90,12 +98,13 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
          )
          SELECT COALESCE(SUM(pms.fours), 0)::int AS fours,
                 COALESCE(SUM(pms.sixes), 0)::int AS sixes
          FROM player_match_stats pms
          JOIN filtered_matches fm ON fm.id = pms.match_id`,
-        [seasonId]
+        [seasonId, worldId]
       ),
       pool.query(
         `WITH filtered_matches AS (
@@ -103,6 +112,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -132,7 +142,7 @@ router.get(
          WHERE i.runs IS NOT NULL
          ORDER BY i.runs DESC, i.wickets ASC, i.balls ASC
          LIMIT 1`,
-        [seasonId]
+        [seasonId, worldId]
       ),
       pool.query(
         `WITH filtered_matches AS (
@@ -140,6 +150,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -169,7 +180,7 @@ router.get(
          WHERE i.runs IS NOT NULL
          ORDER BY i.runs ASC, i.wickets DESC, i.balls ASC
          LIMIT 1`,
-        [seasonId]
+        [seasonId, worldId]
       ),
       pool.query(
         `SELECT pms.match_id,
@@ -190,9 +201,10 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+           AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
          ORDER BY pms.batting_runs DESC, pms.batting_balls ASC
          LIMIT 1`,
-        [seasonId]
+        [seasonId, worldId]
       ),
       pool.query(
         `SELECT pms.match_id,
@@ -212,9 +224,10 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+           AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
          ORDER BY pms.bowling_wickets DESC, pms.bowling_runs ASC, pms.bowling_balls ASC
          LIMIT 1`,
-        [seasonId]
+        [seasonId, worldId]
       ),
       pool.query(
         `WITH filtered_matches AS (
@@ -222,6 +235,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
          )
          SELECT
            COALESCE(SUM(CASE WHEN pms.batting_runs BETWEEN 50 AND 99 THEN 1 ELSE 0 END), 0)::int AS fifties,
@@ -229,7 +243,7 @@ router.get(
            COALESCE(SUM(CASE WHEN pms.bowling_wickets >= 5 THEN 1 ELSE 0 END), 0)::int AS five_wicket_hauls
          FROM player_match_stats pms
          JOIN filtered_matches fm ON fm.id = pms.match_id`,
-        [seasonId]
+        [seasonId, worldId]
       )
     ]);
 
@@ -275,6 +289,11 @@ router.get(
     const seasonId = parseSeasonId(req.query.seasonId);
     const limit = parseLimit(req.query.limit, 20, 100);
     const worldId = req.user?.active_world_id || null;
+
+    if (seasonId && worldId) {
+      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
+    }
 
     const [aggregates, bestBowlingInnings, fastestFifty, fastestHundred] = await Promise.all([
       pool.query(
@@ -430,6 +449,11 @@ router.get(
     const limit = parseLimit(req.query.limit, 20, 100);
     const worldId = req.user?.active_world_id || null;
 
+    if (seasonId && worldId) {
+      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
+    }
+
     const [teamPerformance, highestTotals, lowestTotals, biggestWinsByRuns, biggestWinsByWickets] = await Promise.all([
       pool.query(
         `SELECT f.id AS franchise_id,
@@ -582,11 +606,22 @@ router.get(
 
 router.get(
   '/head-to-head',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
     const teamAId = parseId(req.query.teamAId);
     const teamBId = parseId(req.query.teamBId);
     const limit = parseLimit(req.query.limit, 20, 50);
+    const worldId = req.user?.active_world_id || null;
+
+    if (seasonId && worldId) {
+      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
+    }
+    if (worldId && teamAId) {
+      const check = await pool.query('SELECT id FROM franchises WHERE id = $1 AND world_id = $2', [teamAId, worldId]);
+      if (!check.rows.length) return res.status(403).json({ message: 'Team not found in your world.' });
+    }
 
     if (!teamAId || !teamBId || teamAId === teamBId) {
       return res.status(400).json({ message: 'teamAId and teamBId are required and must be different.' });
@@ -611,12 +646,13 @@ router.get(
          FROM matches m
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+           AND ($4::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $4))
            AND (
              (m.home_franchise_id = $2 AND m.away_franchise_id = $3)
              OR
              (m.home_franchise_id = $3 AND m.away_franchise_id = $2)
            )`,
-        [seasonId, teamAId, teamBId]
+        [seasonId, teamAId, teamBId, worldId]
       ),
       pool.query(
         `SELECT m.id,
@@ -638,6 +674,7 @@ router.get(
          JOIN franchises af ON af.id = m.away_franchise_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+           AND ($5::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $5))
            AND (
              (m.home_franchise_id = $2 AND m.away_franchise_id = $3)
              OR
@@ -645,7 +682,7 @@ router.get(
            )
          ORDER BY m.id DESC
          LIMIT $4`,
-        [seasonId, teamAId, teamBId, limit]
+        [seasonId, teamAId, teamBId, limit, worldId]
       )
     ]);
 
@@ -667,6 +704,11 @@ router.get(
     const limit = parseLimit(req.query.limit, 30, 200);
     const offset = Math.max(0, Number(req.query.offset || 0));
     const worldId = req.user?.active_world_id || null;
+
+    if (seasonId && worldId) {
+      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
+    }
 
     const [count, matches] = await Promise.all([
       pool.query(
@@ -734,10 +776,20 @@ router.get(
 
 router.get(
   '/match-archive/:matchId',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const matchId = parseId(req.params.matchId);
     if (!matchId) {
       return res.status(400).json({ message: 'Invalid match id.' });
+    }
+
+    const worldId = req.user?.active_world_id || null;
+    if (worldId) {
+      const check = await pool.query(
+        'SELECT m.id FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = $1 AND s.world_id = $2',
+        [matchId, worldId]
+      );
+      if (!check.rows.length) return res.status(403).json({ message: 'Match not found in your world.' });
     }
 
     const scorecard = await getMatchScorecard(matchId, pool);

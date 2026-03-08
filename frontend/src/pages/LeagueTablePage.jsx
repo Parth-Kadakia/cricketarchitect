@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import TeamNameButton from '../components/TeamNameButton';
+import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { oversFromBalls, scoreLabel, setPageTitle } from '../utils/format';
 
@@ -31,6 +32,7 @@ function StatusDot({ status }) {
 }
 
 export default function LeagueTablePage() {
+  const { token } = useAuth();
   const { subscribe } = useSocket();
 
   const [tab, setTab] = useState('standings');
@@ -71,17 +73,17 @@ export default function LeagueTablePage() {
   async function load(initial = false) {
     setError('');
     try {
-      const seasonResponse = await api.league.seasons();
+      const seasonResponse = await api.league.seasons(token);
       const seasonRows = seasonResponse.seasons || [];
       setSeasons(seasonRows);
       const currentSeasonId = seasonId || seasonRows[0]?.id;
       setSeasonId(currentSeasonId);
       if (currentSeasonId) {
         const [tableResp, summaryResp, fixturesResp, statsResp] = await Promise.all([
-          api.league.table(currentSeasonId),
-          api.league.seasonSummary(currentSeasonId),
-          api.league.fixtures(currentSeasonId),
-          api.league.seasonStats(currentSeasonId)
+          api.league.table(token, currentSeasonId),
+          api.league.seasonSummary(token, currentSeasonId),
+          api.league.fixtures(token, currentSeasonId),
+          api.league.seasonStats(token, currentSeasonId)
         ]);
         setTable(tableResp.table || []);
         setSummary(summaryResp || null);
@@ -104,10 +106,10 @@ export default function LeagueTablePage() {
     setSeasonId(nextId);
     try {
       const [tableResp, summaryResp, fixturesResp, statsResp] = await Promise.all([
-        api.league.table(nextId),
-        api.league.seasonSummary(nextId),
-        api.league.fixtures(nextId),
-        api.league.seasonStats(nextId)
+        api.league.table(token, nextId),
+        api.league.seasonSummary(token, nextId),
+        api.league.fixtures(token, nextId),
+        api.league.seasonStats(token, nextId)
       ]);
       setTable(tableResp.table || []);
       setSummary(summaryResp || null);

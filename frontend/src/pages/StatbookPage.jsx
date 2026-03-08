@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import { oversFromBalls, setPageTitle } from '../utils/format';
 
 function fmt(value) {
@@ -30,6 +31,7 @@ const TABS = [
 
 export default function StatbookPage() {
   const navigate = useNavigate();
+  const { token } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('players');
@@ -53,10 +55,10 @@ export default function StatbookPage() {
     try {
       const numericSeasonId = activeSeasonId ? Number(activeSeasonId) : null;
       const [overviewData, playerData, teamData, archiveData] = await Promise.all([
-        api.statbook.overview(numericSeasonId),
-        api.statbook.playerRecords(numericSeasonId, 25),
-        api.statbook.teamRecords(numericSeasonId, 25),
-        api.statbook.matchArchive({ seasonId: numericSeasonId, limit: 40, offset: 0 })
+        api.statbook.overview(token, numericSeasonId),
+        api.statbook.playerRecords(token, numericSeasonId, 25),
+        api.statbook.teamRecords(token, numericSeasonId, 25),
+        api.statbook.matchArchive(token, { seasonId: numericSeasonId, limit: 40, offset: 0 })
       ]);
 
       setOverview(overviewData);
@@ -100,7 +102,7 @@ export default function StatbookPage() {
       }
       setHeadToHeadLoading(true);
       try {
-        const payload = await api.statbook.headToHead(Number(teamAId), Number(teamBId), seasonId ? Number(seasonId) : null, 20);
+        const payload = await api.statbook.headToHead(token, Number(teamAId), Number(teamBId), seasonId ? Number(seasonId) : null, 20);
         setHeadToHead(payload);
       } catch (h2hError) {
         setHeadToHead(null);

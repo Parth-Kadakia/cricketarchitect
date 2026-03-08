@@ -89,8 +89,10 @@ async function verifyCityViaGeocoding(name, country) {
 
 router.get(
   '/international-countries',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     await ensureInternationalCountryCities(pool);
+    const worldId = req.user?.active_world_id || null;
 
     const rows = await pool.query(
       `WITH country_cities AS (
@@ -119,11 +121,12 @@ router.get(
          SELECT id, status, owner_user_id
          FROM franchises
          WHERE city_id = cc.id
+           AND ($2::bigint IS NULL OR world_id = $2)
          ORDER BY created_at DESC
          LIMIT 1
        ) f ON TRUE
        ORDER BY cc.country ASC`,
-      [INTERNATIONAL_COUNTRIES]
+      [INTERNATIONAL_COUNTRIES, worldId]
     );
 
     const countries = rows.rows.map((row) => ({

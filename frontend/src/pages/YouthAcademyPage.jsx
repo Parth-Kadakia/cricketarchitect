@@ -54,7 +54,7 @@ export default function YouthAcademyPage() {
       const [aResp, pResp, cResp] = await Promise.all([
         api.youth.academy(token),
         api.youth.prospects(token),
-        api.marketplace.franchises()
+        api.marketplace.franchises(token)
       ]);
       setAcademyData(aResp);
       setProspects(pResp.prospects || []);

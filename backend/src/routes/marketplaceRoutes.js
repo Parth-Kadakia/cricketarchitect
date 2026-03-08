@@ -126,13 +126,27 @@ router.get(
       return res.json({ players: [] });
     }
 
-    const players = await pool.query(
-      `SELECT id, first_name, last_name, country_origin, role, age, batting, bowling, fielding, fitness, temperament, potential, market_value
-       FROM players
-       WHERE squad_status = 'AUCTION'
-       ORDER BY potential DESC, market_value DESC
-       LIMIT 250`
-    );
+    const players = worldId
+      ? await pool.query(
+          `SELECT p.id, p.first_name, p.last_name, p.country_origin, p.role, p.age, p.batting, p.bowling, p.fielding, p.fitness, p.temperament, p.potential, p.market_value
+           FROM players p
+           WHERE p.squad_status = 'AUCTION'
+             AND EXISTS (
+               SELECT 1 FROM transfer_feed tf
+               JOIN seasons s ON s.id = tf.season_id
+               WHERE tf.player_id = p.id AND s.world_id = $1
+             )
+           ORDER BY p.potential DESC, p.market_value DESC
+           LIMIT 250`,
+          [worldId]
+        )
+      : await pool.query(
+          `SELECT id, first_name, last_name, country_origin, role, age, batting, bowling, fielding, fitness, temperament, potential, market_value
+           FROM players
+           WHERE squad_status = 'AUCTION'
+           ORDER BY potential DESC, market_value DESC
+           LIMIT 250`
+        );
 
     return res.json({ players: players.rows });
   })

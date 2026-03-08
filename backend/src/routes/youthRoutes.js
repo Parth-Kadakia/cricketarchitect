@@ -141,14 +141,18 @@ router.get(
   '/growth-history/:playerId',
   requireAuth,
   asyncHandler(async (req, res) => {
+    const worldId = req.user?.active_world_id || null;
     const history = await pool.query(
       `SELECT pgl.*, s.name AS season_name
        FROM player_growth_logs pgl
        LEFT JOIN seasons s ON s.id = pgl.season_id
+       JOIN players p ON p.id = pgl.player_id
+       LEFT JOIN franchises f ON f.id = p.franchise_id
        WHERE pgl.player_id = $1
+         AND ($2::bigint IS NULL OR f.world_id = $2)
        ORDER BY pgl.recorded_at DESC
        LIMIT 40`,
-      [req.params.playerId]
+      [req.params.playerId, worldId]
     );
 
     return res.json({ history: history.rows });

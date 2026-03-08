@@ -52,7 +52,8 @@ router.get(
     if (!managerId) {
       return res.status(400).json({ message: 'Valid managerId is required.' });
     }
-    const profile = await getManagerProfile(managerId);
+    const worldId = req.user?.active_world_id || null;
+    const profile = await getManagerProfile(managerId, undefined, worldId);
     if (!profile) {
       return res.status(404).json({ message: 'Manager not found.' });
     }
@@ -77,6 +78,7 @@ router.post(
       acceptManagerOffer({
         userId: req.user.id,
         offerId: req.params.offerId,
+        worldId: req.user.active_world_id || null,
         dbClient: client
       })
     );
@@ -93,6 +95,7 @@ router.post(
       declineManagerOffer({
         userId: req.user.id,
         offerId: req.params.offerId,
+        worldId: req.user.active_world_id || null,
         dbClient: client
       })
     );
@@ -114,6 +117,7 @@ router.post(
       applyForManagerJob({
         userId: req.user.id,
         franchiseId,
+        worldId: req.user.active_world_id || null,
         dbClient: client
       })
     );
@@ -129,6 +133,7 @@ router.post(
     const snapshot = await withTransaction((client) =>
       retireManagerCareer({
         userId: req.user.id,
+        worldId: req.user.active_world_id || null,
         dbClient: client
       })
     );

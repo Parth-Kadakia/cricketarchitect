@@ -58,7 +58,7 @@ export default function ManagersPage() {
   async function loadDirectory() {
     setError('');
     try {
-      const activeSeason = await api.league.activeSeason();
+      const activeSeason = await api.league.activeSeason(token);
       const result = await api.manager.directory(token, {
         seasonId: activeSeason?.season?.id || null,
         mode,

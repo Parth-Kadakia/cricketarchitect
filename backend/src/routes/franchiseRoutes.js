@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, optionalAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import {
   claimFranchise,
@@ -93,7 +93,8 @@ router.post(
   asyncHandler(async (req, res) => {
     const franchise = await listFranchiseForSale({
       userId: req.user.id,
-      franchiseId: req.params.franchiseId
+      franchiseId: req.params.franchiseId,
+      worldId: req.user.active_world_id || null
     });
 
     return res.json({ franchise });
@@ -106,7 +107,8 @@ router.post(
   asyncHandler(async (req, res) => {
     const franchise = await sellFranchiseToMarketplace({
       userId: req.user.id,
-      franchiseId: req.params.franchiseId
+      franchiseId: req.params.franchiseId,
+      worldId: req.user.active_world_id || null
     });
 
     return res.json({ franchise });
@@ -122,7 +124,8 @@ router.post(
     const franchise = await purchaseFranchise({
       buyerUserId: req.user.id,
       franchiseId: req.params.franchiseId,
-      newFranchiseName: franchiseName
+      newFranchiseName: franchiseName,
+      worldId: req.user.active_world_id || null
     });
 
     return res.json({ franchise });
@@ -160,7 +163,13 @@ router.post(
 
 router.get(
   '/:franchiseId/trophies',
+  optionalAuth,
   asyncHandler(async (req, res) => {
+    const worldId = req.user?.active_world_id || null;
+    if (worldId) {
+      const check = await pool.query('SELECT id FROM franchises WHERE id = $1 AND world_id = $2', [req.params.franchiseId, worldId]);
+      if (!check.rows.length) return res.status(403).json({ message: 'Franchise not found in your world.' });
+    }
     const trophies = await pool.query(
       `SELECT tc.id, tc.title, tc.won_at, s.name AS season_name
        FROM trophy_cabinet tc

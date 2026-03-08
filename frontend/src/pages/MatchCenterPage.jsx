@@ -569,7 +569,7 @@ export default function MatchCenterPage() {
     setLoading(true);
 
     try {
-      const [scorecardResponse, eventsResponse] = await Promise.all([api.league.scorecard(numericMatchId), api.league.events(numericMatchId)]);
+      const [scorecardResponse, eventsResponse] = await Promise.all([api.league.scorecard(token, numericMatchId), api.league.events(token, numericMatchId)]);
       setScorecard(scorecardResponse);
       setEventRows(eventsResponse.events || []);
       setSimulating(String(scorecardResponse?.match?.status || '').toUpperCase() === 'LIVE');
@@ -703,7 +703,7 @@ export default function MatchCenterPage() {
       }
 
       try {
-        const [eventsResponse, scorecardResponse] = await Promise.all([api.league.events(numericMatchId), api.league.scorecard(numericMatchId)]);
+        const [eventsResponse, scorecardResponse] = await Promise.all([api.league.events(token, numericMatchId), api.league.scorecard(token, numericMatchId)]);
         setEventRows((prev) => mergeEventRows(prev, eventsResponse.events || []));
 
         // Merge scorecard carefully: during live simulation the DB may not

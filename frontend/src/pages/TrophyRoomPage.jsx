@@ -26,7 +26,7 @@ export default function TrophyRoomPage() {
         setFranchise(franchiseResponse.franchise || null);
 
         if (franchiseResponse.franchise?.id) {
-          const trophyResponse = await api.franchise.trophies(franchiseResponse.franchise.id);
+          const trophyResponse = await api.franchise.trophies(token, franchiseResponse.franchise.id);
           setTrophies(trophyResponse.trophies || []);
         }
 

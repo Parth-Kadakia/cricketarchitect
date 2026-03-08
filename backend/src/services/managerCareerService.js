@@ -117,13 +117,14 @@ async function getLatestManagerStint(userId, dbClient = pool) {
   return result.rows[0] || null;
 }
 
-async function getManagedFranchise(userId, dbClient = pool) {
+async function getManagedFranchise(userId, dbClient = pool, worldId = null) {
   const result = await dbClient.query(
     `SELECT id, competition_mode, current_league_tier
      FROM franchises
      WHERE owner_user_id = $1
+       AND ($2::bigint IS NULL OR world_id = $2)
      LIMIT 1`,
-    [userId]
+    [userId, worldId]
   );
 
   return result.rows[0] || null;
@@ -754,7 +755,11 @@ async function releaseFranchiseOwnership(franchiseId, dbClient = pool) {
   await dbClient.query(
     `UPDATE season_teams
      SET is_ai = TRUE
-     WHERE franchise_id = $1`,
+     WHERE franchise_id = $1
+       AND season_id IN (
+         SELECT id FROM seasons
+         WHERE world_id = (SELECT world_id FROM franchises WHERE id = $1)
+       )`,
     [franchiseId]
   );
 }
@@ -1545,7 +1550,7 @@ export async function handleManagerInactivityRelease({ userId, franchiseId, dbCl
   });
 }
 
-export async function retireManagerCareer({ userId, dbClient = pool }) {
+export async function retireManagerCareer({ userId, worldId = null, dbClient = pool }) {
   const user = await getUserRow(userId, dbClient);
   if (!user) {
     const error = new Error('User not found.');
@@ -1558,7 +1563,7 @@ export async function retireManagerCareer({ userId, dbClient = pool }) {
     return getManagerCareerSnapshot(userId, dbClient);
   }
 
-  const owned = await getManagedFranchise(userId, dbClient);
+  const owned = await getManagedFranchise(userId, dbClient, worldId);
   if (owned?.id) {
     await releaseFranchiseOwnership(owned.id, dbClient);
   }
@@ -1585,7 +1590,7 @@ export async function retireManagerCareer({ userId, dbClient = pool }) {
     [userId]
   );
 
-  return getManagerCareerSnapshot(userId, dbClient);
+  return getManagerCareerSnapshot(userId, dbClient, worldId);
 }
 
 export async function ensureManagerBoardProfilesForSeason(seasonId, dbClient = pool) {
@@ -2006,6 +2011,7 @@ export async function listManagerOffers(userId, dbClient = pool, worldId = null)
      JOIN cities c ON c.id = f.city_id
      LEFT JOIN season_teams st ON st.franchise_id = mo.franchise_id AND st.season_id = mo.season_id
      WHERE mo.user_id = $1
+       AND ($2::bigint IS NULL OR f.world_id = $2)
      ORDER BY
        CASE mo.status
          WHEN 'PENDING' THEN 0
@@ -2017,7 +2023,7 @@ export async function listManagerOffers(userId, dbClient = pool, worldId = null)
        mo.offer_score DESC,
        mo.created_at DESC
      LIMIT 50`,
-    [userId]
+    [userId, worldId]
   );
 
   return offers.rows;
@@ -2077,7 +2083,7 @@ async function assignManagerToFranchiseFromOffer({ userId, franchiseId, dbClient
   );
 }
 
-export async function acceptManagerOffer({ userId, offerId, dbClient = pool }) {
+export async function acceptManagerOffer({ userId, offerId, worldId = null, dbClient = pool }) {
   const user = await assertManagerCanTakeJobs(userId, dbClient);
   if (String(user.manager_status || '').toUpperCase() !== MANAGER_STATUSES.UNEMPLOYED) {
     const error = new Error('You can only accept offers while unemployed.');
@@ -2086,17 +2092,19 @@ export async function acceptManagerOffer({ userId, offerId, dbClient = pool }) {
   }
 
   const offerResult = await dbClient.query(
-    `SELECT id,
-            user_id,
-            franchise_id,
-            season_id,
-            expires_round,
-            status
-     FROM manager_offers
-     WHERE id = $1
-       AND user_id = $2
-     FOR UPDATE`,
-    [offerId, userId]
+    `SELECT mo.id,
+            mo.user_id,
+            mo.franchise_id,
+            mo.season_id,
+            mo.expires_round,
+            mo.status
+     FROM manager_offers mo
+     JOIN franchises f ON f.id = mo.franchise_id
+     WHERE mo.id = $1
+       AND mo.user_id = $2
+       AND ($3::bigint IS NULL OR f.world_id = $3)
+     FOR UPDATE OF mo`,
+    [offerId, userId, worldId]
   );
 
   if (!offerResult.rows.length) {
@@ -2142,10 +2150,10 @@ export async function acceptManagerOffer({ userId, offerId, dbClient = pool }) {
     [userId, offer.id]
   );
 
-  return getManagerCareerSnapshot(userId, dbClient);
+  return getManagerCareerSnapshot(userId, dbClient, worldId);
 }
 
-export async function declineManagerOffer({ userId, offerId, dbClient = pool }) {
+export async function declineManagerOffer({ userId, offerId, worldId = null, dbClient = pool }) {
   const offerResult = await dbClient.query(
     `SELECT id, status
      FROM manager_offers
@@ -2176,10 +2184,10 @@ export async function declineManagerOffer({ userId, offerId, dbClient = pool }) 
     [offer.id]
   );
 
-  return listManagerOffers(userId, dbClient);
+  return listManagerOffers(userId, dbClient, worldId);
 }
 
-export async function applyForManagerJob({ userId, franchiseId, dbClient = pool }) {
+export async function applyForManagerJob({ userId, franchiseId, worldId = null, dbClient = pool }) {
   const user = await assertManagerCanTakeJobs(userId, dbClient);
   if (String(user.manager_status || '').toUpperCase() !== MANAGER_STATUSES.UNEMPLOYED) {
     const error = new Error('You can only apply for jobs while unemployed.');
@@ -2202,8 +2210,9 @@ export async function applyForManagerJob({ userId, franchiseId, dbClient = pool 
             total_valuation
      FROM franchises
      WHERE id = $1
+       AND ($2::bigint IS NULL OR world_id = $2)
      FOR UPDATE`,
-    [franchiseId]
+    [franchiseId, worldId]
   );
 
   if (!franchiseResult.rows.length) {
@@ -2266,7 +2275,7 @@ export async function applyForManagerJob({ userId, franchiseId, dbClient = pool 
 
   return {
     accepted: true,
-    snapshot: await getManagerCareerSnapshot(userId, dbClient)
+    snapshot: await getManagerCareerSnapshot(userId, dbClient, worldId)
   };
 }
 
@@ -2602,7 +2611,7 @@ export async function getManagerDirectory({ seasonId = null, mode = null, worldI
   return rows.rows;
 }
 
-export async function getManagerProfile(managerId, dbClient = pool) {
+export async function getManagerProfile(managerId, dbClient = pool, worldId = null) {
   const manager = await dbClient.query(
     `SELECT m.id,
             m.user_id,
@@ -2626,8 +2635,9 @@ export async function getManagerProfile(managerId, dbClient = pool) {
      LEFT JOIN franchises f ON f.current_manager_id = m.id
      LEFT JOIN cities c ON c.id = f.city_id
      WHERE m.id = $1
+       AND ($2::bigint IS NULL OR m.world_id = $2 OR f.world_id = $2)
      LIMIT 1`,
-    [managerId]
+    [managerId, worldId]
   );
 
   if (!manager.rows.length) {
@@ -2652,9 +2662,10 @@ export async function getManagerProfile(managerId, dbClient = pool) {
      JOIN franchises f ON f.id = mts.franchise_id
      JOIN cities c ON c.id = f.city_id
      WHERE mts.manager_id = $1
+       AND ($2::bigint IS NULL OR f.world_id = $2)
      ORDER BY mts.started_at DESC
      LIMIT 40`,
-    [managerId]
+    [managerId, worldId]
   );
 
   const recentMatches = await dbClient.query(
@@ -2671,7 +2682,8 @@ export async function getManagerProfile(managerId, dbClient = pool) {
      FROM matches m
      JOIN franchises hf ON hf.id = m.home_franchise_id
      JOIN franchises af ON af.id = m.away_franchise_id
-     WHERE EXISTS (
+     WHERE ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+       AND EXISTS (
        SELECT 1
        FROM manager_team_stints mts
        WHERE mts.manager_id = $1
@@ -2681,7 +2693,7 @@ export async function getManagerProfile(managerId, dbClient = pool) {
      )
      ORDER BY m.updated_at DESC
      LIMIT 20`,
-    [managerId]
+    [managerId, worldId]
   );
 
   return {

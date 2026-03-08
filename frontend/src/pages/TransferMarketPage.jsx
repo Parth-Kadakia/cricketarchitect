@@ -42,8 +42,8 @@ export default function TransferMarketPage() {
     setError('');
     try {
       const [aResp, tResp, fResp] = await Promise.all([
-        api.marketplace.auctionPool(),
-        api.marketplace.transferFeed(120),
+        api.marketplace.auctionPool(token),
+        api.marketplace.transferFeed(token, 120),
         api.financials.summary(token)
       ]);
       setAuctionPlayers(aResp.players || []);
