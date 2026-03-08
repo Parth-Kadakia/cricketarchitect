@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { TeamModalProvider } from '../context/TeamModalContext';
@@ -104,15 +104,25 @@ function getNavItems(mode) {
   ];
 }
 
+/* Bottom-nav quick-access items (subset of full nav for mobile) */
+const BOTTOM_NAV_KEYS = ['/', '/fixtures', '/squad', '/league', '/stats'];
+
 export default function AppLayout() {
   const { user, franchise, logout } = useAuth();
   const { connected } = useSocket();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const location = useLocation();
   const navItems = getNavItems(franchise?.competition_mode || user?.career_mode || 'CLUB');
   const isInternational = String(franchise?.competition_mode || user?.career_mode || '').toUpperCase() === 'INTERNATIONAL';
   const topMetricValue = isInternational
     ? Number(franchise?.strength_rating ?? franchise?.total_valuation ?? 0)
     : Number(franchise?.total_valuation || 100);
+
+  // Close sidebar on route change
+  useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
+
+  // Bottom nav items (first 5 core pages)
+  const bottomItems = navItems.filter((item) => BOTTOM_NAV_KEYS.includes(item.to));
 
   return (
     <div className="app-shell">
@@ -158,7 +168,7 @@ export default function AppLayout() {
           <button className="mobile-menu-btn top-bar-menu" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle menu">
             <Icons.menu />
           </button>
-          <div>
+          <div className="top-bar-info">
             <h2>{franchise?.franchise_name || 'Start Your Career'}</h2>
             <p>
               {franchise?.city_name
@@ -167,15 +177,15 @@ export default function AppLayout() {
             </p>
           </div>
           <div className="top-metrics">
-            <div>
+            <div className="top-metric-item">
               <span>Prospect Pts</span>
               <strong>{franchise?.prospect_points ?? 0}</strong>
             </div>
-            <div>
+            <div className="top-metric-item">
               <span>Growth Pts</span>
               <strong>{franchise?.growth_points ?? 0}</strong>
             </div>
-            <div>
+            <div className="top-metric-item">
               <span>{isInternational ? 'Strength' : 'Value'}</span>
               <strong>{isInternational ? topMetricValue.toFixed(1) : `$${topMetricValue.toFixed(2)}`}</strong>
             </div>
@@ -186,6 +196,36 @@ export default function AppLayout() {
           <Outlet />
         </TeamModalProvider>
       </main>
+
+      {/* Mobile bottom navigation */}
+      <nav className="bottom-nav">
+        {bottomItems.map((item) => {
+          const IconComp = Icons[item.icon];
+          const isActive =
+            item.to === '/'
+              ? location.pathname === '/'
+              : location.pathname.startsWith(item.to);
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/'}
+              className={`bottom-nav-item${isActive ? ' active' : ''}`}
+            >
+              {IconComp && <IconComp />}
+              <span>{item.label}</span>
+            </NavLink>
+          );
+        })}
+        <button
+          className="bottom-nav-item bottom-nav-more"
+          onClick={() => setSidebarOpen(true)}
+          aria-label="More"
+        >
+          <Icons.menu />
+          <span>More</span>
+        </button>
+      </nav>
     </div>
   );
 }

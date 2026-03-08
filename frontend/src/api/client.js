@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+// In production (served from same origin), use relative /api path.
+// In development, use the explicit env var or default to localhost:4000.
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:4000/api');
 
 function buildHeaders(token, hasJson = true) {
   const headers = {};

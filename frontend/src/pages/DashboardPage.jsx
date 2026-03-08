@@ -411,7 +411,7 @@ export default function DashboardPage() {
               <span><strong>Firings:</strong> {managerCareer?.manager?.firings || 0}</span>
               <span><strong>Career Mode:</strong> {managerCareer?.manager?.careerMode || 'CLUB'}</span>
             </div>
-            <div className="db-sim-buttons" style={{ marginTop: 10 }}>
+            <div className="db-sim-buttons db-sim-buttons--top">
               <button type="button" className="sq-btn sq-btn--primary" disabled={isBusy} onClick={simulateNextRound}>
                 {simulatingRound ? '⏳ Simulating...' : '▶ Simulate Next Round'}
               </button>
@@ -509,7 +509,7 @@ export default function DashboardPage() {
       <div className="db-page fp-page">
         {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
 
-        <div className="sq-tabs" style={{ marginBottom: 12 }}>
+        <div className="sq-tabs db-career-tabs">
           <button
             type="button"
             className={`sq-tab ${careerMode === 'CLUB' ? 'active' : ''}`}
@@ -591,7 +591,7 @@ export default function DashboardPage() {
               )}
             </div>
 
-            <div className="fp-country-list" style={{ maxHeight: 520 }}>
+            <div className="fp-country-list">
               {filteredInternationalCountries.map((item) => (
                 <button
                   key={item.country}
