@@ -12,6 +12,30 @@ import { broadcast } from '../ws/realtime.js';
 
 const router = Router();
 
+/* ── Admin: list all users + their franchise/manager stats ── */
+router.get(
+  '/users',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(`
+      SELECT u.id, u.email, u.display_name, u.role, u.career_mode,
+             u.manager_status, u.manager_points, u.manager_firings, u.manager_titles,
+             u.manager_matches_managed, u.manager_wins_managed, u.manager_losses_managed,
+             u.last_active_at, u.created_at,
+             f.id AS franchise_id, f.franchise_name, f.status AS franchise_status,
+             f.competition_mode, f.current_league_tier, f.wins AS f_wins, f.losses AS f_losses,
+             f.championships, f.total_valuation, f.prospect_points, f.growth_points,
+             c.name AS city_name, c.country
+      FROM users u
+      LEFT JOIN franchises f ON f.owner_user_id = u.id
+      LEFT JOIN cities c ON c.id = f.city_id
+      ORDER BY u.created_at DESC
+    `);
+    return res.json({ users: rows });
+  })
+);
+
 router.post(
   '/bootstrap',
   requireAuth,

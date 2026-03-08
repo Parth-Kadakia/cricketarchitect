@@ -44,6 +44,14 @@ server.listen(env.port, '0.0.0.0', async () => {
     }
 
     await ensureSchemaCompatibility();
+
+    // Ensure the designated admin account has admin role
+    const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'parthkadakia92@gmail.com';
+    await pool.query(
+      `UPDATE users SET role = 'admin' WHERE email = $1 AND role <> 'admin'`,
+      [ADMIN_EMAIL.trim().toLowerCase()]
+    );
+
     await bootstrapGameWorld();
 
     const released = await releaseInactiveFranchises();

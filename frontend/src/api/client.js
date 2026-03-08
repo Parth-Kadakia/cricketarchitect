@@ -300,6 +300,8 @@ export const api = {
       })
   },
   admin: {
+    users: (token) =>
+      request('/admin/users', { headers: buildHeaders(token, false) }),
     resetGame: (token) =>
       request('/admin/reset-game', {
         method: 'POST',

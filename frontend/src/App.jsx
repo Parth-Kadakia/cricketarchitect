@@ -16,6 +16,7 @@ import TransferMarketPage from './pages/TransferMarketPage';
 import StatsPage from './pages/StatsPage';
 import TrophyRoomPage from './pages/TrophyRoomPage';
 import YouthAcademyPage from './pages/YouthAcademyPage';
+import AdminConsolePage from './pages/AdminConsolePage';
 
 export default function App() {
   return (
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="marketplace" element={<FranchiseMarketplacePage />} />
         <Route path="financials" element={<FinancialsPage />} />
         <Route path="trophies" element={<TrophyRoomPage />} />
+        <Route path="admin" element={<AdminConsolePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/welcome" replace />} />
     </Routes>
