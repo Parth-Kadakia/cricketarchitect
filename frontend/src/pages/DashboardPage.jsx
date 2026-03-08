@@ -368,7 +368,7 @@ export default function DashboardPage() {
       setResetTyped('');
       await refreshProfile();
       await loadData();
-      toast.success('Game reset complete');
+      toast.success('Career reset complete');
     } catch (e) {
       setError(e.message);
       toast.error(e.message);
@@ -1070,10 +1070,10 @@ export default function DashboardPage() {
       <div className="db-card db-card--danger">
         <h3 className="db-section-title db-section-title--danger">Danger Zone</h3>
         <p className="db-danger-desc">
-          Start a brand-new career from scratch. This permanently wipes all franchises, players, seasons, and match history. Your user account stays intact.
+          Reset your career and start fresh. This releases your franchise back to CPU control and clears your manager history. Other players are not affected.
         </p>
         <button type="button" className="sq-btn sq-btn--danger" onClick={() => { setShowResetConfirm(true); setResetTyped(''); }}>
-          🔄 New Game
+          🔄 Reset My Career
         </button>
       </div>
 
@@ -1081,14 +1081,14 @@ export default function DashboardPage() {
       {showResetConfirm && (
         <div className="sq-modal-backdrop" role="presentation" onClick={() => setShowResetConfirm(false)}>
           <div className="db-reset-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-            <h3 className="db-reset-modal-title">⚠️ Reset Entire Game?</h3>
+            <h3 className="db-reset-modal-title">⚠️ Reset Your Career?</h3>
             <p className="db-reset-modal-body">
-              This will <strong>permanently delete</strong> all game data:
+              This will <strong>permanently reset</strong> your career:
             </p>
             <ul className="db-reset-modal-list">
-              <li>All franchises, squads &amp; player stats</li>
-              <li>All seasons, matches &amp; fixtures</li>
-              <li>All trophies, financials &amp; transfer history</li>
+              <li>Your franchise returns to CPU control</li>
+              <li>Manager history, trophies &amp; stats cleared</li>
+              <li>You'll pick a new city or country to start again</li>
             </ul>
             <p className="db-reset-modal-body">
               Type <strong>RESET</strong> below to confirm:

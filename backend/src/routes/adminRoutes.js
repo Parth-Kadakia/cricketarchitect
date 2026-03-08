@@ -6,6 +6,7 @@ import { releaseInactiveFranchises } from '../services/inactivityService.js';
 import { bootstrapGameWorld } from '../services/bootstrapService.js';
 import { getActiveSeason, getLeagueTable } from '../services/leagueService.js';
 import { runCpuMarketCycle } from '../services/cpuManagerService.js';
+import { transitionManagerToUnemployed } from '../services/managerCareerService.js';
 import { processSeasonRetirements } from '../services/retirementService.js';
 import { rebalanceSeasonPlayers } from '../services/rebalanceService.js';
 import { broadcast } from '../ws/realtime.js';
@@ -119,7 +120,7 @@ router.post(
   })
 );
 
-/* ── Reset Game (available to any authenticated user) ── */
+/* ── Reset Career (resets ONLY the requesting user's career) ── */
 router.post(
   '/reset-game',
   requireAuth,
@@ -129,30 +130,38 @@ router.post(
       return res.status(400).json({ message: 'You must send { confirm: "RESET" } to proceed.' });
     }
 
-    /* Wipe all game data but keep users and the world-city catalog */
-    await pool.query(`
-      TRUNCATE TABLE
-        transfer_feed,
-        manager_offers,
-        board_expectations,
-        board_profiles,
-        manager_stints,
-        franchise_sales,
-        trophy_cabinet,
-        valuations,
-        transactions,
-        player_growth_logs,
-        player_match_stats,
-        match_events,
-        matches,
-        season_teams,
-        seasons,
-        players,
-        regions,
-        franchises
-      RESTART IDENTITY CASCADE
-    `);
+    const userId = req.user.id;
 
+    /* Find the user's current franchise (if any) */
+    const franchiseRow = (await pool.query(
+      `SELECT id FROM franchises WHERE owner_user_id = $1 LIMIT 1`,
+      [userId]
+    )).rows[0];
+
+    const franchiseId = franchiseRow?.id || null;
+
+    /* Release franchise ownership back to CPU (closes stints, board profiles, assigns CPU manager) */
+    if (franchiseId) {
+      await transitionManagerToUnemployed({
+        userId,
+        franchiseId,
+        endReason: 'RESET',
+        incrementFirings: false,
+        generateOffers: false,
+        releaseTeam: true,
+      });
+    }
+
+    /* Clean up user-specific data */
+    await pool.query(`DELETE FROM manager_offers WHERE user_id = $1`, [userId]);
+    await pool.query(`DELETE FROM manager_stints WHERE user_id = $1`, [userId]);
+    await pool.query(`DELETE FROM board_profiles WHERE user_id = $1`, [userId]);
+    if (franchiseId) {
+      await pool.query(`DELETE FROM trophy_cabinet WHERE franchise_id = $1`, [franchiseId]);
+      await pool.query(`DELETE FROM franchise_sales WHERE seller_user_id = $1 OR buyer_user_id = $1`, [userId]);
+    }
+
+    /* Reset user stats to fresh state */
     await pool.query(
       `UPDATE users
        SET manager_status = 'UNEMPLOYED',
@@ -163,16 +172,13 @@ router.post(
            manager_titles = 0,
            manager_matches_managed = 0,
            manager_wins_managed = 0,
-           manager_losses_managed = 0`
+           manager_losses_managed = 0,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [userId]
     );
 
-    /* Re-seed the welcome note */
-    await pool.query(
-      `INSERT INTO transfer_feed (season_id, action_type, message)
-       VALUES (NULL, 'SEASON_NOTE', 'Game world has been reset. Claim any city to start a fresh career.')`
-    );
-
-    return res.json({ message: 'Game world reset successfully. Pick a new city to begin.' });
+    return res.json({ message: 'Career reset successfully. Pick a city or country to start fresh.' });
   })
 );
 
