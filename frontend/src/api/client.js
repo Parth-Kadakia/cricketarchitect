@@ -313,6 +313,26 @@ export const api = {
         method: 'POST',
         headers: buildHeaders(token),
         body: JSON.stringify({ seasonId: seasonId || undefined, dryRun: !!dryRun })
+      }),
+    bootstrap: (token) =>
+      request('/admin/bootstrap', {
+        method: 'POST',
+        headers: buildHeaders(token)
+      }),
+    inactivityRun: (token) =>
+      request('/admin/inactivity/run', {
+        method: 'POST',
+        headers: buildHeaders(token)
+      }),
+    cpuCycle: (token) =>
+      request('/admin/cpu-cycle', {
+        method: 'POST',
+        headers: buildHeaders(token)
+      }),
+    retirements: (token) =>
+      request('/admin/retirements/run', {
+        method: 'POST',
+        headers: buildHeaders(token)
       })
   },
   financials: {
