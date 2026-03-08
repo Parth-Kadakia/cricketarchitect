@@ -5,6 +5,7 @@ import DashboardPage from './pages/DashboardPage';
 import FinancialsPage from './pages/FinancialsPage';
 import FixturesResultsPage from './pages/FixturesResultsPage';
 import FranchiseMarketplacePage from './pages/FranchiseMarketplacePage';
+import LandingPage from './pages/LandingPage';
 import LeagueTablePage from './pages/LeagueTablePage';
 import LoginPage from './pages/LoginPage';
 import ManagersPage from './pages/ManagersPage';
@@ -19,6 +20,7 @@ import YouthAcademyPage from './pages/YouthAcademyPage';
 export default function App() {
   return (
     <Routes>
+      <Route path="/welcome" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route
         path="/"
@@ -42,7 +44,7 @@ export default function App() {
         <Route path="financials" element={<FinancialsPage />} />
         <Route path="trophies" element={<TrophyRoomPage />} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/welcome" replace />} />
     </Routes>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 /* ── tiny inline SVG icons ─────────────────────────────── */
@@ -33,8 +33,9 @@ const Icon = {
 export default function LoginPage() {
   const { login, register } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [mode, setMode] = useState('login');
+  const [mode, setMode] = useState(searchParams.get('mode') === 'register' ? 'register' : 'login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
