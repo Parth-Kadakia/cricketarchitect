@@ -334,7 +334,7 @@ export default function FranchiseMarketplacePage() {
                     )}
                   </div>
                   <button type="button" className="sq-btn sq-btn--primary mp-claim-btn" disabled={!!franchise || acting === `claim-${city.id}`}
-                    onClick={() => act(() => api.franchise.claim(token, { cityId: city.id, franchiseName: `${city.name} Rise` }), `claim-${city.id}`)}>
+                    onClick={() => act(() => api.franchise.claim(token, { cityId: city.id }), `claim-${city.id}`)}>
                     {acting === `claim-${city.id}` ? 'Claiming...' : '🏴 Claim'}
                   </button>
                 </div>

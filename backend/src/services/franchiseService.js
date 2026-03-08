@@ -1,6 +1,6 @@
 import pool, { withTransaction } from '../config/db.js';
 import { randomInt } from '../utils/gameMath.js';
-import { buildAcademyName, buildNameKey, getDefaultRegionLabels, pickUniquePlayerName } from './nameService.js';
+import { buildAcademyName, buildNameKey, buildTeamName, getDefaultRegionLabels, pickUniquePlayerName } from './nameService.js';
 import { ensureActiveSeason, generateDoubleRoundRobinFixtures } from './leagueService.js';
 import { calculateFranchiseValuation } from './valuationService.js';
 import { ensureProminentCricketCities } from '../db/seedWorldCities.js';
@@ -590,7 +590,7 @@ async function createFranchiseRecord(
     [
       cityId,
       ownerUserId,
-      franchiseName || `${cityName} Cricket Club`,
+      franchiseName || buildTeamName(cityName),
       status,
       academyName || buildAcademyName(cityName),
       resolvedMode
@@ -609,7 +609,7 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
       cityName: city.name,
       ownerUserId: userId,
       status: 'ACTIVE',
-      franchiseName: franchiseName?.trim() || `${city.name} Cricket Club`,
+      franchiseName: franchiseName?.trim() || buildTeamName(city.name),
       academyName: buildAcademyName(city.name),
       competitionMode: CAREER_MODES.CLUB
     },

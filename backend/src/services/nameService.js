@@ -115,6 +115,19 @@ const ACADEMY_SUFFIXES = [
 ];
 const REGION_LABELS = ['North District', 'Metro Central', 'South Corridor'];
 
+const TEAM_SUFFIXES = [
+  'Warriors', 'Titans', 'Royals', 'Knights', 'Kings',
+  'Challengers', 'Strikers', 'Chargers', 'Riders', 'Lions',
+  'Eagles', 'Thunderbolts', 'Legends', 'Hurricanes', 'Gladiators',
+  'Panthers', 'Falcons', 'Wolves', 'Spartans', 'Blazers',
+  'Rising Stars', 'Mavericks', 'Stallions', 'Trailblazers', 'Superstars',
+  'Vipers', 'Scorchers', 'Daredevils', 'Sunrisers', 'Rangers',
+  'Crusaders', 'Raiders', 'Dynamos', 'Wanderers', 'United',
+  'Phoenix', 'Centurions', 'Renegades', 'Storm', 'Capitals',
+  'Braves', 'Avengers', 'Defenders', 'Invincibles', 'Phantoms',
+  'Rockets', 'Comets', 'Sharks', 'Cobras', 'Jaguars'
+];
+
 /* ── Exported helpers (unchanged API) ── */
 
 export function generateRegionalName(cityName, label) {
@@ -123,6 +136,11 @@ export function generateRegionalName(cityName, label) {
 
 export function buildAcademyName(cityName) {
   const suffix = ACADEMY_SUFFIXES[Math.abs(cityName.length) % ACADEMY_SUFFIXES.length];
+  return `${cityName} ${suffix}`;
+}
+
+export function buildTeamName(cityName) {
+  const suffix = TEAM_SUFFIXES[randomInt(0, TEAM_SUFFIXES.length - 1)];
   return `${cityName} ${suffix}`;
 }
 

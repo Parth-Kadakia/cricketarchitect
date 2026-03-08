@@ -181,7 +181,6 @@ export default function DashboardPage() {
       } else {
         await api.franchise.claim(token, {
           cityId: pendingClaim.cityId,
-          franchiseName: `${pendingClaim.cityName} Rise`,
           mode: 'CLUB'
         });
       }
