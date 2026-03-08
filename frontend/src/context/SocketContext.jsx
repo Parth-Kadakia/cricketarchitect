@@ -10,7 +10,9 @@ function resolveSocketUrl() {
     return explicit;
   }
 
-  const apiUrl = new URL(getApiBaseUrl());
+  const base = getApiBaseUrl();
+  // Handle both absolute URLs and relative paths (e.g. '/api' in production)
+  const apiUrl = base.startsWith('http') ? new URL(base) : new URL(base, window.location.origin);
   const protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${apiUrl.host}/ws`;
 }
