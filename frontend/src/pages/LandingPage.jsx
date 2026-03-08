@@ -44,49 +44,49 @@ const FEATURES = [
   {
     icon: Icons.globe,
     title: 'Club Franchise Career',
-    desc: 'Choose any city in the world. Found a T20 franchise. Climb a 52-club, 4-league pyramid with promotion and relegation every season.',
+    desc: 'Choose any city from 1,200+ worldwide. Found a T20 franchise. Climb a 52-club, 4-league pyramid with promotion and relegation every season.',
     accent: 'var(--accent)',
   },
   {
     icon: Icons.flag,
     title: 'International Career',
-    desc: 'Take charge of a national team. Compete across 10 divisions with 100+ countries. Rise through the ranks on results alone.',
+    desc: 'Take charge of a national team. Compete across 10 divisions with 100+ countries. No transfers — rise through the ranks on results and youth alone.',
     accent: 'var(--info)',
   },
   {
     icon: Icons.briefcase,
     title: 'Manager Career & Board',
-    desc: 'Build your reputation. Meet board expectations on win rate, league position, youth development and squad strength — or get sacked.',
+    desc: 'Earn XP, level up to 100, build reputation. Meet board expectations every 3 rounds on win rate, league position, youth pipeline, and squad strength — or get sacked.',
     accent: 'var(--warning)',
   },
   {
     icon: Icons.zap,
     title: 'Ball-by-Ball Match Engine',
-    desc: 'Full T20 simulation. Toss, pitch conditions, batting orders, tactical bowling, commentary, scorecards, and player-of-the-match.',
+    desc: 'Live T20 simulation via WebSocket. Pitch conditions, weather, wind, ground size, 9 bowling styles, 5 batsman types, phase-aware play, scorecards, and AI match analysis.',
     accent: 'var(--danger)',
   },
   {
     icon: Icons.users,
     title: 'Youth Academy & Scouting',
-    desc: 'Run a regional scouting network. Generate prospects, invest in growth cycles, and promote talent into your starting XI.',
+    desc: 'Run a regional scouting network. Generate prospects, invest in growth cycles, upgrade academy level 1–10, and promote talent into your starting XI.',
     accent: 'var(--success)',
   },
   {
     icon: Icons.trendingUp,
     title: 'Transfers & Club Economy',
-    desc: 'Buy and sell on the transfer market. Track valuation growth from wins, streaks, trophies, academy quality, and squad strength.',
+    desc: 'Auction market, player loans, salary cap, club valuation formula with 6 components. CPU teams actively buy, sell, and upgrade around you.',
     accent: '#f472b6',
   },
   {
     icon: Icons.shield,
     title: 'Hire, Fire & Job Market',
-    desc: 'Get fired? Enter the unemployed job market. Receive board offers, apply to open teams, or wait for the right opportunity.',
+    desc: 'Get fired? Enter the unemployed job market. Receive 3–6 board offers, apply to open teams, or wait for the right opportunity to get back in.',
     accent: '#a78bfa',
   },
   {
     icon: Icons.trophy,
-    title: 'Legacy & Records',
-    desc: 'Trophy cabinet, player career histories, seasonal archives, head-to-head stats, and a full statbook across every season played.',
+    title: 'Stats, Records & Legacy',
+    desc: 'Top 100 leaderboards (16 batting, 14 bowling columns), head-to-head, match archive, Excel export, trophy cabinet, and a full statbook across every season.',
     accent: '#fb923c',
   },
 ];
@@ -95,7 +95,7 @@ const STATS = [
   { value: '52', label: 'Club Teams' },
   { value: '100+', label: 'National Teams' },
   { value: '4+10', label: 'League Tiers' },
-  { value: '∞', label: 'Seasons' },
+  { value: '25', label: 'Data Tables' },
 ];
 
 export default function LandingPage() {
@@ -176,9 +176,10 @@ export default function LandingPage() {
             <ul>
               <li>Pick any city from 1,200+ worldwide</li>
               <li>52-club league with 4 tiers</li>
-              <li>Full transfer market & financials</li>
+              <li>Full transfer market, loans & salary cap</li>
               <li>Promotion, relegation, league finals</li>
-              <li>Club valuation tracks your success</li>
+              <li>Club valuation with 6-component formula</li>
+              <li>Buy & sell franchises on the marketplace</li>
             </ul>
           </div>
 
@@ -189,7 +190,7 @@ export default function LandingPage() {
               <li>100+ nations from Afghanistan to Zimbabwe</li>
               <li>10 divisions with promotion & relegation</li>
               <li>No transfers — results and youth only</li>
-              <li>Build squad strength through call-ups</li>
+              <li>Build squad strength through development</li>
               <li>Rise through pure cricket merit</li>
             </ul>
           </div>
@@ -258,6 +259,45 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── UNDER THE HOOD ──────────────────────────────── */}
+      <section className="landing-depth">
+        <div className="landing-section-header">
+          <p className="landing-overline">Under the Hood</p>
+          <h2>Depth You Can Feel</h2>
+        </div>
+
+        <div className="landing-manager-grid">
+          <div className="landing-manager-item">
+            <span className="landing-manager-num">9</span>
+            <div>
+              <h4>Bowling Styles</h4>
+              <p>Express Pace, Swing, Seam, Cutters, Off/Leg Spin, Left-arm, Mystery — each with unique delivery profiles.</p>
+            </div>
+          </div>
+          <div className="landing-manager-item">
+            <span className="landing-manager-num">7</span>
+            <div>
+              <h4>Pitch Conditions</h4>
+              <p>Good, green, flat, dusty, dry, damp, bouncy — plus weather, wind, time of day, and ground size.</p>
+            </div>
+          </div>
+          <div className="landing-manager-item">
+            <span className="landing-manager-num">16</span>
+            <div>
+              <h4>Batting Leaderboard Columns</h4>
+              <p>Matches, innings, runs, balls, average, strike rate, highest score, fours, sixes, not outs, rating, and more.</p>
+            </div>
+          </div>
+          <div className="landing-manager-item">
+            <span className="landing-manager-num">AI</span>
+            <div>
+              <h4>Living CPU World</h4>
+              <p>CPU teams buy, sell, loan, generate prospects, upgrade academies, and hire/fire managers — all autonomously.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── HOW IT WORKS ────────────────────────────────── */}
       <section className="landing-how">
         <div className="landing-section-header">
@@ -275,13 +315,13 @@ export default function LandingPage() {
           <div className="landing-step">
             <div className="landing-step-num">2</div>
             <h3>Build Your Squad</h3>
-            <p>Scout youth, set your starting XI, manage transfers, and prepare for match day.</p>
+            <p>Scout youth, set your starting XI with smart auto-lineup, manage transfers, and prepare for match day.</p>
           </div>
           <div className="landing-step-divider" />
           <div className="landing-step">
             <div className="landing-step-num">3</div>
             <h3>Climb the Pyramid</h3>
-            <p>Win matches, earn promotion, survive board pressure, and compete for the championship.</p>
+            <p>Simulate rounds, half-seasons, or full seasons. Win matches, earn promotion, and compete for the championship.</p>
           </div>
         </div>
       </section>
@@ -290,7 +330,7 @@ export default function LandingPage() {
       <section className="landing-cta-section">
         <div className="landing-cta-card">
           <h2>Ready to Manage?</h2>
-          <p>Free to play. No downloads. Start your career in the browser right now.</p>
+          <p>Free to play. No downloads. No app store. Start your career in the browser right now.</p>
           <div className="landing-cta-actions">
             <button className="landing-btn-hero" onClick={() => navigate('/login?mode=register')}>
               Start Your Career {Icons.chevronRight}
