@@ -5975,6 +5975,91 @@ table.stats-table tr:hover td {
   padding: 0.1rem 0.35rem;
   border-radius: var(--radius-xs);
 }
+
+/* ── Fixtures Round Share ── */
+.fx-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.fx-share-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.fx-share-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 200ms ease;
+  white-space: nowrap;
+}
+.fx-share-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--text-muted);
+}
+
+.fx-share-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 200;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  min-width: 210px;
+  padding: 0.35rem 0;
+  animation: fadeInUp 150ms var(--ease-out);
+}
+
+.fx-share-option {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0.5rem 0.85rem;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.fx-share-option:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.fx-share-hint {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  margin-top: 0.1rem;
+}
+
+.fx-share-copied {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  font-size: 0.65rem;
+  color: var(--leaf);
+  background: var(--bg-surface);
+  border: 1px solid var(--leaf);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.5rem;
+  white-space: nowrap;
+  z-index: 201;
+  animation: fadeInUp 150ms var(--ease-out);
+}
+
 /* ═══════════════════════════════════════════════════════════
    CHUNK 6: TRANSFER MARKET + YOUTH ACADEMY
    ═══════════════════════════════════════════════════════════ */
@@ -8861,6 +8946,17 @@ table.stats-table tr:hover td {
     width: 100%;
     text-align: center;
     min-height: 40px;
+  }
+
+  .fx-toolbar-actions {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .fx-share-btn {
+    font-size: 0.65rem;
+    padding: 0.25rem 0.5rem;
   }
 
   .fx-league-pills {
