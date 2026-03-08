@@ -36,6 +36,19 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
   await dbClient.query("CREATE INDEX IF NOT EXISTS seasons_world_idx ON seasons(world_id, status)");
   await dbClient.query("CREATE INDEX IF NOT EXISTS managers_world_idx ON managers(world_id)");
 
+  /* Drop legacy global UNIQUE(name) on seasons — name only needs to be unique per world */
+  await dbClient.query(`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'seasons_name_key' AND conrelid = 'seasons'::regclass
+      ) THEN
+        ALTER TABLE seasons DROP CONSTRAINT seasons_name_key;
+      END IF;
+    END $$
+  `);
+  await dbClient.query("CREATE UNIQUE INDEX IF NOT EXISTS seasons_world_name_uidx ON seasons(world_id, name)");
+
   /* Backfill: create a world for each existing franchise owner and assign world_id */
   await dbClient.query(
     `INSERT INTO worlds (creator_user_id, competition_mode)
