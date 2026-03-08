@@ -4,6 +4,7 @@ import Panel from '../components/Panel';
 import SimpleTable from '../components/SimpleTable';
 import StatCard from '../components/StatCard';
 import { useAuth } from '../context/AuthContext';
+import { setPageTitle } from '../utils/format';
 
 export default function TrophyRoomPage() {
   const { token } = useAuth();
@@ -13,6 +14,8 @@ export default function TrophyRoomPage() {
   const [retired, setRetired] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => { setPageTitle('Trophy Room'); }, []);
 
   useEffect(() => {
     async function load() {

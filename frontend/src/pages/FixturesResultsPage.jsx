@@ -4,19 +4,7 @@ import { api } from '../api/client';
 import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-
-/* ── Helpers ── */
-
-function oversFromBalls(balls) {
-  const complete = Math.floor(Number(balls || 0) / 6);
-  const rem = Number(balls || 0) % 6;
-  return `${complete}.${rem}`;
-}
-
-function scoreLabel(runs, wickets, balls) {
-  if (runs == null) return '';
-  return `${runs}/${wickets} (${oversFromBalls(balls)})`;
-}
+import { oversFromBalls, scoreLabel, setPageTitle } from '../utils/format';
 
 function roundStatus(round) {
   if (Number(round.completed_matches) === Number(round.total_matches)) return 'completed';
@@ -71,6 +59,8 @@ export default function FixturesResultsPage() {
   const [activeSimulation, setActiveSimulation] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => { setPageTitle('Fixtures & Results'); }, []);
 
   /* ── Data helpers ── */
 

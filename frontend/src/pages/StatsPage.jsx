@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import PlayerDetailModal from '../components/PlayerDetailModal';
+import { setPageTitle } from '../utils/format';
 
 /* ── tiny helpers ── */
 function fmt(v) { return v == null ? '-' : Number(v).toLocaleString(); }
@@ -29,6 +30,8 @@ export default function StatsPage() {
   /* player detail modal */
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [playerDetail, setPlayerDetail] = useState(null);
+
+  useEffect(() => { setPageTitle('Stats'); }, []);
 
   async function loadStats(sid) {
     setLoading(true);

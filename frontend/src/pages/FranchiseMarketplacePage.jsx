@@ -2,17 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
-
-/* ── Helpers ── */
-const money = (v) => `$${Number(v || 0).toFixed(2)}`;
-const timeAgo = (ts) => {
-  if (!ts) return '';
-  const diff = (Date.now() - new Date(ts).getTime()) / 1000;
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-};
+import { useToast } from '../context/ToastContext';
+import { money, timeAgo, setPageTitle } from '../utils/format';
 
 function controlLabel(row, myId) {
   if (Number(row.id) === Number(myId)) return 'YOU';
@@ -53,6 +44,7 @@ function ValRing({ value, max, size = 42 }) {
 
 export default function FranchiseMarketplacePage() {
   const { token, franchise, refreshProfile } = useAuth();
+  const toast = useToast();
 
   const [tab, setTab] = useState('clubs');
   const [data, setData] = useState({ availableCities: [], franchisesForSale: [], allFranchises: [], recentSales: [] });
@@ -63,6 +55,8 @@ export default function FranchiseMarketplacePage() {
   const [citySearch, setCitySearch] = useState('');
   const [tierFilter, setTierFilter] = useState('ALL');
   const [clubSort, setClubSort] = useState('valuation');
+
+  useEffect(() => { setPageTitle('Franchise Marketplace'); }, []);
 
   async function load() {
     setError('');
@@ -77,8 +71,8 @@ export default function FranchiseMarketplacePage() {
 
   async function act(fn, key) {
     setActing(key);
-    try { await fn(); await refreshProfile(); await load(); }
-    catch (e) { setError(e.message); }
+    try { await fn(); await refreshProfile(); await load(); toast.success('Franchise action complete!'); }
+    catch (e) { setError(e.message); toast.error(e.message); }
     finally { setActing(null); }
   }
 

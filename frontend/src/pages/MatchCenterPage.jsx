@@ -4,20 +4,7 @@ import { api } from '../api/client';
 import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-
-function oversFromBalls(balls) {
-  const complete = Math.floor(Number(balls || 0) / 6);
-  const rem = Number(balls || 0) % 6;
-  return `${complete}.${rem}`;
-}
-
-function scoreLabel(runs, wickets, balls) {
-  if (runs == null) {
-    return '-';
-  }
-
-  return `${runs}/${wickets} (${oversFromBalls(balls)})`;
-}
+import { oversFromBalls, scoreLabel, setPageTitle } from '../utils/format';
 
 function stripCommentaryPrefix(commentary) {
   const value = String(commentary || '').trim();
@@ -568,6 +555,8 @@ export default function MatchCenterPage() {
   const [error, setError] = useState('');
   const [shareOpen, setShareOpen] = useState(false);
   const [copied, setCopied] = useState('');
+
+  useEffect(() => { setPageTitle('Match Center'); }, []);
 
   async function loadMatchCenterData() {
     if (!numericMatchId) {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { setPageTitle } from '../utils/format';
 
 /* ── tiny inline SVG icons ─────────────────────────────── */
 const Icon = {
@@ -45,6 +46,8 @@ export default function LoginPage() {
     email: '',
     password: ''
   });
+
+  useEffect(() => { setPageTitle('Sign In'); }, []);
 
   /* clear error when switching modes */
   function switchMode(next) {

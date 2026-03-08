@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { setPageTitle } from '../utils/format';
 
 /* ── Inline SVG icons ──────────────────────────────────── */
 const Icons = {
@@ -92,13 +94,15 @@ const FEATURES = [
 const STATS = [
   { value: '52', label: 'Club Teams' },
   { value: '100+', label: 'National Teams' },
-  { value: '14', label: 'League Tiers' },
+  { value: '4+10', label: 'League Tiers' },
   { value: '∞', label: 'Seasons' },
 ];
 
 export default function LandingPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
+
+  useEffect(() => { setPageTitle('Cricket Architect — Build Your Dynasty'); }, []);
 
   if (token) {
     return <Navigate to="/" replace />;

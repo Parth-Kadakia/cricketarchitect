@@ -1,23 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-
-/* ── helpers ── */
-const money = (v) => {
-  const n = Number(v || 0);
-  if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
-  return `$${n.toFixed(2)}`;
-};
-const moneyFull = (v) => `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const pct = (part, whole) => (whole ? ((part / whole) * 100).toFixed(1) : '0');
-const timeAgo = (ts) => {
-  if (!ts) return '';
-  const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-};
+import { useToast } from '../context/ToastContext';
+import { money, moneyFull, pct, timeAgo, setPageTitle } from '../utils/format';
 
 const TX_META = {
   SALARY:          { icon: '💰', color: 'var(--danger)', label: 'Salary' },
@@ -83,6 +68,7 @@ function BreakdownBars({ data }) {
 /* ──────────────────────────────────── */
 export default function FinancialsPage() {
   const { token, franchise } = useAuth();
+  const toast = useToast();
   const isInternationalMode = String(franchise?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
   const [summary, setSummary] = useState(null);
   const [valuations, setValuations] = useState([]);
@@ -92,6 +78,8 @@ export default function FinancialsPage() {
   const [upgrading, setUpgrading] = useState(null);
   const [tab, setTab] = useState('overview');
   const [txFilter, setTxFilter] = useState('ALL');
+
+  useEffect(() => { setPageTitle('Financials'); }, []);
 
   async function load() {
     setError('');
@@ -128,8 +116,10 @@ export default function FinancialsPage() {
     try {
       await api.franchise.academyUpgrade(token, franchise.id, mode);
       await load();
+      toast.success('Facility upgraded!');
     } catch (e) {
       setError(e.message);
+      toast.error(e.message);
     } finally {
       setUpgrading(null);
     }

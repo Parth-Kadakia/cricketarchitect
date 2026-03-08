@@ -1,25 +1,43 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
+import { useToast } from '../context/ToastContext';
+import { money, timeAgo, opId, setPageTitle } from '../utils/format';
 
-/* ── Helpers ── */
-const money = (v) => `$${Number(v || 0).toFixed(2)}`;
-const timeAgo = (ts) => {
-  if (!ts) return '';
-  const d = (Date.now() - new Date(ts).getTime()) / 1000;
-  if (d < 60) return 'just now';
-  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
-  if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
-  return `${Math.floor(d / 86400)}d ago`;
-};
-function opId(prefix = 'sim') {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+/* ── Getting-Started onboarding card (dismissible via localStorage) ── */
+const ONBOARDING_DISMISSED_KEY = 'onboarding_dismissed';
+
+function useOnboardingCard({ franchise, squadSummary, recentResults }) {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(ONBOARDING_DISMISSED_KEY) === '1'; } catch { return false; }
+  });
+
+  const dismiss = useCallback(() => {
+    setDismissed(true);
+    try { localStorage.setItem(ONBOARDING_DISMISSED_KEY, '1'); } catch { /* noop */ }
+  }, []);
+
+  const steps = useMemo(() => {
+    const hasSquad = Number(squadSummary?.main_squad_count || 0) >= 11;
+    const hasPlayed = (recentResults?.length || 0) > 0;
+    return [
+      { key: 'claim', label: 'Claim a franchise', done: Boolean(franchise), hint: 'Pick a city or country to begin.' },
+      { key: 'squad', label: 'Build your squad (11+ players)', done: hasSquad, hint: 'Visit Squad Management to sign or scout players.' },
+      { key: 'match', label: 'Play your first match', done: hasPlayed, hint: 'Use Season Controls below to simulate a round.' },
+    ];
+  }, [franchise, squadSummary, recentResults]);
+
+  const allDone = steps.every((s) => s.done);
+  const visible = Boolean(franchise) && !dismissed && !allDone;
+
+  return { visible, steps, dismiss };
 }
 
 export default function DashboardPage() {
   const { token, user, franchise, refreshProfile } = useAuth();
   const { subscribe } = useSocket();
+  const toast = useToast();
 
   const [franchiseData, setFranchiseData] = useState(null);
   const [squadSummary, setSquadSummary] = useState(null);
@@ -50,6 +68,10 @@ export default function DashboardPage() {
   const [resetTyped, setResetTyped] = useState('');
   const [resetting, setResetting] = useState(false);
   const [pendingClaim, setPendingClaim] = useState(null); // { type: 'CLUB'|'INTERNATIONAL', cityId?, cityName?, country? }
+
+  const onboarding = useOnboardingCard({ franchise, squadSummary, recentResults });
+
+  useEffect(() => { setPageTitle('Dashboard'); }, []);
 
   async function loadData() {
     setError('');
@@ -166,7 +188,8 @@ export default function DashboardPage() {
       setPendingClaim(null);
       await refreshProfile();
       await loadData();
-    } catch (e) { setError(e.message); }
+      toast.success('Franchise claimed!');
+    } catch (e) { setError(e.message); toast.error(e.message); }
   }
 
   async function acceptManagerOffer(offerId) {
@@ -176,8 +199,10 @@ export default function DashboardPage() {
       await api.manager.acceptOffer(token, offerId);
       await refreshProfile();
       await loadData();
+      toast.success('Offer accepted!');
     } catch (e) {
       setError(e.message);
+      toast.error(e.message);
     } finally {
       setManagerActionBusy(false);
     }
@@ -223,8 +248,10 @@ export default function DashboardPage() {
       await api.manager.retire(token);
       await refreshProfile();
       await loadData();
+      toast.success('Manager retired');
     } catch (e) {
       setError(e.message);
+      toast.error(e.message);
     } finally {
       setManagerActionBusy(false);
     }
@@ -341,8 +368,10 @@ export default function DashboardPage() {
       setResetTyped('');
       await refreshProfile();
       await loadData();
+      toast.success('Game reset complete');
     } catch (e) {
       setError(e.message);
+      toast.error(e.message);
     } finally {
       setResetting(false);
     }
@@ -801,6 +830,28 @@ export default function DashboardPage() {
   return (
     <div className="db-page">
       {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
+
+      {/* ── Getting Started onboarding card ── */}
+      {onboarding.visible && (
+        <div className="db-card db-onboarding">
+          <div className="db-onboarding-head">
+            <h3 className="db-section-title">🚀 Getting Started</h3>
+            <button type="button" className="db-onboarding-dismiss" onClick={onboarding.dismiss} title="Dismiss">✕</button>
+          </div>
+          <p className="db-onboarding-sub">Complete these steps to get your franchise up and running.</p>
+          <ul className="db-onboarding-steps">
+            {onboarding.steps.map((step) => (
+              <li key={step.key} className={`db-onboarding-step ${step.done ? 'db-onboarding-step--done' : ''}`}>
+                <span className="db-onboarding-check">{step.done ? '✅' : '⬜'}</span>
+                <div>
+                  <strong>{step.label}</strong>
+                  {!step.done && <span className="db-onboarding-hint">{step.hint}</span>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* ── Header ── */}
       <div className="db-header">

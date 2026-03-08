@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { money, overall, timeAgo, setPageTitle } from '../utils/format';
+import { StatMini, OvrRing } from '../utils/MiniComponents';
 
 /* ── Helpers ── */
-const money = (v) => `$${Number(v || 0).toFixed(2)}`;
-const overall = (p) => ((Number(p.batting || 0) + Number(p.bowling || 0) + Number(p.fielding || 0) + Number(p.fitness || 0) + Number(p.temperament || 0)) / 5).toFixed(0);
 const ROLE_EMOJI = { BATTER: '🏏', BOWLER: '🎯', ALL_ROUNDER: '⚡', WICKET_KEEPER: '🧤' };
 const ROLE_SHORT = { BATTER: 'BAT', BOWLER: 'BWL', ALL_ROUNDER: 'AR', WICKET_KEEPER: 'WK' };
 const ACTION_ICON = { TRANSFER: '🔄', LOAN: '📋', RETIREMENT: '👋', RELEASE: '🚪', PROMOTION: '⬆️', RETURN: '↩️' };
@@ -18,50 +19,9 @@ const SORT_OPTIONS = [
   { value: 'age-desc', label: 'Oldest' },
 ];
 
-function StatMini({ label, value, max = 100 }) {
-  const pct = Math.max(0, Math.min(100, (Number(value) / max) * 100));
-  const color = pct >= 70 ? 'var(--leaf)' : pct >= 45 ? '#daa520' : 'var(--danger)';
-  return (
-    <div className="tm-stat-mini">
-      <div className="tm-stat-mini-header">
-        <span className="tm-stat-mini-label">{label}</span>
-        <span className="tm-stat-mini-val" style={{ color }}>{value}</span>
-      </div>
-      <div className="tm-stat-mini-track"><div className="tm-stat-mini-fill" style={{ width: `${pct}%`, background: color }} /></div>
-    </div>
-  );
-}
-
-function OvrRing({ value, size = 38 }) {
-  const v = Number(value || 0);
-  const r = (size - 4) / 2;
-  const c = 2 * Math.PI * r;
-  const pct = Math.max(0, Math.min(100, v));
-  const offset = c * (1 - pct / 100);
-  const color = pct >= 70 ? 'var(--leaf)' : pct >= 45 ? '#daa520' : 'var(--danger)';
-  return (
-    <svg width={size} height={size} className="tm-ovr-ring">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--border)" strokeWidth={3} />
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={3} strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round" transform={`rotate(-90 ${size / 2} ${size / 2})`} />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize={size * 0.32} fontWeight="700" fontFamily="'Space Grotesk', sans-serif" fill={color}>{v}</text>
-    </svg>
-  );
-}
-
-function timeAgo(dateStr) {
-  if (!dateStr) return '';
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
-
 export default function TransferMarketPage() {
   const { token, franchise, refreshProfile } = useAuth();
+  const toast = useToast();
   const isInternationalMode = String(franchise?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
 
   const [tab, setTab] = useState('auction');
@@ -75,6 +35,8 @@ export default function TransferMarketPage() {
   const [sort, setSort] = useState('overall-desc');
   const [buying, setBuying] = useState(null);
   const [feedFilter, setFeedFilter] = useState('ALL');
+
+  useEffect(() => { setPageTitle('Transfer Market'); }, []);
 
   async function load() {
     setError('');
@@ -107,7 +69,8 @@ export default function TransferMarketPage() {
       await api.marketplace.buyAuctionPlayer(token, playerId);
       await load();
       await refreshProfile();
-    } catch (e) { setError(e.message); }
+      toast.success('Player signed!');
+    } catch (e) { setError(e.message); toast.error(e.message); }
     finally { setBuying(null); }
   }
 

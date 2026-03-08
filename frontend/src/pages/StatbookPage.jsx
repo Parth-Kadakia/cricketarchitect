@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { oversFromBalls, setPageTitle } from '../utils/format';
 
 function fmt(value) {
   if (value == null) {
@@ -14,11 +15,6 @@ function fmtDec(value, digits = 2) {
     return '-';
   }
   return Number(value).toFixed(digits);
-}
-
-function oversFromBalls(balls) {
-  const safeBalls = Number(balls || 0);
-  return `${Math.floor(safeBalls / 6)}.${safeBalls % 6}`;
 }
 
 function nameOf(row) {
@@ -48,6 +44,8 @@ export default function StatbookPage() {
   const [teamBId, setTeamBId] = useState('');
   const [headToHead, setHeadToHead] = useState(null);
   const [headToHeadLoading, setHeadToHeadLoading] = useState(false);
+
+  useEffect(() => { setPageTitle('Statbook'); }, []);
 
   async function loadStatbook(activeSeasonId) {
     setLoading(true);

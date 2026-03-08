@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
+import { setPageTitle } from '../utils/format';
 
 function pct(value) {
   const num = Number(value || 0);
@@ -51,6 +52,8 @@ export default function ManagersPage() {
   const [profileLoading, setProfileLoading] = useState(false);
 
   const mode = String(franchise?.competition_mode || user?.career_mode || 'CLUB').toUpperCase();
+
+  useEffect(() => { setPageTitle('Managers'); }, []);
 
   async function loadDirectory() {
     setError('');

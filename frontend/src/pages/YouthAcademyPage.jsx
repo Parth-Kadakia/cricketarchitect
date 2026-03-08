@@ -2,44 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { money, overall, setPageTitle } from '../utils/format';
+import { StatMini, OvrRing } from '../utils/MiniComponents';
 
 /* ── Helpers ── */
-const money = (v) => `$${Number(v || 0).toFixed(2)}`;
 const academyUpgradeCost = (level) => 10 + Number(level || 1) * 5;
 const youthRatingUpgradeCost = (rating) => 20 + Math.floor(Number(rating || 0) / 10) * 5;
-const overall = (p) => ((Number(p.batting||0)+Number(p.bowling||0)+Number(p.fielding||0)+Number(p.fitness||0)+Number(p.temperament||0))/5).toFixed(0);
 
 const ROLE_EMOJI = { BATTER: '🏏', BOWLER: '🎯', ALL_ROUNDER: '⚡', WICKET_KEEPER: '🧤' };
 const ROLE_SHORT = { BATTER: 'BAT', BOWLER: 'BWL', ALL_ROUNDER: 'AR', WICKET_KEEPER: 'WK' };
-
-function StatMini({ label, value, max = 100 }) {
-  const pct = Math.max(0, Math.min(100, (Number(value) / max) * 100));
-  const color = pct >= 70 ? 'var(--leaf)' : pct >= 45 ? '#daa520' : 'var(--danger)';
-  return (
-    <div className="tm-stat-mini">
-      <div className="tm-stat-mini-header">
-        <span className="tm-stat-mini-label">{label}</span>
-        <span className="tm-stat-mini-val" style={{ color }}>{value}</span>
-      </div>
-      <div className="tm-stat-mini-track"><div className="tm-stat-mini-fill" style={{ width: `${pct}%`, background: color }} /></div>
-    </div>
-  );
-}
-
-function OvrRing({ value, size = 38 }) {
-  const v = Number(value || 0);
-  const r = (size - 4) / 2;
-  const c = 2 * Math.PI * r;
-  const offset = c * (1 - Math.max(0, Math.min(100, v)) / 100);
-  const color = v >= 70 ? 'var(--leaf)' : v >= 45 ? '#daa520' : 'var(--danger)';
-  return (
-    <svg width={size} height={size} className="tm-ovr-ring">
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--border)" strokeWidth={3} />
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={3} strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round" transform={`rotate(-90 ${size/2} ${size/2})`} />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize={size*0.32} fontWeight="700" fontFamily="'Space Grotesk', sans-serif" fill={color}>{v}</text>
-    </svg>
-  );
-}
 
 function GrowthSparkline({ data }) {
   if (!data || data.length < 2) return <span className="ya-spark-empty">No history</span>;
@@ -59,6 +31,7 @@ function GrowthSparkline({ data }) {
 
 export default function YouthAcademyPage() {
   const { token, franchise } = useAuth();
+  const toast = useToast();
 
   const [tab, setTab] = useState('overview');
   const [academyData, setAcademyData] = useState(null);
@@ -72,6 +45,8 @@ export default function YouthAcademyPage() {
   const [prospectSearch, setProspectSearch] = useState('');
   const [prospectRole, setProspectRole] = useState('ALL');
   const [clubSearch, setClubSearch] = useState('');
+
+  useEffect(() => { setPageTitle('Youth Academy'); }, []);
 
   async function load() {
     setError('');
@@ -103,8 +78,8 @@ export default function YouthAcademyPage() {
 
   async function act(fn, label) {
     setActing(label);
-    try { await fn(); await load(); }
-    catch (e) { setError(e.message); }
+    try { await fn(); await load(); toast.success(label === 'gen' ? 'Prospects generated' : label === 'grow' ? 'Growth cycle complete' : 'Upgrade complete'); }
+    catch (e) { setError(e.message); toast.error(e.message); }
     finally { setActing(null); }
   }
 

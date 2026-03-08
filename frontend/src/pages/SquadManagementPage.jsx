@@ -3,6 +3,8 @@ import { api } from '../api/client';
 import PlayerCard from '../components/PlayerCard';
 import PlayerDetailModal from '../components/PlayerDetailModal';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { setPageTitle } from '../utils/format';
 
 const TABS = [
   { key: 'squad', label: 'Squad', icon: '👥' },
@@ -64,6 +66,7 @@ function OverallRing({ value }) {
 
 export default function SquadManagementPage() {
   const { token } = useAuth();
+  const toast = useToast();
 
   const [tab, setTab] = useState('squad');
   const [squadData, setSquadData] = useState(null);
@@ -74,6 +77,8 @@ export default function SquadManagementPage() {
   const [rosterSearch, setRosterSearch] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => { setPageTitle('Squad Management'); }, []);
 
   async function load() {
     setError('');
@@ -99,17 +104,17 @@ export default function SquadManagementPage() {
   }, [selectedPlayer, token]);
 
   async function saveLineup() {
-    try { await api.squad.setLineup(token, selectedLineup.slice(0, 11)); await load(); }
-    catch (e) { setError(e.message); }
+    try { await api.squad.setLineup(token, selectedLineup.slice(0, 11)); await load(); toast.success('Lineup saved'); }
+    catch (e) { setError(e.message); toast.error(e.message); }
   }
   async function promote(id) {
-    try { await api.squad.promote(token, id); await load(); } catch (e) { setError(e.message); }
+    try { await api.squad.promote(token, id); await load(); toast.success('Player promoted'); } catch (e) { setError(e.message); toast.error(e.message); }
   }
   async function release(id) {
-    try { await api.squad.release(token, id); await load(); } catch (e) { setError(e.message); }
+    try { await api.squad.release(token, id); await load(); toast.success('Player released'); } catch (e) { setError(e.message); toast.error(e.message); }
   }
   async function demote(id) {
-    try { await api.squad.demote(token, id); await load(); } catch (e) { setError(e.message); }
+    try { await api.squad.demote(token, id); await load(); toast.success('Player demoted'); } catch (e) { setError(e.message); toast.error(e.message); }
   }
 
   function toggleLineup(playerId) {

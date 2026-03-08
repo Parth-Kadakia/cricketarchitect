@@ -2,18 +2,7 @@ import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
-
-function timeAgo(dateStr) {
-  if (!dateStr) return '—';
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
+import { timeAgo, setPageTitle } from '../utils/format';
 
 function fmtDate(dateStr) {
   if (!dateStr) return '—';
@@ -26,6 +15,8 @@ export default function AdminConsolePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
+
+  useEffect(() => { setPageTitle('Admin Console'); }, []);
 
   // Gate: only admin can see this
   if (user?.role !== 'admin') {

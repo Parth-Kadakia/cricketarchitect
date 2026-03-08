@@ -2,17 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import TeamNameButton from '../components/TeamNameButton';
 import { useSocket } from '../context/SocketContext';
-
-function oversFromBalls(balls) {
-  const complete = Math.floor(Number(balls || 0) / 6);
-  const rem = Number(balls || 0) % 6;
-  return `${complete}.${rem}`;
-}
-
-function scoreLabel(runs, wickets, balls) {
-  if (runs == null) return '-';
-  return `${runs}/${wickets} (${oversFromBalls(balls)})`;
-}
+import { oversFromBalls, scoreLabel, setPageTitle } from '../utils/format';
 
 const TABS = [
   { key: 'standings', label: 'Standings', icon: '🏆' },
@@ -55,6 +45,8 @@ export default function LeagueTablePage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const isInternational = String(summary?.season?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
+
+  useEffect(() => { setPageTitle('League Table'); }, []);
 
   const tableByLeague = useMemo(
     () =>
