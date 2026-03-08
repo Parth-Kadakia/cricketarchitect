@@ -311,7 +311,7 @@ router.post(
     /* Find the user's current franchise (if any) */
     const worldId = req.user.active_world_id || null;
     const franchiseRow = (await pool.query(
-      `SELECT id FROM franchises WHERE owner_user_id = $1 AND ($2::bigint IS NULL OR world_id = $2) LIMIT 1`,
+      `SELECT id FROM franchises WHERE owner_user_id = $1 AND world_id = $2 LIMIT 1`,
       [userId, worldId]
     )).rows[0];
 

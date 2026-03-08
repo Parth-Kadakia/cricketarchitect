@@ -70,7 +70,7 @@ async function getActiveSeasonInfo(dbClient = pool, worldId = null) {
     `SELECT id, competition_mode, league_count, teams_per_league, status
      FROM seasons
      WHERE status = 'ACTIVE'
-       AND ($1::bigint IS NULL OR world_id = $1)
+       AND world_id = $1
      ORDER BY id DESC
      LIMIT 1`,
     [worldId]
@@ -122,7 +122,7 @@ async function getManagedFranchise(userId, dbClient = pool, worldId = null) {
     `SELECT id, competition_mode, current_league_tier
      FROM franchises
      WHERE owner_user_id = $1
-       AND ($2::bigint IS NULL OR world_id = $2)
+       AND world_id = $2
      LIMIT 1`,
     [userId, worldId]
   );
@@ -234,7 +234,7 @@ async function buildUsedManagerNameKeySet(dbClient = pool, worldId = null) {
   const rows = await dbClient.query(
     `SELECT display_name
      FROM managers
-     WHERE ($1::bigint IS NULL OR world_id = $1)`,
+     WHERE world_id = $1`,
     [worldId]
   );
   const set = new Set();
@@ -589,7 +589,7 @@ async function ensureCpuManagerForFranchise({ franchiseId, competitionMode, coun
      LEFT JOIN franchises f ON f.current_manager_id = m.id
      WHERE m.is_cpu = TRUE
        AND m.competition_mode = $1
-       AND ($2::bigint IS NULL OR m.world_id = $2)
+       AND m.world_id = $2
        AND mts.id IS NULL
        AND f.id IS NULL
      ORDER BY m.reputation DESC, m.level DESC, m.id ASC
@@ -635,7 +635,7 @@ export async function ensureFranchiseManagers(dbClient = pool, worldId = null) {
             c.country
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
-     WHERE ($1::bigint IS NULL OR f.world_id = $1)
+     WHERE f.world_id = $1
      ORDER BY f.id ASC`,
     [worldId]
   );
@@ -673,7 +673,7 @@ export async function ensureFranchiseManagers(dbClient = pool, worldId = null) {
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
      WHERE f.current_manager_id IS NULL
-       AND ($1::bigint IS NULL OR f.world_id = $1)
+       AND f.world_id = $1
      ORDER BY f.id ASC`,
     [worldId]
   );
@@ -1329,7 +1329,7 @@ async function listApplyMarketCandidates({ userId, mode, worldId = null, limit =
      WHERE f.owner_user_id IS NULL
        AND f.status IN ('AI_CONTROLLED', 'AVAILABLE', 'FOR_SALE')
        AND f.competition_mode = $1
-       AND ($4::bigint IS NULL OR f.world_id = $4)
+       AND f.world_id = $4
      ORDER BY f.current_league_tier ASC,
               COALESCE(st.league_position, st.position, 999) ASC,
               f.total_valuation DESC,
@@ -1917,7 +1917,7 @@ export async function generateManagerOffersForUser(userId, options = {}) {
      WHERE f.owner_user_id IS NULL
        AND f.status IN ('AI_CONTROLLED', 'AVAILABLE', 'FOR_SALE')
        AND f.competition_mode = $2
-       AND ($4::bigint IS NULL OR f.world_id = $4)
+       AND f.world_id = $4
        AND NOT EXISTS (
          SELECT 1
          FROM manager_offers mo
@@ -2011,7 +2011,7 @@ export async function listManagerOffers(userId, dbClient = pool, worldId = null)
      JOIN cities c ON c.id = f.city_id
      LEFT JOIN season_teams st ON st.franchise_id = mo.franchise_id AND st.season_id = mo.season_id
      WHERE mo.user_id = $1
-       AND ($2::bigint IS NULL OR f.world_id = $2)
+       AND f.world_id = $2
      ORDER BY
        CASE mo.status
          WHEN 'PENDING' THEN 0
@@ -2102,7 +2102,7 @@ export async function acceptManagerOffer({ userId, offerId, worldId = null, dbCl
      JOIN franchises f ON f.id = mo.franchise_id
      WHERE mo.id = $1
        AND mo.user_id = $2
-       AND ($3::bigint IS NULL OR f.world_id = $3)
+       AND f.world_id = $3
      FOR UPDATE OF mo`,
     [offerId, userId, worldId]
   );
@@ -2210,7 +2210,7 @@ export async function applyForManagerJob({ userId, franchiseId, worldId = null, 
             total_valuation
      FROM franchises
      WHERE id = $1
-       AND ($2::bigint IS NULL OR world_id = $2)
+       AND world_id = $2
      FOR UPDATE`,
     [franchiseId, worldId]
   );
@@ -2568,6 +2568,7 @@ export async function finalizeGlobalManagerSeasonLifecycle(seasonId, dbClient = 
 }
 
 export async function getManagerDirectory({ seasonId = null, mode = null, worldId = null, limit = 200, dbClient = pool } = {}) {
+  if (!worldId) return [];
   const seasonParam = seasonId ? Number(seasonId) : null;
   const normalizedMode = mode ? normalizeCareerMode(mode) : null;
   const cappedLimit = Math.max(25, Math.min(500, Number(limit || 200)));
@@ -2602,7 +2603,7 @@ export async function getManagerDirectory({ seasonId = null, mode = null, worldI
      LEFT JOIN cities c ON c.id = f.city_id
      LEFT JOIN season_teams st ON st.franchise_id = f.id AND st.season_id = $1
      WHERE ($2::text IS NULL OR m.competition_mode = $2)
-       AND ($4::bigint IS NULL OR m.world_id = $4)
+       AND m.world_id = $4
      ORDER BY m.level DESC, m.reputation DESC, m.titles_won DESC, m.matches_managed DESC
      LIMIT $3`,
     [seasonParam, normalizedMode, cappedLimit, worldId]
@@ -2612,6 +2613,7 @@ export async function getManagerDirectory({ seasonId = null, mode = null, worldI
 }
 
 export async function getManagerProfile(managerId, dbClient = pool, worldId = null) {
+  if (!worldId) return null;
   const manager = await dbClient.query(
     `SELECT m.id,
             m.user_id,
@@ -2635,7 +2637,7 @@ export async function getManagerProfile(managerId, dbClient = pool, worldId = nu
      LEFT JOIN franchises f ON f.current_manager_id = m.id
      LEFT JOIN cities c ON c.id = f.city_id
      WHERE m.id = $1
-       AND ($2::bigint IS NULL OR m.world_id = $2 OR f.world_id = $2)
+       AND (m.world_id = $2 OR f.world_id = $2)
      LIMIT 1`,
     [managerId, worldId]
   );
@@ -2662,7 +2664,7 @@ export async function getManagerProfile(managerId, dbClient = pool, worldId = nu
      JOIN franchises f ON f.id = mts.franchise_id
      JOIN cities c ON c.id = f.city_id
      WHERE mts.manager_id = $1
-       AND ($2::bigint IS NULL OR f.world_id = $2)
+       AND f.world_id = $2
      ORDER BY mts.started_at DESC
      LIMIT 40`,
     [managerId, worldId]
@@ -2682,7 +2684,7 @@ export async function getManagerProfile(managerId, dbClient = pool, worldId = nu
      FROM matches m
      JOIN franchises hf ON hf.id = m.home_franchise_id
      JOIN franchises af ON af.id = m.away_franchise_id
-     WHERE ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+     WHERE m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
        AND EXISTS (
        SELECT 1
        FROM manager_team_stints mts
@@ -2714,7 +2716,7 @@ export async function getManagerCareerSnapshot(userId, dbClient = pool, worldId 
   const worldState = await dbClient.query(
     `SELECT COUNT(*)::int AS franchise_count
      FROM franchises
-     WHERE ($1::bigint IS NULL OR world_id = $1)`,
+     WHERE world_id = $1`,
     [worldId]
   );
   const worldFranchiseCount = Number(worldState.rows[0]?.franchise_count || 0);
@@ -2740,10 +2742,10 @@ export async function getManagerCareerSnapshot(userId, dbClient = pool, worldId 
             COALESCE(st.league_position, st.position)::int AS league_position
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
-     LEFT JOIN seasons s ON s.status = 'ACTIVE' AND ($2::bigint IS NULL OR s.world_id = $2)
+     LEFT JOIN seasons s ON s.status = 'ACTIVE' AND s.world_id = $2
      LEFT JOIN season_teams st ON st.season_id = s.id AND st.franchise_id = f.id
      WHERE f.owner_user_id = $1
-       AND ($2::bigint IS NULL OR f.world_id = $2)
+       AND f.world_id = $2
      ORDER BY s.id DESC NULLS LAST
      LIMIT 1`,
     [userId, worldId]

@@ -505,10 +505,10 @@ async function getOwnedFranchise(userId, dbClient = pool, worldId = null) {
             ), 0), 1) AS strength_rating
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
-     LEFT JOIN seasons s ON s.status = 'ACTIVE' AND ($2::bigint IS NULL OR s.world_id = $2)
+     LEFT JOIN seasons s ON s.status = 'ACTIVE' AND s.world_id = $2
      LEFT JOIN season_teams st ON st.season_id = s.id AND st.franchise_id = f.id
      WHERE f.owner_user_id = $1
-       AND ($2::bigint IS NULL OR f.world_id = $2)
+       AND f.world_id = $2
      ORDER BY s.season_number DESC NULLS LAST
      LIMIT 1`,
     [userId, worldId]
@@ -529,7 +529,7 @@ async function markCpuAndHumanOwnership(selectedFranchiseId, dbClient, worldId =
        WHEN owner_user_id IS NULL THEN 'AI_CONTROLLED'
        ELSE status
      END
-     WHERE ($2::bigint IS NULL OR world_id = $2)`,
+     WHERE world_id = $2`,
     [selectedFranchiseId, worldId]
   );
 
@@ -537,7 +537,7 @@ async function markCpuAndHumanOwnership(selectedFranchiseId, dbClient, worldId =
     `SELECT id
      FROM seasons
      WHERE status = 'ACTIVE'
-       AND ($1::bigint IS NULL OR world_id = $1)
+       AND world_id = $1
      ORDER BY id DESC
      LIMIT 1`,
     [worldId]

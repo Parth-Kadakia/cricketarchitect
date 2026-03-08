@@ -97,7 +97,7 @@ router.get(
        FROM franchises f
        JOIN cities c ON c.id = f.city_id
        LEFT JOIN users u ON u.id = f.owner_user_id
-       LEFT JOIN seasons s ON s.status = 'ACTIVE' AND ($2::bigint IS NULL OR s.world_id = $2)
+       LEFT JOIN seasons s ON s.status = 'ACTIVE' AND s.world_id = $2
        LEFT JOIN season_teams st ON st.season_id = s.id AND st.franchise_id = f.id
        WHERE f.id = $1
        LIMIT 1`,
@@ -205,7 +205,7 @@ router.get(
        FROM players p
        LEFT JOIN franchises f ON f.id = p.franchise_id
        WHERE p.id = $1
-         AND ($2::bigint IS NULL OR f.world_id = $2)`,
+         AND f.world_id = $2`,
       [req.params.playerId, worldId]
     );
 

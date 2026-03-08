@@ -5,7 +5,7 @@ import { ensureFranchiseManagers } from './managerCareerService.js';
 
 export async function bootstrapGameWorld(dbClient = pool, worldId = null) {
   const franchiseCount = Number((await dbClient.query(
-    'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+    'SELECT COUNT(*)::int AS count FROM franchises WHERE world_id = $1',
     [worldId]
   )).rows[0].count);
   if (franchiseCount === 0) {
@@ -24,7 +24,7 @@ export async function bootstrapGameWorld(dbClient = pool, worldId = null) {
     `INSERT INTO season_teams (season_id, franchise_id, is_ai, league_tier, previous_league_tier, movement)
      SELECT $1, f.id, f.owner_user_id IS NULL, f.current_league_tier, f.current_league_tier, 'STAY'
      FROM franchises f
-     WHERE ($2::bigint IS NULL OR f.world_id = $2)
+     WHERE f.world_id = $2
      ON CONFLICT (season_id, franchise_id) DO UPDATE
        SET is_ai = EXCLUDED.is_ai`,
     [season.id, worldId]
@@ -38,7 +38,7 @@ export async function bootstrapGameWorld(dbClient = pool, worldId = null) {
 export async function getGameBootstrapStatus(dbClient = pool, worldId = null) {
   const season = await getActiveSeason(dbClient, worldId);
   const franchiseCount = Number((await dbClient.query(
-    'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+    'SELECT COUNT(*)::int AS count FROM franchises WHERE world_id = $1',
     [worldId]
   )).rows[0].count);
 

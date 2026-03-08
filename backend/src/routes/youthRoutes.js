@@ -149,7 +149,7 @@ router.get(
        JOIN players p ON p.id = pgl.player_id
        LEFT JOIN franchises f ON f.id = p.franchise_id
        WHERE pgl.player_id = $1
-         AND ($2::bigint IS NULL OR f.world_id = $2)
+         AND f.world_id = $2
        ORDER BY pgl.recorded_at DESC
        LIMIT 40`,
       [req.params.playerId, worldId]

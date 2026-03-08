@@ -87,7 +87,7 @@ export async function rebalanceSeasonPlayers({ seasonId = null, dryRun = false, 
       `SELECT id
        FROM seasons
        WHERE status = 'ACTIVE'
-         AND ($1::bigint IS NULL OR world_id = $1)
+         AND world_id = $1
        ORDER BY id DESC
        LIMIT 1`,
       [worldId]

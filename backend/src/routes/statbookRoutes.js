@@ -47,7 +47,7 @@ router.get(
       pool.query(
         `SELECT id, season_number, name, status
          FROM seasons
-         WHERE ($1::bigint IS NULL OR world_id = $1)
+         WHERE world_id = $1
          ORDER BY season_number DESC`,
         [worldId]
       ),
@@ -57,13 +57,13 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
            UNION
            SELECT DISTINCT away_franchise_id
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
          )
          SELECT f.id AS franchise_id,
                 f.franchise_name,
@@ -81,7 +81,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
          )
          SELECT COUNT(*)::int AS completed_matches,
                 COALESCE(SUM(COALESCE(home_score, 0) + COALESCE(away_score, 0)), 0)::int AS total_runs,
@@ -100,7 +100,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
          )
          SELECT COALESCE(SUM(pms.fours), 0)::int AS fours,
                 COALESCE(SUM(pms.sixes), 0)::int AS sixes
@@ -114,7 +114,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -152,7 +152,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -203,7 +203,7 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
          ORDER BY pms.batting_runs DESC, pms.batting_balls ASC
          LIMIT 1`,
         [seasonId, worldId]
@@ -226,7 +226,7 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
          ORDER BY pms.bowling_wickets DESC, pms.bowling_runs ASC, pms.bowling_balls ASC
          LIMIT 1`,
         [seasonId, worldId]
@@ -237,7 +237,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
          )
          SELECT
            COALESCE(SUM(CASE WHEN pms.batting_runs BETWEEN 50 AND 99 THEN 1 ELSE 0 END), 0)::int AS fifties,
@@ -329,7 +329,7 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
          GROUP BY p.id, p.first_name, p.last_name, p.role, f.franchise_name, c.country`,
         [seasonId, worldId]
       ),
@@ -351,7 +351,7 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
            AND pms.bowling_balls > 0
          ORDER BY pms.bowling_wickets DESC, pms.bowling_runs ASC, pms.bowling_balls ASC
          LIMIT $2`,
@@ -374,7 +374,7 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
            AND pms.batting_runs >= 50
          ORDER BY pms.batting_balls ASC, pms.batting_runs DESC
          LIMIT 1`,
@@ -397,7 +397,7 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
            AND pms.batting_runs >= 100
          ORDER BY pms.batting_balls ASC, pms.batting_runs DESC
          LIMIT 1`,
@@ -475,7 +475,7 @@ router.get(
          JOIN franchises f ON f.id = st.franchise_id
          JOIN cities c ON c.id = f.city_id
          WHERE ($1::bigint IS NULL OR st.season_id = $1::bigint)
-           AND ($3::bigint IS NULL OR st.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
+           AND st.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
          GROUP BY f.id, f.franchise_name, c.country
          ORDER BY SUM(st.won) DESC, SUM(st.points) DESC
          LIMIT $2`,
@@ -487,7 +487,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
+             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -523,7 +523,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
+             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -569,7 +569,7 @@ router.get(
          LEFT JOIN franchises wf ON wf.id = m.winner_franchise_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
            AND lower(COALESCE(m.result_summary, '')) ~ 'by\\s+[0-9]+\\s+runs'
          ORDER BY margin_runs DESC
          LIMIT $2`,
@@ -591,7 +591,7 @@ router.get(
          LEFT JOIN franchises wf ON wf.id = m.winner_franchise_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
            AND lower(COALESCE(m.result_summary, '')) ~ 'by\\s+[0-9]+\\s+wickets'
          ORDER BY margin_wickets DESC
          LIMIT $2`,
@@ -654,7 +654,7 @@ router.get(
          FROM matches m
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($4::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $4))
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $4)
            AND (
              (m.home_franchise_id = $2 AND m.away_franchise_id = $3)
              OR
@@ -682,7 +682,7 @@ router.get(
          JOIN franchises af ON af.id = m.away_franchise_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($5::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $5))
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $5)
            AND (
              (m.home_franchise_id = $2 AND m.away_franchise_id = $3)
              OR
@@ -727,7 +727,7 @@ router.get(
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
            AND ($2::bigint IS NULL OR m.home_franchise_id = $2::bigint OR m.away_franchise_id = $2::bigint)
-           AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))`,
+           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)`,
         [seasonId, teamId, worldId]
       ),
       pool.query(
@@ -766,7 +766,7 @@ router.get(
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
            AND ($2::bigint IS NULL OR m.home_franchise_id = $2::bigint OR m.away_franchise_id = $2::bigint)
-           AND ($5::bigint IS NULL OR s.world_id = $5)
+           AND s.world_id = $5
          ORDER BY m.id DESC
          LIMIT $3 OFFSET $4`,
         [seasonId, teamId, limit, offset, worldId]

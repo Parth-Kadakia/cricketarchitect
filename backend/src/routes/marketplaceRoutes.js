@@ -98,7 +98,7 @@ router.get(
        FROM franchises f
        JOIN cities c ON c.id = f.city_id
        LEFT JOIN users u ON u.id = f.owner_user_id
-       WHERE ($1::bigint IS NULL OR f.world_id = $1)
+       WHERE f.world_id = $1
        ORDER BY f.total_valuation DESC, c.name ASC`,
       [worldId]
     );
@@ -117,7 +117,7 @@ router.get(
       `SELECT competition_mode
        FROM seasons
        WHERE status = 'ACTIVE'
-         AND ($1::bigint IS NULL OR world_id = $1)
+         AND world_id = $1
        ORDER BY id DESC
        LIMIT 1`,
       [worldId]
@@ -258,7 +258,7 @@ router.get(
       `SELECT competition_mode
        FROM seasons
        WHERE status = 'ACTIVE'
-         AND ($1::bigint IS NULL OR world_id = $1)
+         AND world_id = $1
        ORDER BY id DESC
        LIMIT 1`,
       [worldId]

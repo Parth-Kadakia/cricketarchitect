@@ -114,7 +114,7 @@ async function buildRandomTierAssignments(teamCount, leagueCount, worldId = null
   const franchises = await dbClient.query(
     `SELECT id, owner_user_id
      FROM franchises
-     WHERE ($2::bigint IS NULL OR world_id = $2)
+     WHERE world_id = $2
      ORDER BY random()
      LIMIT $1`,
     [teamCount, worldId]
@@ -164,7 +164,7 @@ async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCoun
               owner_user_id
        FROM franchises
        WHERE ($1::bigint[] IS NULL OR id <> ALL($1::bigint[]))
-         AND ($4::bigint IS NULL OR world_id = $4)
+         AND world_id = $4
        ORDER BY random()
        LIMIT $3`,
       [selectedIds.length ? selectedIds : null, leagueCount, teamCount - selectedRows.length, worldId]
@@ -279,7 +279,7 @@ export async function listSeasons(limit = 12, worldId = null, dbClient = pool) {
            start_date,
            end_date
      FROM seasons
-     WHERE ($1::bigint IS NULL OR world_id = $1)
+     WHERE world_id = $1
      ORDER BY season_number DESC
      LIMIT $2`,
     [worldId, limit]
@@ -293,7 +293,7 @@ export async function getActiveSeason(dbClient = pool, worldId = null) {
     `SELECT *
      FROM seasons
      WHERE status = 'ACTIVE'
-       AND ($1::bigint IS NULL OR world_id = $1)
+       AND world_id = $1
      ORDER BY season_number DESC
      LIMIT 1`,
     [worldId]
@@ -323,7 +323,7 @@ export async function createSeason({
   }
 
   const availableTeamCount = Number((await dbClient.query(
-    'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+    'SELECT COUNT(*)::int AS count FROM franchises WHERE world_id = $1',
     [worldId]
   )).rows[0].count);
   const resolvedTeamCount = Math.min(requestedTeamCount, availableTeamCount);
@@ -337,7 +337,7 @@ export async function createSeason({
   const nextSeasonNumber =
     seasonNumber ||
     Number((await dbClient.query(
-      'SELECT COALESCE(MAX(season_number), 0) AS season_number FROM seasons WHERE ($1::bigint IS NULL OR world_id = $1)',
+      'SELECT COALESCE(MAX(season_number), 0) AS season_number FROM seasons WHERE world_id = $1',
       [worldId]
     )).rows[0].season_number) + 1;
 
@@ -347,13 +347,13 @@ export async function createSeason({
 
   // Ensure the name is unique — if a season with this name already exists, append a suffix
   const nameCheck = await dbClient.query(
-    'SELECT id FROM seasons WHERE name = $1 AND ($2::bigint IS NULL OR world_id = $2)',
+    'SELECT id FROM seasons WHERE name = $1 AND world_id = $2',
     [seasonName, worldId]
   );
   if (nameCheck.rows.length) {
     const maxNum = Number(
       (await dbClient.query(
-        'SELECT COALESCE(MAX(season_number), 0) AS mn FROM seasons WHERE ($1::bigint IS NULL OR world_id = $1)',
+        'SELECT COALESCE(MAX(season_number), 0) AS mn FROM seasons WHERE world_id = $1',
         [worldId]
       )).rows[0].mn
     );
@@ -407,7 +407,7 @@ export async function ensureActiveSeason(dbClient = pool, worldId = null) {
   }
 
   const franchiseCount = Number((await dbClient.query(
-    'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+    'SELECT COUNT(*)::int AS count FROM franchises WHERE world_id = $1',
     [worldId]
   )).rows[0].count);
   if (franchiseCount < 2) {
@@ -417,7 +417,7 @@ export async function ensureActiveSeason(dbClient = pool, worldId = null) {
   const modeResult = await dbClient.query(
     `SELECT competition_mode, COUNT(*)::int AS count
      FROM franchises
-     WHERE ($1::bigint IS NULL OR world_id = $1)
+     WHERE world_id = $1
      GROUP BY competition_mode
      ORDER BY COUNT(*) DESC
      LIMIT 1`,
@@ -1028,7 +1028,7 @@ export async function createNextSeasonFromCompleted(completedSeasonId, dbClient 
   // Guard: if a season with this number already exists (e.g. stale retry), skip to its record
   const nextNumber = Number(completed.rows[0].season_number) + 1;
   const existingNext = await dbClient.query(
-    'SELECT * FROM seasons WHERE season_number = $1 AND ($2::bigint IS NULL OR world_id = $2)', [nextNumber, completedWorldId]
+    'SELECT * FROM seasons WHERE season_number = $1 AND world_id = $2', [nextNumber, completedWorldId]
   );
   if (existingNext.rows.length) {
     return existingNext.rows[0];
