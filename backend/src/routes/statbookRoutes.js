@@ -709,7 +709,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
     const teamId = parseId(req.query.teamId);
-    const limit = parseLimit(req.query.limit, 30, 200);
+    const limit = parseLimit(req.query.limit, 30, 5000);
     const offset = Math.max(0, Number(req.query.offset || 0));
     const worldId = req.user?.active_world_id || null;
 

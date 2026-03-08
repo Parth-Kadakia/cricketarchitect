@@ -49,7 +49,7 @@ export default function StatbookPage() {
   const [headToHead, setHeadToHead] = useState(null);
   const [headToHeadLoading, setHeadToHeadLoading] = useState(false);
   const [expanded, setExpanded] = useState({});
-  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => { setPageTitle('Statbook'); }, []);
 
@@ -158,70 +158,93 @@ export default function StatbookPage() {
     }
   }
 
-  function exportStatbookExcel() {
-    const seasonLabel = seasonId
-      ? (seasons.find((s) => String(s.id) === String(seasonId))?.name || `Season ${seasonId}`)
-      : 'All Time';
+  const [archiveLoading, setArchiveLoading] = useState(false);
+
+  async function exportStatbookExcel() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const numericSeasonId = seasonId ? Number(seasonId) : null;
+
+      // Fetch complete data fresh from API
+      const [fullPlayer, fullTeam, fullArchive] = await Promise.all([
+        api.statbook.playerRecords(token, numericSeasonId, 500),
+        api.statbook.teamRecords(token, numericSeasonId, 500),
+        api.statbook.matchArchive(token, { seasonId: numericSeasonId, limit: 5000, offset: 0 })
+      ]);
+
+      const allMostRuns = fullPlayer?.most_runs || [];
+      const allMostWickets = fullPlayer?.most_wickets || [];
+      const allBestAverage = fullPlayer?.best_batting_average || [];
+      const allBestEconomy = fullPlayer?.best_economy || [];
+      const allTopTeams = fullTeam?.top_teams || [];
+      const allHighestTotals = fullTeam?.highest_totals || [];
+      const allBiggestWins = fullTeam?.biggest_wins_by_runs || [];
+      const allArchive = fullArchive?.matches || [];
+
+      const seasonLabel = seasonId
+        ? (seasons.find((s) => String(s.id) === String(seasonId))?.name || `Season ${seasonId}`)
+        : 'All Time';
 
     const sheets = [];
 
-    if (mostRuns.length) {
+    if (allMostRuns.length) {
       sheets.push({
         name: 'Most Runs',
         headers: ['#', 'Player', 'Team', 'Mat', 'Runs', 'Avg', 'SR', '50s', '100s'],
-        rows: mostRuns.map((r, i) => [
+        rows: allMostRuns.map((r, i) => [
           i + 1, nameOf(r), r.franchise_name, r.matches, r.runs,
           fmtDec(r.batting_average), fmtDec(r.strike_rate), r.fifties, r.hundreds
         ])
       });
     }
 
-    if (mostWickets.length) {
+    if (allMostWickets.length) {
       sheets.push({
         name: 'Most Wickets',
         headers: ['#', 'Player', 'Team', 'Mat', 'Wkts', 'Overs', 'Econ', 'Best'],
-        rows: mostWickets.map((r, i) => [
+        rows: allMostWickets.map((r, i) => [
           i + 1, nameOf(r), r.franchise_name, r.matches, r.wickets,
           oversFromBalls(r.bowling_balls), fmtDec(r.economy), r.best_wickets
         ])
       });
     }
 
-    if (bestAverage.length) {
+    if (allBestAverage.length) {
       sheets.push({
         name: 'Best Batting Average',
         headers: ['#', 'Player', 'Team', 'Runs', 'Outs', 'Avg'],
-        rows: bestAverage.map((r, i) => [
+        rows: allBestAverage.map((r, i) => [
           i + 1, nameOf(r), r.franchise_name, r.runs, r.outs, fmtDec(r.batting_average)
         ])
       });
     }
 
-    if (bestEconomy.length) {
+    if (allBestEconomy.length) {
       sheets.push({
         name: 'Best Economy',
         headers: ['#', 'Player', 'Team', 'Overs', 'Wkts', 'Econ'],
-        rows: bestEconomy.map((r, i) => [
+        rows: allBestEconomy.map((r, i) => [
           i + 1, nameOf(r), r.franchise_name, oversFromBalls(r.bowling_balls), r.wickets, fmtDec(r.economy)
         ])
       });
     }
 
-    if (topTeams.length) {
+    if (allTopTeams.length) {
       sheets.push({
         name: 'Top Teams',
         headers: ['#', 'Team', 'Country', 'P', 'W', 'L', 'Pts', 'NRR'],
-        rows: topTeams.map((r, i) => [
+        rows: allTopTeams.map((r, i) => [
           i + 1, r.franchise_name, r.country, r.played, r.won, r.lost, r.points, fmtDec(r.avg_nrr, 3)
         ])
       });
     }
 
-    if (highestTotals.length) {
+    if (allHighestTotals.length) {
       sheets.push({
         name: 'Highest Totals',
         headers: ['#', 'Team', 'Country', 'Score', 'Match'],
-        rows: highestTotals.map((r, i) => [
+        rows: allHighestTotals.map((r, i) => [
           i + 1, r.franchise_name, r.country,
           `${r.runs}/${r.wickets} (${oversFromBalls(r.balls)})`,
           `#${r.match_id}`
@@ -229,11 +252,11 @@ export default function StatbookPage() {
       });
     }
 
-    if (biggestWinsByRuns.length) {
+    if (allBiggestWins.length) {
       sheets.push({
         name: 'Biggest Wins By Runs',
         headers: ['#', 'Winner', 'Fixture', 'Margin', 'Result'],
-        rows: biggestWinsByRuns.map((r, i) => [
+        rows: allBiggestWins.map((r, i) => [
           i + 1, r.winner_name || '-',
           `${r.home_team} vs ${r.away_team}`,
           `${r.margin_runs} runs`,
@@ -242,11 +265,11 @@ export default function StatbookPage() {
       });
     }
 
-    if (archiveMatches.length) {
+    if (allArchive.length) {
       sheets.push({
         name: 'Match Archive',
         headers: ['Season', 'Round', 'League', 'Home', 'Home Score', 'Away', 'Away Score', 'Result'],
-        rows: archiveMatches.map((r) => [
+        rows: allArchive.map((r) => [
           r.season_name, r.round_no,
           r.league_tier ? `League ${r.league_tier}` : r.stage,
           `${r.home_team} (${r.home_country})`,
@@ -261,6 +284,11 @@ export default function StatbookPage() {
     if (!sheets.length) return;
     const safeName = seasonLabel.replace(/\s+/g, '-').toLowerCase();
     downloadExcel(`statbook-${safeName}.xls`, sheets);
+    } catch (exportErr) {
+      setError(exportErr.message || 'Failed to export.');
+    } finally {
+      setExporting(false);
+    }
   }
 
   const selectedTeams = useMemo(() => {
@@ -299,8 +327,8 @@ export default function StatbookPage() {
           <p className="sb-subtitle">Historical records, milestones, and match archive across seasons.</p>
         </div>
         <div className="sb-header-actions">
-          <button type="button" className="sb-export-btn" onClick={exportStatbookExcel} title="Download all tables as Excel">
-            📥 Export Excel
+          <button type="button" className="sb-export-btn" onClick={exportStatbookExcel} disabled={exporting} title="Download all tables as Excel">
+            {exporting ? '⏳ Exporting...' : '📥 Export Excel'}
           </button>
         <div className="sb-season">
           <label htmlFor="sb-season-select">Season</label>
