@@ -48,6 +48,8 @@ export default function StatbookPage() {
   const [teamBId, setTeamBId] = useState('');
   const [headToHead, setHeadToHead] = useState(null);
   const [headToHeadLoading, setHeadToHeadLoading] = useState(false);
+  const [expanded, setExpanded] = useState({});
+  const [archiveLoading, setArchiveLoading] = useState(false);
 
   useEffect(() => { setPageTitle('Statbook'); }, []);
 
@@ -58,9 +60,9 @@ export default function StatbookPage() {
       const numericSeasonId = activeSeasonId ? Number(activeSeasonId) : null;
       const [overviewData, playerData, teamData, archiveData] = await Promise.all([
         api.statbook.overview(token, numericSeasonId),
-        api.statbook.playerRecords(token, numericSeasonId, 25),
-        api.statbook.teamRecords(token, numericSeasonId, 25),
-        api.statbook.matchArchive(token, { seasonId: numericSeasonId, limit: 40, offset: 0 })
+        api.statbook.playerRecords(token, numericSeasonId, 500),
+        api.statbook.teamRecords(token, numericSeasonId, 500),
+        api.statbook.matchArchive(token, { seasonId: numericSeasonId, limit: 50, offset: 0 })
       ]);
 
       setOverview(overviewData);
@@ -124,6 +126,37 @@ export default function StatbookPage() {
   const biggestWinsByRuns = teamRecords?.biggest_wins_by_runs || [];
   const topTeams = teamRecords?.top_teams || [];
   const archiveMatches = archive?.matches || [];
+
+  function toggleExpand(key) {
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function visibleRows(arr, key, defaultCount = 15) {
+    return expanded[key] ? arr : arr.slice(0, defaultCount);
+  }
+
+  async function loadMoreArchive() {
+    if (archiveLoading) return;
+    setArchiveLoading(true);
+    try {
+      const numericSeasonId = seasonId ? Number(seasonId) : null;
+      const currentCount = archiveMatches.length;
+      const moreData = await api.statbook.matchArchive(token, {
+        seasonId: numericSeasonId,
+        limit: 50,
+        offset: currentCount
+      });
+      setArchive((prev) => ({
+        ...prev,
+        matches: [...(prev?.matches || []), ...(moreData?.matches || [])],
+        total: moreData?.total ?? prev?.total
+      }));
+    } catch (err) {
+      setError(err.message || 'Failed to load more matches.');
+    } finally {
+      setArchiveLoading(false);
+    }
+  }
 
   function exportStatbookExcel() {
     const seasonLabel = seasonId
@@ -396,7 +429,7 @@ export default function StatbookPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {mostRuns.slice(0, 15).map((row, index) => (
+                  {visibleRows(mostRuns, 'mostRuns').map((row, index) => (
                     <tr key={`runs-${row.player_id}`}>
                       <td>{index + 1}</td>
                       <td>{nameOf(row)}</td>
@@ -412,6 +445,11 @@ export default function StatbookPage() {
                 </tbody>
               </table>
             </div>
+            {mostRuns.length > 15 && (
+              <button type="button" className="sb-toggle-btn" onClick={() => toggleExpand('mostRuns')}>
+                {expanded.mostRuns ? '▲ Show Top 15' : `▼ Show All (${mostRuns.length})`}
+              </button>
+            )}
           </div>
 
           <div className="panel">
@@ -431,7 +469,7 @@ export default function StatbookPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {mostWickets.slice(0, 15).map((row, index) => (
+                  {visibleRows(mostWickets, 'mostWickets').map((row, index) => (
                     <tr key={`wkts-${row.player_id}`}>
                       <td>{index + 1}</td>
                       <td>{nameOf(row)}</td>
@@ -446,6 +484,11 @@ export default function StatbookPage() {
                 </tbody>
               </table>
             </div>
+            {mostWickets.length > 15 && (
+              <button type="button" className="sb-toggle-btn" onClick={() => toggleExpand('mostWickets')}>
+                {expanded.mostWickets ? '▲ Show Top 15' : `▼ Show All (${mostWickets.length})`}
+              </button>
+            )}
           </div>
 
           <div className="panel">
@@ -463,7 +506,7 @@ export default function StatbookPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {bestAverage.slice(0, 10).map((row, index) => (
+                  {visibleRows(bestAverage, 'bestAverage', 10).map((row, index) => (
                     <tr key={`avg-${row.player_id}`}>
                       <td>{index + 1}</td>
                       <td>{nameOf(row)}</td>
@@ -476,6 +519,11 @@ export default function StatbookPage() {
                 </tbody>
               </table>
             </div>
+            {bestAverage.length > 10 && (
+              <button type="button" className="sb-toggle-btn" onClick={() => toggleExpand('bestAverage')}>
+                {expanded.bestAverage ? '▲ Show Top 10' : `▼ Show All (${bestAverage.length})`}
+              </button>
+            )}
           </div>
 
           <div className="panel">
@@ -493,7 +541,7 @@ export default function StatbookPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {bestEconomy.slice(0, 10).map((row, index) => (
+                  {visibleRows(bestEconomy, 'bestEconomy', 10).map((row, index) => (
                     <tr key={`econ-${row.player_id}`}>
                       <td>{index + 1}</td>
                       <td>{nameOf(row)}</td>
@@ -506,6 +554,11 @@ export default function StatbookPage() {
                 </tbody>
               </table>
             </div>
+            {bestEconomy.length > 10 && (
+              <button type="button" className="sb-toggle-btn" onClick={() => toggleExpand('bestEconomy')}>
+                {expanded.bestEconomy ? '▲ Show Top 10' : `▼ Show All (${bestEconomy.length})`}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -529,7 +582,7 @@ export default function StatbookPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {topTeams.slice(0, 15).map((row, index) => (
+                  {visibleRows(topTeams, 'topTeams').map((row, index) => (
                     <tr key={`team-${row.franchise_id}`}>
                       <td>{index + 1}</td>
                       <td>{row.franchise_name}</td>
@@ -544,6 +597,11 @@ export default function StatbookPage() {
                 </tbody>
               </table>
             </div>
+            {topTeams.length > 15 && (
+              <button type="button" className="sb-toggle-btn" onClick={() => toggleExpand('topTeams')}>
+                {expanded.topTeams ? '▲ Show Top 15' : `▼ Show All (${topTeams.length})`}
+              </button>
+            )}
           </div>
 
           <div className="panel">
@@ -560,7 +618,7 @@ export default function StatbookPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {highestTotals.slice(0, 15).map((row, index) => (
+                  {visibleRows(highestTotals, 'highestTotals').map((row, index) => (
                     <tr key={`high-total-${row.match_id}-${row.franchise_id}-${index}`}>
                       <td>{index + 1}</td>
                       <td>{row.franchise_name}</td>
@@ -574,6 +632,11 @@ export default function StatbookPage() {
                 </tbody>
               </table>
             </div>
+            {highestTotals.length > 15 && (
+              <button type="button" className="sb-toggle-btn" onClick={() => toggleExpand('highestTotals')}>
+                {expanded.highestTotals ? '▲ Show Top 15' : `▼ Show All (${highestTotals.length})`}
+              </button>
+            )}
           </div>
 
           <div className="panel">
@@ -590,7 +653,7 @@ export default function StatbookPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {biggestWinsByRuns.slice(0, 15).map((row, index) => (
+                  {visibleRows(biggestWinsByRuns, 'biggestWins').map((row, index) => (
                     <tr key={`margin-runs-${row.match_id}`}>
                       <td>{index + 1}</td>
                       <td>{row.winner_name || '-'}</td>
@@ -604,6 +667,11 @@ export default function StatbookPage() {
                 </tbody>
               </table>
             </div>
+            {biggestWinsByRuns.length > 15 && (
+              <button type="button" className="sb-toggle-btn" onClick={() => toggleExpand('biggestWins')}>
+                {expanded.biggestWins ? '▲ Show Top 15' : `▼ Show All (${biggestWinsByRuns.length})`}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -653,6 +721,11 @@ export default function StatbookPage() {
               </tbody>
             </table>
           </div>
+          {archiveMatches.length < (archive?.total || 0) && (
+            <button type="button" className="sb-toggle-btn" onClick={loadMoreArchive} disabled={archiveLoading}>
+              {archiveLoading ? 'Loading...' : `▼ Load More (${archiveMatches.length} of ${archive?.total})`}
+            </button>
+          )}
         </div>
       )}
 

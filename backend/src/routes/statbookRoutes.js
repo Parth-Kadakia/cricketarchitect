@@ -289,7 +289,7 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
-    const limit = parseLimit(req.query.limit, 20, 100);
+    const limit = parseLimit(req.query.limit, 25, 500);
     const worldId = req.user?.active_world_id || null;
 
     if (!worldId) return res.json({ seasonId: null, most_runs: [], most_wickets: [], best_batting_average: [], best_strike_rate: [], best_economy: [], most_fifties: [], most_hundreds: [], most_sixes: [], best_bowling_innings: [], fastest_fifty: null, fastest_hundred: null });
@@ -450,7 +450,7 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
-    const limit = parseLimit(req.query.limit, 20, 100);
+    const limit = parseLimit(req.query.limit, 25, 500);
     const worldId = req.user?.active_world_id || null;
 
     if (!worldId) return res.json({ seasonId: null, top_teams: [], highest_totals: [], lowest_totals: [], biggest_wins_by_runs: [], biggest_wins_by_wickets: [] });

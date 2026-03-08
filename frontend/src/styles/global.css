@@ -4909,6 +4909,28 @@ table.stats-table tr:hover td {
   color: var(--text-muted);
 }
 
+.sb-toggle-btn {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #3e7f45;
+  background: rgba(62, 127, 69, 0.06);
+  border: none;
+  border-top: 1px solid var(--glass-border);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.sb-toggle-btn:hover {
+  background: rgba(62, 127, 69, 0.14);
+}
+.sb-toggle-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .sb-h2h-controls {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

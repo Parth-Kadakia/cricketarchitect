@@ -231,9 +231,9 @@ export const api = {
   statbook: {
     overview: (token, seasonId = null) =>
       request(`/statbook/overview${seasonId ? `?seasonId=${seasonId}` : ''}`, { headers: buildHeaders(token, false) }),
-    playerRecords: (token, seasonId = null, limit = 20) =>
+    playerRecords: (token, seasonId = null, limit = 500) =>
       request(`/statbook/player-records?${[seasonId ? `seasonId=${seasonId}` : null, `limit=${limit}`].filter(Boolean).join('&')}`, { headers: buildHeaders(token, false) }),
-    teamRecords: (token, seasonId = null, limit = 20) =>
+    teamRecords: (token, seasonId = null, limit = 500) =>
       request(`/statbook/team-records?${[seasonId ? `seasonId=${seasonId}` : null, `limit=${limit}`].filter(Boolean).join('&')}`, { headers: buildHeaders(token, false) }),
     headToHead: (token, teamAId, teamBId, seasonId = null, limit = 20) =>
       request(`/statbook/head-to-head?${[
