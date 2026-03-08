@@ -68,6 +68,7 @@ export default function DashboardPage() {
   const [resetTyped, setResetTyped] = useState('');
   const [resetting, setResetting] = useState(false);
   const [pendingClaim, setPendingClaim] = useState(null); // { type: 'CLUB'|'INTERNATIONAL', cityId?, cityName?, country? }
+  const [claiming, setClaiming] = useState(false);
 
   const onboarding = useOnboardingCard({ franchise, squadSummary, recentResults });
 
@@ -169,9 +170,10 @@ export default function DashboardPage() {
   }
 
   async function confirmClaim() {
-    if (!pendingClaim) return;
+    if (!pendingClaim || claiming) return;
     try {
       setError('');
+      setClaiming(true);
       if (pendingClaim.type === 'INTERNATIONAL') {
         await api.franchise.claim(token, {
           mode: 'INTERNATIONAL',
@@ -189,6 +191,7 @@ export default function DashboardPage() {
       await loadData();
       toast.success('Franchise claimed!');
     } catch (e) { setError(e.message); toast.error(e.message); }
+    finally { setClaiming(false); }
   }
 
   async function acceptManagerOffer(offerId) {
@@ -792,21 +795,30 @@ export default function DashboardPage() {
 
         {/* ── Confirmation modal ── */}
         {pendingClaim && (
-          <div className="sq-modal-backdrop" onClick={() => setPendingClaim(null)}>
+          <div className="sq-modal-backdrop" onClick={() => { if (!claiming) setPendingClaim(null); }}>
             <div className="fp-confirm-modal" onClick={(e) => e.stopPropagation()}>
-              <h3 className="fp-confirm-title">Confirm Selection</h3>
-              <p className="fp-confirm-text">
-                {pendingClaim.type === 'INTERNATIONAL' ? (
-                  <>You are about to start an <strong>International Career</strong> managing <strong>{pendingClaim.country}</strong>.</>
-                ) : (
-                  <>You are about to start a <strong>Club T20 Career</strong> in <strong>{pendingClaim.cityName}, {selectedCountry}</strong>.</>
-                )}
-              </p>
-              <p className="fp-confirm-sub">This cannot be undone without resetting your save.</p>
-              <div className="fp-confirm-actions">
-                <button type="button" className="sq-btn" onClick={() => setPendingClaim(null)}>← Go Back</button>
-                <button type="button" className="sq-btn sq-btn--primary" onClick={confirmClaim}>Confirm & Start →</button>
-              </div>
+              {claiming ? (
+                <div className="sq-loading" style={{ padding: '2rem 0' }}>
+                  <div className="sq-spinner" />
+                  <span>Setting up your franchise…</span>
+                </div>
+              ) : (
+                <>
+                  <h3 className="fp-confirm-title">Confirm Selection</h3>
+                  <p className="fp-confirm-text">
+                    {pendingClaim.type === 'INTERNATIONAL' ? (
+                      <>You are about to start an <strong>International Career</strong> managing <strong>{pendingClaim.country}</strong>.</>
+                    ) : (
+                      <>You are about to start a <strong>Club T20 Career</strong> in <strong>{pendingClaim.cityName}, {selectedCountry}</strong>.</>
+                    )}
+                  </p>
+                  <p className="fp-confirm-sub">This cannot be undone without resetting your save.</p>
+                  <div className="fp-confirm-actions">
+                    <button type="button" className="sq-btn" onClick={() => setPendingClaim(null)}>← Go Back</button>
+                    <button type="button" className="sq-btn sq-btn--primary" onClick={confirmClaim}>Confirm & Start →</button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
