@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import NoFranchiseBox, { isNoFranchiseError } from '../components/NoFranchiseBox';
 import { useAuth } from '../context/AuthContext';
 import PlayerDetailModal from '../components/PlayerDetailModal';
 import { setPageTitle } from '../utils/format';
@@ -78,6 +79,8 @@ export default function StatsPage() {
   }
 
   if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading rankings...</span></div>;
+
+  if (isNoFranchiseError(error)) return <NoFranchiseBox />;
 
   return (
     <div className="stats-page">

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import NoFranchiseBox, { isNoFranchiseError } from '../components/NoFranchiseBox';
 import Panel from '../components/Panel';
 import SimpleTable from '../components/SimpleTable';
 import StatCard from '../components/StatCard';
@@ -44,6 +45,10 @@ export default function TrophyRoomPage() {
 
   if (loading) {
     return <div className="loading-state">Loading trophy room...</div>;
+  }
+
+  if (isNoFranchiseError(error)) {
+    return <NoFranchiseBox />;
   }
 
   return (

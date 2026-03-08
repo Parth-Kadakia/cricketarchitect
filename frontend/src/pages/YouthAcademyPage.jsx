@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import NoFranchiseBox, { isNoFranchiseError } from '../components/NoFranchiseBox';
 import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -107,6 +108,8 @@ export default function YouthAcademyPage() {
   const selectedProspect = useMemo(() => prospects.find((p) => p.id === selectedPlayerId) || null, [prospects, selectedPlayerId]);
 
   if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading academy...</span></div>;
+
+  if (isNoFranchiseError(error)) return <NoFranchiseBox />;
 
   return (
     <div className="ya-page">

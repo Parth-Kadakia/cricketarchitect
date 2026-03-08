@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import NoFranchiseBox, { isNoFranchiseError } from '../components/NoFranchiseBox';
 import { useAuth } from '../context/AuthContext';
 import { oversFromBalls, setPageTitle } from '../utils/format';
 
@@ -138,6 +139,8 @@ export default function StatbookPage() {
       </div>
     );
   }
+
+  if (isNoFranchiseError(error)) return <NoFranchiseBox />;
 
   return (
     <div className="sb-page">

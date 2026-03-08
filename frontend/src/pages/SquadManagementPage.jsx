@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import NoFranchiseBox, { isNoFranchiseError } from '../components/NoFranchiseBox';
 import PlayerCard from '../components/PlayerCard';
 import PlayerDetailModal from '../components/PlayerDetailModal';
 import { useAuth } from '../context/AuthContext';
@@ -171,6 +172,8 @@ export default function SquadManagementPage() {
   }, [allPlayers, rosterFilter, rosterSearch]);
 
   if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading squad...</span></div>;
+
+  if (isNoFranchiseError(error)) return <NoFranchiseBox />;
 
   return (
     <div className="sq-page">

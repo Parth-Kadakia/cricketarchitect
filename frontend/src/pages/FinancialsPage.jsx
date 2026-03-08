@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import NoFranchiseBox, { isNoFranchiseError } from '../components/NoFranchiseBox';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { money, moneyFull, pct, timeAgo, setPageTitle } from '../utils/format';
@@ -173,6 +174,7 @@ export default function FinancialsPage() {
   }
 
   if (error && !summary) {
+    if (isNoFranchiseError(error)) return <NoFranchiseBox />;
     return <div className="sq-error">{error}</div>;
   }
 
