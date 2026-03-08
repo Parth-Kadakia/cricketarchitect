@@ -1,4 +1,13 @@
 import env from '../config/env.js';
+import {
+  resolveStoredBatsmanType,
+  resolveStoredBowlerMentality,
+  resolveStoredBowlerStyle,
+  resolveStoredHand,
+  toBallApiBatsmanType,
+  toBallApiBowlerMentality,
+  toBallApiBowlerStyle
+} from './playerTacticsService.js';
 
 const VALID_PITCH = ['good', 'cracked', 'dusty', 'damp', 'green', 'flat', 'dead', 'dry', 'wet', 'sticky', 'bouncy', 'Astro Turf', 'Grass', 'Matting'];
 const VALID_WEATHER = ['clear', 'overcast', 'humid', 'drizzle', 'windy', 'hot', 'cold', 'Sunny', 'Rainy', 'Cloudy'];
@@ -86,52 +95,6 @@ function mapInningPart(phase) {
   return 'Middle';
 }
 
-function deriveHandFromId(playerId) {
-  return Number(playerId || 0) % 4 === 0 ? 'Left' : 'Right';
-}
-
-function batsmanType(player, phase) {
-  if (phase === 'DEATH' && Number(player.batting) >= 72) {
-    return 'Finisher';
-  }
-  if (Number(player.batting) >= 78 && Number(player.temperament) <= 55) {
-    return 'Aggressive';
-  }
-  if (Number(player.temperament) >= 74) {
-    return 'Anchor';
-  }
-  if (Number(player.temperament) <= 45) {
-    return 'Defensive';
-  }
-  return 'Balanced';
-}
-
-function bowlerStyle(player) {
-  if (String(player.role || '').includes('BOWLER') && Number(player.bowling) >= 75 && Number(player.fitness) >= 70) {
-    return 'Fast Bowler (Express Pace)';
-  }
-  if (Number(player.bowling) >= 70) {
-    return 'Fast Bowler (Swing)';
-  }
-  if (Number(player.bowling) >= 62) {
-    return 'Medium Fast (Seam)';
-  }
-  return 'Spin Bowler (Off Spin)';
-}
-
-function bowlerMentality(player, phase) {
-  if (phase === 'DEATH') {
-    return 'Aggressive';
-  }
-  if (Number(player.bowling) >= 78) {
-    return 'Wicket Taker';
-  }
-  if (Number(player.temperament) >= 70) {
-    return 'Economy';
-  }
-  return 'Balanced';
-}
-
 function mapPitchForMatch(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) {
@@ -167,73 +130,42 @@ function mapWindForMatch(value) {
 
 function mapGroundForMatch(value) {
   const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'large' || normalized === 'long') {
+  if (normalized === 'short') {
+    return 'Short';
+  }
+  if (normalized === 'medium' || normalized === 'large' || normalized === 'long') {
     return 'Long';
   }
-  return 'Short';
+  return 'Long';
 }
 
-function deriveMatchBatsmanType(player) {
+function tuneBattingRating(player) {
   const role = String(player.role || '').toUpperCase();
-  const batting = Number(player.batting || 0);
-  const temperament = Number(player.temperament || 50);
+  const raw = clampInt(Number(player.batting || 0), 0, 100, 50);
 
-  if (role === 'BOWLER' && batting < 40) {
-    return 'Tail ender';
+  if (role === 'BOWLER') {
+    return clampInt(Math.round(raw * 0.5), 0, 100, 50);
   }
-  if (batting >= 78 && temperament <= 58) {
-    return 'Aggressive';
+  if (role === 'WICKET_KEEPER') {
+    return clampInt(Math.round(raw * 0.74), 0, 100, 50);
   }
-  if (temperament >= 72) {
-    return 'Accumulator';
+  if (role === 'ALL_ROUNDER') {
+    return clampInt(Math.round(raw * 0.78), 0, 100, 50);
   }
-  if (batting <= 45) {
-    return 'Defensive';
-  }
-  return 'Balanced';
+  return clampInt(Math.round(raw * 0.82), 0, 100, 50);
 }
 
-function deriveMatchBowlerStyle(player) {
+function tuneBowlingRating(player) {
   const role = String(player.role || '').toUpperCase();
-  const bowling = Number(player.bowling || 0);
-  const fitness = Number(player.fitness || 50);
-  const hand = deriveHandFromId(player.id);
+  const base = capBowlerRatingByRole(player);
 
-  if (role !== 'BOWLER' && role !== 'ALL_ROUNDER' && bowling < 52) {
-    return 'Medium Pace Bowler (Seam Bowler)';
+  if (role === 'WICKET_KEEPER' || role === 'BATTER') {
+    return 0;
   }
-  if (bowling >= 80 && fitness >= 70) {
-    return 'Fast Bowler (Express Pace)';
+  if (role === 'ALL_ROUNDER') {
+    return clampInt(Math.round(base * 1.14 + 6), 0, 100, 50);
   }
-  if (bowling >= 72 && fitness >= 65) {
-    return 'Fast-Medium Bowler';
-  }
-  if (bowling >= 67) {
-    return 'Swing Bowler';
-  }
-  if (bowling >= 62) {
-    return hand === 'Left' ? 'Slow Left-Arm Orthodox' : 'Off-Spin Bowler';
-  }
-  if (bowling >= 56) {
-    return hand === 'Left' ? 'Slow Left-Arm Orthodox' : 'Leg-Spin Bowler (including Chinaman)';
-  }
-  return 'Medium Pace Bowler (Seam Bowler)';
-}
-
-function deriveMatchBowlerMentality(player) {
-  const bowling = Number(player.bowling || 0);
-  const temperament = Number(player.temperament || 50);
-  const fitness = Number(player.fitness || 50);
-  if (bowling >= 78) {
-    return 'Wicket Taker';
-  }
-  if (fitness >= 72 && bowling >= 64) {
-    return 'Death Over Specialist';
-  }
-  if (temperament >= 70) {
-    return 'Economical';
-  }
-  return 'Powerplay Specialist';
+  return clampInt(Math.round(base * 1.24 + 10), 0, 100, 50);
 }
 
 function capBowlerRatingByRole(player) {
@@ -244,10 +176,10 @@ function capBowlerRatingByRole(player) {
     return 0;
   }
   if (role === 'BATTER') {
-    return Math.min(16, bowling);
+    return Math.min(1, bowling);
   }
   if (role === 'ALL_ROUNDER') {
-    return Math.min(88, Math.max(22, bowling));
+    return Math.min(84, Math.max(20, bowling));
   }
 
   return bowling;
@@ -278,12 +210,22 @@ function toApiPayload({ striker, bowler, context, strikerBalls }) {
 
   const batsmanFatigue = Math.min(100, Math.round(Math.max(0, 100 - Number(striker.fitness) + Number(strikerBalls || 0) * 0.8)));
   const bowlerFatigue = Math.min(100, Math.round(Math.max(0, 100 - Number(bowler.fitness) + Number(context.bowlerBalls || 0) * 1.1)));
-  const resolvedBatsmanHand = normalizeAllowed(context.batsmanHand || deriveHandFromId(striker.id), VALID_HAND, 'Right');
-  const resolvedBowlerHand = normalizeAllowed(context.bowlerHand || deriveHandFromId(bowler.id), VALID_HAND, 'Right');
-  const resolvedBowlerStyle = normalizeAllowed(context.bowlerStyle || bowlerStyle(bowler), VALID_BOWLER_STYLE, 'Fast Bowler (Express Pace)');
-  const resolvedBatsmanType = normalizeAllowed(context.batsmanType || batsmanType(striker, battingPhase), VALID_BATSMAN_TYPE, 'Balanced');
+  const strikerStoredHand = resolveStoredHand(striker, 'batsman_hand');
+  const bowlerStoredHand = resolveStoredHand(bowler, 'bowler_hand');
+  const resolvedBatsmanHand = normalizeAllowed(context.batsmanHand || strikerStoredHand, VALID_HAND, 'Right');
+  const resolvedBowlerHand = normalizeAllowed(context.bowlerHand || bowlerStoredHand, VALID_HAND, 'Right');
+  const resolvedBowlerStyle = normalizeAllowed(
+    context.bowlerStyle || toBallApiBowlerStyle(resolveStoredBowlerStyle(bowler)),
+    VALID_BOWLER_STYLE,
+    'Medium Fast (Seam)'
+  );
+  const resolvedBatsmanType = normalizeAllowed(
+    context.batsmanType || toBallApiBatsmanType(resolveStoredBatsmanType(striker)),
+    VALID_BATSMAN_TYPE,
+    'Balanced'
+  );
   const resolvedBowlerMentality = normalizeAllowed(
-    context.bowlerMentality || bowlerMentality(bowler, battingPhase),
+    context.bowlerMentality || toBallApiBowlerMentality(resolveStoredBowlerMentality(bowler)),
     VALID_BOWLER_MENTALITY,
     'Wicket Taker'
   );
@@ -368,26 +310,29 @@ function deriveTeamStrengthLabel(teamPlayers = []) {
 
 function buildMatchPlayerPayload(player, index = 0) {
   const role = String(player.role || '').toUpperCase();
-  const batting = clampInt(Number(player.batting || 0), 0, 100, 50);
-  const bowling = capBowlerRatingByRole(player);
-  const hand = normalizeAllowed(deriveHandFromId(Number(player.id || index + 1)), VALID_HAND, 'Right');
-  const bowlerStyle =
-    role === 'WICKET_KEEPER'
-      ? 'Off-Spin Bowler'
-      : normalizeAllowed(deriveMatchBowlerStyle(player), VALID_MATCH_BOWLER_STYLE, 'Medium Pace Bowler (Seam Bowler)');
-  const bowlerMentality =
-    role === 'WICKET_KEEPER' || role === 'BATTER'
-      ? 'Economical'
-      : normalizeAllowed(deriveMatchBowlerMentality(player), VALID_MATCH_BOWLER_MENTALITY, 'Wicket Taker');
+  const batting = tuneBattingRating(player);
+  const bowling = tuneBowlingRating(player);
+  const batsmanHand = normalizeAllowed(resolveStoredHand(player, 'batsman_hand'), VALID_HAND, 'Right');
+  const bowlerHand = normalizeAllowed(resolveStoredHand(player, 'bowler_hand'), VALID_HAND, batsmanHand);
+  const bowlerStyle = normalizeAllowed(
+    resolveStoredBowlerStyle(player),
+    VALID_MATCH_BOWLER_STYLE,
+    role === 'WICKET_KEEPER' ? 'Off-Spin Bowler' : 'Medium Pace Bowler (Seam Bowler)'
+  );
+  const bowlerMentality = normalizeAllowed(
+    resolveStoredBowlerMentality(player),
+    VALID_MATCH_BOWLER_MENTALITY,
+    role === 'BATTER' || role === 'WICKET_KEEPER' ? 'Economical' : 'Wicket Taker'
+  );
 
   return {
     name: normalizePlayerName(player, `Player ${index + 1}`),
     batsman_rating: batting,
     bowler_rating: bowling,
-    batsman_type: normalizeAllowed(deriveMatchBatsmanType(player), VALID_MATCH_BATSMAN_TYPE, 'Balanced'),
-    batsman_hand: hand,
+    batsman_type: normalizeAllowed(resolveStoredBatsmanType(player), VALID_MATCH_BATSMAN_TYPE, 'Balanced'),
+    batsman_hand: batsmanHand,
     bowler_style: bowlerStyle,
-    bowler_hand: hand,
+    bowler_hand: bowlerHand,
     bowler_mentality: bowlerMentality
   };
 }
@@ -404,6 +349,24 @@ function buildSimulateMatchPayload({ team1Name, team2Name, team1Players, team2Pl
   const homePlayers = (team1Players || []).map((player, index) => buildMatchPlayerPayload(player, index)).slice(0, 11);
   const awayPlayers = (team2Players || []).map((player, index) => buildMatchPlayerPayload(player, index)).slice(0, 11);
 
+  const allPlayers = [...homePlayers, ...awayPlayers];
+  const avgBatting = allPlayers.length
+    ? allPlayers.reduce((sum, player) => sum + Number(player.batsman_rating || 0), 0) / allPlayers.length
+    : 50;
+  const avgBowling = allPlayers.length
+    ? allPlayers.reduce((sum, player) => sum + Number(player.bowler_rating || 0), 0) / allPlayers.length
+    : 50;
+  const battingAdvantage = avgBatting - avgBowling;
+
+  const adjustedPitch =
+    battingAdvantage >= 5 ? 'poor' : battingAdvantage >= 2 ? 'average' : pitchConditions;
+  const adjustedGround =
+    battingAdvantage >= 3 ? 'Long' : groundSize;
+  const adjustedWeather =
+    battingAdvantage >= 3 ? 'overcast' : weatherConditions;
+  const adjustedWind =
+    battingAdvantage >= 3 ? 'windy' : windConditions;
+
   return {
     team1: {
       name: sanitizeName(team1Name, 'Team 1'),
@@ -416,21 +379,21 @@ function buildSimulateMatchPayload({ team1Name, team2Name, team1Players, team2Pl
     match_settings: {
       overs,
       format_type: formatType,
-      pitch_conditions: pitchConditions,
-      weather_conditions: weatherConditions,
-      wind_conditions: windConditions,
+      pitch_conditions: adjustedPitch,
+      weather_conditions: adjustedWeather,
+      wind_conditions: adjustedWind,
       time_of_day: normalizeAllowed(context.timeOfDay === 'night' ? 'night' : 'day', ['day', 'night'], 'day'),
-      ground_size: groundSize,
+      ground_size: adjustedGround,
       max_spell: maxSpell
     },
     toss: {
       // Runtime currently expects strength labels for toss logic (.lower() is called server-side).
       team1_strength: deriveTeamStrengthLabel(team1Players),
       team2_strength: deriveTeamStrengthLabel(team2Players),
-      boundaries: groundSize,
+      boundaries: adjustedGround,
       dew_factor: context.timeOfDay === 'night' || context.timeOfDay === 'day_night' ? 'Moderate' : 'None',
-      pitch_condition: pitchConditions,
-      weather_condition: weatherConditions
+      pitch_condition: adjustedPitch,
+      weather_condition: adjustedWeather
     }
   };
 }

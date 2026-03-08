@@ -15,6 +15,10 @@ export default function PlayerCard({ player, onOpen, StatBar, OverallRing, RoleP
         <StatBar label="Fielding" value={player.fielding} />
         <StatBar label="Fitness" value={player.fitness} />
       </div>
+      <div className="sq-card-meta">
+        <span>{player.batsman_hand || '-'}</span>
+        <span>{player.batsman_type || '-'}</span>
+      </div>
       <div className="sq-card-footer">
         <span className="sq-card-status">{player.squad_status.replace('_', ' ')}</span>
         <span className="sq-card-potential">Potential {player.potential}</span>

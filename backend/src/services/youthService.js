@@ -1,6 +1,7 @@
 import pool from '../config/db.js';
 import { clamp, randomFloat, randomInt } from '../utils/gameMath.js';
 import { buildNameKey, pickUniquePlayerName } from './nameService.js';
+import { createPlayerTacticsFromProfile } from './playerTacticsService.js';
 
 const PLAYER_ROLES = ['BATTER', 'BOWLER', 'ALL_ROUNDER', 'WICKET_KEEPER'];
 const PROSPECT_GENERATION_COST = 50;
@@ -178,6 +179,14 @@ export async function generateSeasonYouthPlayers(franchiseId, seasonId, dbClient
         potential: clamp(Math.round(35 + Number(franchise.youth_development_rating) * 0.55 + randomFloat(-10, 15)), 30, 95),
         age: randomInt(16, 22)
       };
+      const tactics = createPlayerTacticsFromProfile({
+        role,
+        batting: player.batting,
+        bowling: player.bowling,
+        fielding: player.fielding,
+        fitness: player.fitness,
+        temperament: player.temperament
+      });
 
       const marketValue = computeMarketValue(player);
       const salary = Number((0.5 + marketValue * 0.06).toFixed(2));
@@ -190,6 +199,11 @@ export async function generateSeasonYouthPlayers(franchiseId, seasonId, dbClient
           last_name,
           country_origin,
           role,
+          batsman_type,
+          batsman_hand,
+          bowler_hand,
+          bowler_style,
+          bowler_mentality,
           batting,
           bowling,
           fielding,
@@ -205,8 +219,9 @@ export async function generateSeasonYouthPlayers(franchiseId, seasonId, dbClient
           squad_status
         ) VALUES (
           $1, $2, $3, $4, $5, $6,
-          $7, $8, $9, $10, $11, $12,
-          $13, $14, $15, 32, 30, TRUE, 'YOUTH'
+          $7, $8, $9, $10, $11,
+          $12, $13, $14, $15, $16, $17,
+          $18, $19, $20, 32, 30, TRUE, 'YOUTH'
         ) RETURNING *`,
         [
           franchiseId,
@@ -215,6 +230,11 @@ export async function generateSeasonYouthPlayers(franchiseId, seasonId, dbClient
           name.lastName,
           region.region_country,
           role,
+          tactics.batsman_type,
+          tactics.batsman_hand,
+          tactics.bowler_hand,
+          tactics.bowler_style,
+          tactics.bowler_mentality,
           player.batting,
           player.bowling,
           player.fielding,

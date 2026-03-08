@@ -5,6 +5,8 @@ import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 
+/* ── Helpers ── */
+
 function oversFromBalls(balls) {
   const complete = Math.floor(Number(balls || 0) / 6);
   const rem = Number(balls || 0) % 6;
@@ -12,29 +14,8 @@ function oversFromBalls(balls) {
 }
 
 function scoreLabel(runs, wickets, balls) {
-  if (runs == null) return '-';
+  if (runs == null) return '';
   return `${runs}/${wickets} (${oversFromBalls(balls)})`;
-}
-
-function teamNameById(row, franchiseId) {
-  const id = Number(franchiseId || 0);
-  if (id === Number(row.home_franchise_id || 0)) return row.home_franchise_name || 'Home';
-  if (id === Number(row.away_franchise_id || 0)) return row.away_franchise_name || 'Away';
-  return `Franchise ${id || '?'}`;
-}
-
-function teamCountryById(row, franchiseId) {
-  const id = Number(franchiseId || 0);
-  if (id === Number(row.home_franchise_id || 0)) return row.home_country || '-';
-  if (id === Number(row.away_franchise_id || 0)) return row.away_country || '-';
-  return '-';
-}
-
-function venueTagById(row, franchiseId) {
-  const id = Number(franchiseId || 0);
-  if (id === Number(row.home_franchise_id || 0)) return 'H';
-  if (id === Number(row.away_franchise_id || 0)) return 'A';
-  return '?';
 }
 
 function roundStatus(round) {
@@ -47,31 +28,6 @@ function createSimulationOperationId(prefix = 'sim') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/* ── Inline sub-components ── */
-
-function FixtureStatusBadge({ status }) {
-  const s = (status || '').toLowerCase();
-  const cls = s === 'completed' ? 'done' : s === 'live' ? 'live' : 'pending';
-  const label = s === 'completed' ? 'Completed' : s === 'live' ? 'Live' : s || 'Scheduled';
-  return <span className={`fx-status fx-status--${cls}`}>{label}</span>;
-}
-
-function WinnerBadge({ row }) {
-  const winnerId = Number(row.winner_franchise_id || 0);
-  if (!winnerId) return null;
-  const winner = teamSnapshotById(row, winnerId);
-  const isHome = winnerId === Number(row.home_franchise_id || 0);
-  return (
-    <span className={`fx-winner-badge ${isHome ? 'fx-winner--home' : 'fx-winner--away'}`}>
-      🏆{' '}
-      <TeamNameButton franchiseId={winner.id} name={winner.name} country={winner.country} className="fx-inline-team-link">
-        {winner.name}
-      </TeamNameButton>{' '}
-      wins
-    </span>
-  );
-}
-
 function battingOrder(row) {
   const homeId = Number(row.home_franchise_id || 0);
   const awayId = Number(row.away_franchise_id || 0);
@@ -82,60 +38,20 @@ function battingOrder(row) {
   return { homeBattedFirst: first === homeId };
 }
 
-function teamSnapshotById(row, franchiseId) {
-  const id = Number(franchiseId || 0);
-  if (id === Number(row.home_franchise_id || 0)) {
-    return {
-      id,
-      name: row.home_franchise_name || 'Home',
-      country: row.home_country || '',
-      ovr: Number(row.home_avg_overall || 0),
-      score: row.home_score,
-      wickets: row.home_wickets,
-      balls: row.home_balls,
-      venue: 'H',
-    };
-  }
-  if (id === Number(row.away_franchise_id || 0)) {
-    return {
-      id,
-      name: row.away_franchise_name || 'Away',
-      country: row.away_country || '',
-      ovr: Number(row.away_avg_overall || 0),
-      score: row.away_score,
-      wickets: row.away_wickets,
-      balls: row.away_balls,
-      venue: 'A',
-    };
-  }
+function teamSnap(row, side) {
+  const isHome = side === 'home';
   return {
-    id,
-    name: teamNameById(row, id),
-    country: teamCountryById(row, id),
-    ovr: 0,
-    score: null,
-    wickets: null,
-    balls: null,
-    venue: venueTagById(row, id),
+    id: Number(isHome ? row.home_franchise_id : row.away_franchise_id) || 0,
+    name: (isHome ? row.home_franchise_name : row.away_franchise_name) || (isHome ? 'Home' : 'Away'),
+    country: (isHome ? row.home_country : row.away_country) || '',
+    ovr: Number(isHome ? row.home_avg_overall : row.away_avg_overall) || 0,
+    score: isHome ? row.home_score : row.away_score,
+    wickets: isHome ? row.home_wickets : row.away_wickets,
+    balls: isHome ? row.home_balls : row.away_balls,
   };
 }
 
-function TossLine({ row }) {
-  const tossWinnerId = Number(row.toss_winner_franchise_id || 0);
-  if (!tossWinnerId) return null;
-  const winner = teamSnapshotById(row, tossWinnerId);
-  const decision = String(row.toss_decision || '').toLowerCase();
-  if (!decision) return null;
-  return (
-    <span className="fx-toss-line">
-      🪙{' '}
-      <TeamNameButton franchiseId={winner.id} name={winner.name} country={winner.country} className="fx-inline-team-link">
-        {winner.name}
-      </TeamNameButton>{' '}
-      won toss &amp; chose to {decision} first
-    </span>
-  );
-}
+/* ── Main component ── */
 
 export default function FixturesResultsPage() {
   const { token, franchise } = useAuth();
@@ -156,7 +72,7 @@ export default function FixturesResultsPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
-  /* ── Helpers (unchanged logic) ── */
+  /* ── Data helpers ── */
 
   function filterRoundFixtures(allRows, roundNo, leagueTier = 0) {
     return (allRows || []).filter(
@@ -167,9 +83,9 @@ export default function FixturesResultsPage() {
     );
   }
 
-  function syncQueryParams(seasonId, roundNo, leagueTier) {
+  function syncQueryParams(sId, roundNo, leagueTier) {
     const next = {};
-    if (seasonId) next.season = String(seasonId);
+    if (sId) next.season = String(sId);
     if (roundNo) next.round = String(roundNo);
     if (leagueTier) next.league = String(leagueTier);
     setSearchParams(next, { replace: true });
@@ -249,7 +165,7 @@ export default function FixturesResultsPage() {
       : 1;
     try {
       setError(''); setSimulatingAction(true);
-      setActiveSimulation({ operationId, rowId: Number(row.id), label: isRegularRound ? `Simulating League ${Number(row.league_tier)} Round ${Number(row.round_no)}` : 'Simulating Match', phase: 'start', completed: 0, total: Math.max(1, pendingInRound) });
+      setActiveSimulation({ operationId, rowId: Number(row.id), label: isRegularRound ? `Simulating L${Number(row.league_tier)} R${Number(row.round_no)}` : 'Simulating Match', phase: 'start', completed: 0, total: Math.max(1, pendingInRound) });
       if (isRegularRound) {
         const result = await api.league.simulateLeagueRound(token, { seasonId: selectedSeasonId, roundNo: row.round_no, leagueTier: row.league_tier, operationId });
         setActiveSimulation((prev) => prev?.operationId === operationId ? { ...prev, phase: 'complete', completed: Number(result.simulated || prev.completed || 0), total: Number(prev.total || result.totalMatches || result.simulated || 0) } : prev);
@@ -368,15 +284,6 @@ export default function FixturesResultsPage() {
 
   const selectedRoundIndex = useMemo(() => rounds.findIndex((r) => Number(r.round_no) === Number(selectedRound)), [rounds, selectedRound]);
 
-  const visibleRounds = useMemo(() => {
-    if (!rounds.length) return [];
-    const anchor = selectedRoundIndex >= 0 ? selectedRoundIndex : 0;
-    let start = Math.max(0, anchor - 5);
-    let end = Math.min(rounds.length, start + 12);
-    if (end - start < 12) start = Math.max(0, end - 12);
-    return rounds.slice(start, end);
-  }, [rounds, selectedRoundIndex]);
-
   const completedRounds = useMemo(() => rounds.filter((r) => Number(r.completed_matches) === Number(r.total_matches)).length, [rounds]);
   const currentRoundMeta = useMemo(() => rounds.find((r) => Number(r.round_no) === Number(selectedRound)) || null, [rounds, selectedRound]);
   const previousRound = selectedRoundIndex > 0 ? rounds[selectedRoundIndex - 1]?.round_no : null;
@@ -396,98 +303,113 @@ export default function FixturesResultsPage() {
 
   if (loading) return <div className="sq-loading"><div className="sq-spinner" /><span>Loading fixtures...</span></div>;
 
-  /* ── Render a single fixture card ── */
-  function renderFixtureCard(row) {
-    const pending = String(row.status || '').toUpperCase() !== 'COMPLETED';
+  /* ── Render a single fixture row ── */
+  function renderFixtureRow(row) {
+    const status = String(row.status || '').toUpperCase();
+    const completed = status === 'COMPLETED';
+    const live = status === 'LIVE';
+    const pending = !completed && !live;
     const blocked = isFutureRoundBlocked(row);
     const rowIsActive = activeSimulation && Number(activeSimulation.rowId || 0) === Number(row.id || 0);
     const managed = isManagedFixture(row);
-    const homeId = Number(row.home_franchise_id || 0);
-    const awayId = Number(row.away_franchise_id || 0);
+    const winnerId = Number(row.winner_franchise_id || 0);
+
+    const home = teamSnap(row, 'home');
+    const away = teamSnap(row, 'away');
     const order = battingOrder(row);
-    const inningsOneId = order ? (order.homeBattedFirst ? homeId : awayId) : homeId;
-    const inningsTwoId = order ? (order.homeBattedFirst ? awayId : homeId) : awayId;
-    const inningsOne = teamSnapshotById(row, inningsOneId);
-    const inningsTwo = teamSnapshotById(row, inningsTwoId);
+
+    const homeWon = winnerId === home.id;
+    const awayWon = winnerId === away.id;
 
     return (
-      <div key={row.id} className={`fx-card ${managed ? 'fx-card--mine' : ''} ${pending ? '' : 'fx-card--done'}`}>
-        {/* Card header */}
-        <div className="fx-card-header">
-          <div className="fx-card-header-left">
-            {row.league_tier && <span className={`lg-tier-badge lg-tier-badge--${row.league_tier}`} style={{ width: 22, height: 22, fontSize: '0.7rem', borderRadius: '0.35rem' }}>{row.league_tier}</span>}
-            {row.matchday_label && <span className="fx-card-matchday">{row.matchday_label}</span>}
-          </div>
-          <FixtureStatusBadge status={row.status} />
-        </div>
-
-        {/* Teams */}
-        <div className="fx-card-teams">
-          <div className="fx-card-team">
-            <TeamNameButton franchiseId={inningsOne.id} name={inningsOne.name} country={inningsOne.country} className="fx-team-name">
-              {inningsOne.name}
-            </TeamNameButton>
-            <span className="fx-team-country">{inningsOne.country}</span>
-            <span className="fx-team-ovr">{inningsOne.ovr.toFixed(0)} OVR</span>
-            <span className="fx-team-score">{scoreLabel(inningsOne.score, inningsOne.wickets, inningsOne.balls)}</span>
-            {inningsOne.score != null && order && (
-              <span className="fx-bat-order fx-bat-order--1st">
-                Batted 1st
-              </span>
-            )}
-          </div>
-          <div className="fx-vs-block">
-            <span className="fx-ovr-matchup">{inningsOne.ovr.toFixed(0)} <span className="fx-ovr-v">v</span> {inningsTwo.ovr.toFixed(0)}</span>
-            <span className="fx-vs">vs</span>
-          </div>
-          <div className="fx-card-team fx-card-team--away">
-            <TeamNameButton franchiseId={inningsTwo.id} name={inningsTwo.name} country={inningsTwo.country} className="fx-team-name">
-              {inningsTwo.name}
-            </TeamNameButton>
-            <span className="fx-team-country">{inningsTwo.country}</span>
-            <span className="fx-team-ovr">{inningsTwo.ovr.toFixed(0)} OVR</span>
-            <span className="fx-team-score">{scoreLabel(inningsTwo.score, inningsTwo.wickets, inningsTwo.balls)}</span>
-            {inningsTwo.score != null && order && (
-              <span className="fx-bat-order">
-                Batted 2nd
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Toss + Result */}
-        {row.home_score != null && <TossLine row={row} />}
-
-        {/* Winner */}
-        <WinnerBadge row={row} />
-
-        {/* Simulation progress */}
-        {rowIsActive && (
-          <div className="fx-sim-progress">
-            <div className="fx-sim-track"><div className="fx-sim-fill" style={{ width: `${activeSimulationPercent}%` }} /></div>
-            <span className="fx-sim-label">
-              {activeSimulation.total ? `${activeSimulation.completed}/${activeSimulation.total}` : activeSimulation.phase === 'complete' ? 'Done' : 'Starting...'}
+      <div
+        key={row.id}
+        className={`fxr ${managed ? 'fxr--mine' : ''} ${completed ? 'fxr--done' : ''} ${live ? 'fxr--live' : ''}`}
+        onClick={() => navigate(`/matches/${row.id}?season=${seasonId || ''}&round=${selectedRound || row.round_no}`)}
+      >
+        {/* Left: home team */}
+        <div className={`fxr-team fxr-team--home ${homeWon ? 'fxr-team--won' : ''}`}>
+          <TeamNameButton franchiseId={home.id} name={home.name} country={home.country} className="fxr-team-name">
+            {home.name}
+          </TeamNameButton>
+          {home.country && <span className="fxr-team-flag">{home.country}</span>}
+          {(completed || live) && (
+            <span className={`fxr-mob-score ${homeWon ? 'fxr-score--won' : ''}`}>
+              {scoreLabel(home.score, home.wickets, home.balls)}
             </span>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Actions */}
-        <div className="fx-card-actions">
-          {pending && String(row.status || '').toUpperCase() !== 'LIVE' && (
-            <button type="button" className="sq-btn sq-btn--sm sq-btn--promote" onClick={() => simulateFixtureWithoutOpening(row)} disabled={blocked || simulatingAction}
-              title={blocked ? `Complete earlier rounds first in League ${row.league_tier}.` : undefined}>
-              {rowIsActive && simulatingAction ? 'Simulating...' : managed ? '▶ Play Round' : '▶ Simulate'}
+        {/* Center: score block (desktop only) */}
+        <div className="fxr-center">
+          {completed || live ? (
+            <div className="fxr-scores">
+              <span className={`fxr-score ${homeWon ? 'fxr-score--won' : ''}`}>
+                {scoreLabel(home.score, home.wickets, home.balls)}
+              </span>
+              <span className="fxr-score-sep">–</span>
+              <span className={`fxr-score ${awayWon ? 'fxr-score--won' : ''}`}>
+                {scoreLabel(away.score, away.wickets, away.balls)}
+              </span>
+            </div>
+          ) : (
+            <span className="fxr-vs">vs</span>
+          )}
+          {/* Result / status line */}
+          <div className="fxr-meta">
+            {live && <span className="fxr-badge fxr-badge--live">LIVE</span>}
+            {pending && <span className="fxr-scheduled">Scheduled</span>}
+            {order && completed && (
+              <span className="fxr-toss">
+                {order.homeBattedFirst ? home.name : away.name} batted first
+              </span>
+            )}
+          </div>
+          {completed && winnerId > 0 && (
+            <span className="fxr-result">
+              {homeWon ? home.name : away.name} won
+            </span>
+          )}
+          {completed && !winnerId && <span className="fxr-result fxr-result--tie">Tied</span>}
+          {/* Sim progress */}
+          {rowIsActive && (
+            <div className="fxr-sim">
+              <div className="fxr-sim-track"><div className="fxr-sim-fill" style={{ width: `${activeSimulationPercent}%` }} /></div>
+            </div>
+          )}
+        </div>
+
+        {/* Right: away team */}
+        <div className={`fxr-team fxr-team--away ${awayWon ? 'fxr-team--won' : ''}`}>
+          <TeamNameButton franchiseId={away.id} name={away.name} country={away.country} className="fxr-team-name">
+            {away.name}
+          </TeamNameButton>
+          {away.country && <span className="fxr-team-flag">{away.country}</span>}
+          {(completed || live) && (
+            <span className={`fxr-mob-score ${awayWon ? 'fxr-score--won' : ''}`}>
+              {scoreLabel(away.score, away.wickets, away.balls)}
+            </span>
+          )}
+        </div>
+
+        {/* Far right: actions */}
+        <div className="fxr-actions" onClick={(e) => e.stopPropagation()}>
+          {pending && (
+            <button
+              type="button"
+              className="fxr-btn fxr-btn--sim"
+              onClick={() => simulateFixtureWithoutOpening(row)}
+              disabled={blocked || simulatingAction}
+              title={blocked ? `Complete earlier rounds first` : managed ? 'Play Round' : 'Simulate'}
+            >
+              {rowIsActive && simulatingAction ? '...' : '▶'}
             </button>
           )}
-          {String(row.status || '').toUpperCase() === 'LIVE' && (
-            <button type="button" className="sq-btn sq-btn--sm" style={{ background: 'rgba(200,50,50,0.12)', color: '#c33' }} onClick={() => resetStuckMatch(row.id)} disabled={simulatingAction}>
-              ↺ Reset
+          {live && (
+            <button type="button" className="fxr-btn fxr-btn--reset" onClick={() => resetStuckMatch(row.id)} disabled={simulatingAction}>
+              ↺
             </button>
           )}
-          <button type="button" className="sq-btn sq-btn--sm" style={{ background: 'rgba(65,123,196,0.12)', color: '#3b7bca' }}
-            onClick={() => navigate(`/matches/${row.id}?season=${seasonId || ''}&round=${selectedRound || row.round_no}`)}>
-            Match Center →
-          </button>
         </div>
       </div>
     );
@@ -497,75 +419,69 @@ export default function FixturesResultsPage() {
     <div className="fx-page">
       {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
 
-      {/* ── Season Selector ── */}
-      <div className="lg-season-bar">
-        <div className="lg-season-pills">
+      {/* ── Top bar: season + tabs ── */}
+      <div className="fx-topbar">
+        <div className="fx-season-row">
           {seasons.map((s) => (
-            <button key={s.id} type="button" className={`lg-season-pill ${Number(s.id) === Number(selectedSeasonId) ? 'active' : ''}`} onClick={() => changeSeason(s.id)}>
-              <span className="lg-season-pill-name">{s.name}</span>
-              <span className={`lg-season-pill-status lg-season-pill-status--${(s.status || '').toLowerCase()}`}>{s.status}</span>
+            <button key={s.id} type="button" className={`fx-season-btn ${Number(s.id) === Number(selectedSeasonId) ? 'active' : ''}`} onClick={() => changeSeason(s.id)}>
+              {s.name}
+              <span className={`fx-season-status fx-season-status--${(s.status || '').toLowerCase()}`}>{s.status}</span>
             </button>
           ))}
         </div>
-      </div>
-
-      {/* ── Tab nav ── */}
-      <nav className="sq-tabs">
-        <button type="button" className={`sq-tab ${tab === 'regular' ? 'active' : ''}`} onClick={() => setTab('regular')}>
-          <span className="sq-tab-icon">📅</span>Regular Season
-        </button>
-        {!isInternationalSeason && (
-          <button type="button" className={`sq-tab ${tab === 'knockouts' ? 'active' : ''}`} onClick={() => setTab('knockouts')}>
-            <span className="sq-tab-icon">⚡</span>Knockouts
+        <div className="fx-tab-row">
+          <button type="button" className={`fx-tab-btn ${tab === 'regular' ? 'active' : ''}`} onClick={() => setTab('regular')}>
+            Regular Season
           </button>
-        )}
-      </nav>
+          {!isInternationalSeason && (
+            <button type="button" className={`fx-tab-btn ${tab === 'knockouts' ? 'active' : ''}`} onClick={() => setTab('knockouts')}>
+              Knockouts
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* ═══ REGULAR SEASON TAB ═══ */}
       {tab === 'regular' && (
-        <div className="sq-tab-content">
+        <>
           {!seasonMeta ? (
             <div className="sq-empty">Select a season to view fixtures.</div>
           ) : (
             <>
-              {/* Round browser */}
-              <div className="fx-round-browser">
-                <button type="button" className="fx-round-nav" disabled={!previousRound} onClick={() => changeRound(previousRound)}>‹ Prev</button>
-                <div className="fx-round-browser-center">
-                  <span className="fx-round-current">Round <strong>{selectedRound || '-'}</strong> of {rounds.length}</span>
-                  <span className="fx-round-progress-text">{completedRounds} of {rounds.length} rounds completed</span>
+              {/* Round strip: prev | chips | next */}
+              <div className="fx-round-strip">
+                <button type="button" className="fx-round-arr" disabled={!previousRound} onClick={() => changeRound(previousRound)}>‹</button>
+                <div className="fx-round-scroll">
+                  {rounds.map((round) => {
+                    const st = roundStatus(round);
+                    const active = Number(selectedRound) === Number(round.round_no);
+                    return (
+                      <button key={round.round_no} type="button" className={`fx-rchip ${active ? 'fx-rchip--active' : ''} fx-rchip--${st}`} onClick={() => changeRound(round.round_no)}>
+                        {round.round_no}
+                      </button>
+                    );
+                  })}
                 </div>
-                <button type="button" className="fx-round-nav" disabled={!nextRound} onClick={() => changeRound(nextRound)}>Next ›</button>
+                <button type="button" className="fx-round-arr" disabled={!nextRound} onClick={() => changeRound(nextRound)}>›</button>
               </div>
 
-              {/* Round chips */}
-              <div className="fx-round-chips">
-                {visibleRounds.map((round) => {
-                  const completion = Number(round.total_matches) ? (Number(round.completed_matches) / Number(round.total_matches)) * 100 : 0;
-                  const status = roundStatus(round);
-                  const active = Number(selectedRound) === Number(round.round_no);
-                  return (
-                    <button key={round.round_no} type="button" className={`fx-round-chip ${active ? 'active' : ''} fx-round-chip--${status}`} onClick={() => changeRound(round.round_no)}>
-                      <span className="fx-chip-label">R{round.round_no}</span>
-                      <div className="fx-chip-progress"><div className="fx-chip-fill" style={{ width: `${completion}%` }} /></div>
-                      <span className="fx-chip-count">{round.completed_matches}/{round.total_matches}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* League filter + "Simulate My Round" button */}
-              <div className="fx-controls">
-                <div className="fx-league-filters">
+              {/* Toolbar: league filters + round info + simulate */}
+              <div className="fx-toolbar">
+                <div className="fx-league-pills">
                   {leagueTierFilters.map((tier) => (
-                    <button key={tier} type="button" className={`sq-filter-btn ${Number(selectedLeagueTier) === tier ? 'active' : ''}`} onClick={() => changeLeagueFilter(tier)}>
-                      {tier === 0 ? 'All Leagues' : `League ${tier}`}
+                    <button key={tier} type="button" className={`fx-lpill ${Number(selectedLeagueTier) === tier ? 'fx-lpill--active' : ''}`} onClick={() => changeLeagueFilter(tier)}>
+                      {tier === 0 ? 'All' : `L${tier}`}
                     </button>
                   ))}
                 </div>
+                <div className="fx-toolbar-info">
+                  <span className="fx-toolbar-round">Round {selectedRound || '-'}</span>
+                  <span className="fx-toolbar-progress">{currentRoundMeta ? `${currentRoundMeta.completed_matches}/${currentRoundMeta.total_matches}` : ''}</span>
+                  <span className="fx-toolbar-season-progress">{completedRounds}/{rounds.length} rounds</span>
+                </div>
                 {franchise && (
-                  <button type="button" className="sq-btn sq-btn--primary" onClick={simulateMyLeagueRoundNow} disabled={simulatingAction}>
-                    {simulatingAction && !activeSimulation?.rowId ? 'Simulating...' : '▶ Simulate My League Round'}
+                  <button type="button" className="fx-sim-btn" onClick={simulateMyLeagueRoundNow} disabled={simulatingAction}>
+                    {simulatingAction && !activeSimulation?.rowId ? 'Simulating...' : '▶ Simulate Round'}
                   </button>
                 )}
               </div>
@@ -574,66 +490,64 @@ export default function FixturesResultsPage() {
               {activeSimulation && !activeSimulation.rowId && (
                 <div className="fx-global-sim">
                   <div className="fx-global-sim-head">
-                    <strong>{activeSimulation.label}</strong>
-                    <span>{activeSimulation.total ? `${activeSimulation.completed}/${activeSimulation.total} (${activeSimulationPercent}%)` : activeSimulation.phase === 'complete' ? 'Completed' : 'Preparing...'}</span>
+                    <span>{activeSimulation.label}</span>
+                    <span>{activeSimulation.total ? `${activeSimulation.completed}/${activeSimulation.total}` : activeSimulation.phase === 'complete' ? 'Done' : '...'}</span>
                   </div>
-                  <div className="fx-sim-track"><div className="fx-sim-fill" style={{ width: `${activeSimulationPercent}%` }} /></div>
+                  <div className="fxr-sim-track"><div className="fxr-sim-fill" style={{ width: `${activeSimulationPercent}%` }} /></div>
                 </div>
               )}
 
-              {/* Round meta */}
-              {currentRoundMeta && (
-                <div className="fx-round-meta">
-                  <span>Round {currentRoundMeta.round_no}: {currentRoundMeta.completed_matches} of {currentRoundMeta.total_matches} matches completed</span>
-                </div>
-              )}
-
-              {/* Fixture cards by league */}
+              {/* Fixture rows */}
               {selectedLeagueTier ? (
-                <div className="fx-card-grid">
-                  {fixtures.length === 0 ? <div className="sq-empty">No fixtures in this round.</div> : fixtures.map(renderFixtureCard)}
+                <div className="fx-fixture-list">
+                  {fixtures.length === 0 ? <div className="sq-empty">No fixtures this round.</div> : fixtures.map(renderFixtureRow)}
                 </div>
               ) : (
                 roundFixturesByLeague.map((group) => (
-                  <section key={group.tier} className="fx-league-group">
-                    <div className="fx-league-group-header">
-                      <span className={`lg-tier-badge lg-tier-badge--${group.tier}`}>{group.tier}</span>
-                      <h4>League {group.tier}</h4>
-                      <span className="fx-league-group-count">{group.rows.length} matches</span>
+                  <section key={group.tier} className="fx-league-section">
+                    <div className="fx-league-hdr">
+                      <span className={`lg-tier-badge lg-tier-badge--${group.tier}`} style={{ width: 20, height: 20, fontSize: '0.65rem' }}>{group.tier}</span>
+                      <span className="fx-league-title">League {group.tier}</span>
+                      <span className="fx-league-ct">{group.rows.length}</span>
                     </div>
-                    {group.rows.length === 0 ? (
-                      <div className="sq-empty" style={{ marginTop: '0.3rem' }}>No League {group.tier} fixtures this round.</div>
-                    ) : (
-                      <div className="fx-card-grid">{group.rows.map(renderFixtureCard)}</div>
-                    )}
+                    <div className="fx-fixture-list">
+                      {group.rows.length === 0
+                        ? <div className="sq-empty">No fixtures.</div>
+                        : group.rows.map(renderFixtureRow)}
+                    </div>
                   </section>
                 ))
               )}
             </>
           )}
-        </div>
+        </>
       )}
 
       {/* ═══ KNOCKOUTS TAB ═══ */}
       {tab === 'knockouts' && (
-        <div className="sq-tab-content">
-          <section className="lg-ko-section">
-            <div className="lg-ko-header"><h3>Semifinals</h3><span className="lg-ko-count">{playoffFixtures.length} match{playoffFixtures.length !== 1 ? 'es' : ''}</span></div>
-            {playoffFixtures.length === 0 ? (
-              <div className="sq-empty">No semifinal fixtures in this season.</div>
-            ) : (
-              <div className="fx-card-grid">{playoffFixtures.map(renderFixtureCard)}</div>
-            )}
+        <>
+          <section className="fx-league-section">
+            <div className="fx-league-hdr">
+              <span className="fx-league-title">Semifinals</span>
+              <span className="fx-league-ct">{playoffFixtures.length}</span>
+            </div>
+            <div className="fx-fixture-list">
+              {playoffFixtures.length === 0
+                ? <div className="sq-empty">No semifinal fixtures.</div>
+                : playoffFixtures.map(renderFixtureRow)}
+            </div>
           </section>
-          <section className="lg-ko-section">
-            <div className="lg-ko-header"><h3>🏆 Final</h3></div>
-            {finalFixtures.length === 0 ? (
-              <div className="sq-empty">No final fixture in this season yet.</div>
-            ) : (
-              <div className="fx-card-grid">{finalFixtures.map(renderFixtureCard)}</div>
-            )}
+          <section className="fx-league-section">
+            <div className="fx-league-hdr">
+              <span className="fx-league-title">🏆 Final</span>
+            </div>
+            <div className="fx-fixture-list">
+              {finalFixtures.length === 0
+                ? <div className="sq-empty">No final fixture yet.</div>
+                : finalFixtures.map(renderFixtureRow)}
+            </div>
           </section>
-        </div>
+        </>
       )}
     </div>
   );

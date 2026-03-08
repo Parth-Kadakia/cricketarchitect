@@ -1,6 +1,7 @@
 import pool from '../config/db.js';
 import { clamp, randomFloat, randomInt } from '../utils/gameMath.js';
 import { buildNameKey, pickUniquePlayerName } from './nameService.js';
+import { createPlayerTacticsFromProfile } from './playerTacticsService.js';
 
 const ROLES = ['BATTER', 'BOWLER', 'ALL_ROUNDER', 'WICKET_KEEPER'];
 
@@ -105,6 +106,14 @@ async function ensureMinimumSquadSize(franchiseId, dbClient = pool) {
     const role = randomRole();
     const attrs = generateProspectAttributes(role);
     const name = pickUniquePlayerName(country, usedNameKeys, { usedFirstNames, strictCountry: true });
+    const tactics = createPlayerTacticsFromProfile({
+      role,
+      batting: attrs.batting,
+      bowling: attrs.bowling,
+      fielding: attrs.fielding,
+      fitness: attrs.fitness,
+      temperament: attrs.temperament
+    });
 
     await dbClient.query(
       `INSERT INTO players (
@@ -114,6 +123,11 @@ async function ensureMinimumSquadSize(franchiseId, dbClient = pool) {
         last_name,
         country_origin,
         role,
+        batsman_type,
+        batsman_hand,
+        bowler_hand,
+        bowler_style,
+        bowler_mentality,
         batting,
         bowling,
         fielding,
@@ -129,8 +143,9 @@ async function ensureMinimumSquadSize(franchiseId, dbClient = pool) {
         squad_status
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10, $11, $12,
-        $13, $14, $15, 30, 30, TRUE, 'YOUTH'
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, $16, $17,
+        $18, $19, $20, 30, 30, TRUE, 'YOUTH'
       )`,
       [
         franchiseId,
@@ -139,6 +154,11 @@ async function ensureMinimumSquadSize(franchiseId, dbClient = pool) {
         name.lastName,
         country,
         role,
+        tactics.batsman_type,
+        tactics.batsman_hand,
+        tactics.bowler_hand,
+        tactics.bowler_style,
+        tactics.bowler_mentality,
         attrs.batting,
         attrs.bowling,
         attrs.fielding,

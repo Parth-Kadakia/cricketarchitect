@@ -261,6 +261,9 @@ export default function TeamSquadModal({ open, franchiseId, seed, onClose }) {
                         <td>
                           <strong className="team-modal-player-link">{player.first_name} {player.last_name}</strong>
                           <div className="team-modal-player-sub">{player.country_origin}</div>
+                          <div className="team-modal-player-sub">
+                            {(player.batsman_hand || '-')} • {(player.batsman_type || '-')} • {(player.bowler_style || '-')}
+                          </div>
                         </td>
                         <td>{roleLabel(player.role)}</td>
                         <td>{player.age}</td>

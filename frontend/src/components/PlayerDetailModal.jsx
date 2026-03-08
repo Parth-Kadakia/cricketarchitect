@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 /* ── helpers ───────────────────────────────────────────── */
 function fmt(v) { return v == null ? '-' : Number(v).toLocaleString(); }
 function fmtDec(v, d = 1) { return v == null ? '-' : Number(v).toFixed(d); }
+function pretty(v) { return v == null || v === '' ? '-' : String(v).replace(/_/g, ' '); }
 function fmtMoney(v) {
   const n = Number(v || 0);
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
@@ -160,6 +161,32 @@ export default function PlayerDetailModal({ open, playerDetail, selectedPlayer, 
             <div className="pd-body">
               {activeTab === 'Overview' && (
                 <>
+                  <div className="pd-section">
+                    <h4 className="pd-section-title">Simulation Profile</h4>
+                    <div className="pd-profile-grid">
+                      <div className="pd-profile-item">
+                        <span>Batting Type</span>
+                        <strong>{pretty(p.batsman_type)}</strong>
+                      </div>
+                      <div className="pd-profile-item">
+                        <span>Batting Hand</span>
+                        <strong>{pretty(p.batsman_hand)}</strong>
+                      </div>
+                      <div className="pd-profile-item">
+                        <span>Bowler Style</span>
+                        <strong>{pretty(p.bowler_style)}</strong>
+                      </div>
+                      <div className="pd-profile-item">
+                        <span>Bowler Hand</span>
+                        <strong>{pretty(p.bowler_hand)}</strong>
+                      </div>
+                      <div className="pd-profile-item">
+                        <span>Bowler Mentality</span>
+                        <strong>{pretty(p.bowler_mentality)}</strong>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* ── Skills ── */}
                   <div className="pd-section">
                     <h4 className="pd-section-title">Skills</h4>

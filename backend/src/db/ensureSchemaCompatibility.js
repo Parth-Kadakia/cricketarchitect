@@ -49,6 +49,11 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
   await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS lineup_slot INTEGER");
   await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS career_fifties INTEGER DEFAULT 0");
   await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS career_hundreds INTEGER DEFAULT 0");
+  await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS batsman_type TEXT");
+  await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS batsman_hand TEXT");
+  await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS bowler_hand TEXT");
+  await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS bowler_style TEXT");
+  await dbClient.query("ALTER TABLE players ADD COLUMN IF NOT EXISTS bowler_mentality TEXT");
   await dbClient.query(
     `DO $$
      BEGIN
@@ -66,6 +71,98 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
     `CREATE UNIQUE INDEX IF NOT EXISTS players_franchise_lineup_slot_uidx
      ON players(franchise_id, lineup_slot)
      WHERE lineup_slot IS NOT NULL`
+  );
+
+  await dbClient.query(
+    `UPDATE players
+     SET batsman_hand = COALESCE(
+           NULLIF(TRIM(batsman_hand), ''),
+           CASE WHEN MOD(id, 4) = 0 THEN 'Left' ELSE 'Right' END
+         ),
+         bowler_hand = COALESCE(
+           NULLIF(TRIM(bowler_hand), ''),
+           CASE
+             WHEN role IN ('BOWLER', 'ALL_ROUNDER') AND MOD(id, 3) = 0 THEN 'Left'
+             WHEN role IN ('BOWLER', 'ALL_ROUNDER') THEN 'Right'
+             WHEN MOD(id, 4) = 0 THEN 'Left'
+             ELSE 'Right'
+           END
+         ),
+         batsman_type = COALESCE(
+           NULLIF(TRIM(batsman_type), ''),
+           CASE
+             WHEN role = 'BOWLER' AND batting <= 22 THEN 'Tail ender'
+             WHEN role = 'BOWLER' THEN 'Defensive'
+             WHEN role = 'WICKET_KEEPER' AND batting >= 58 AND temperament >= 54 THEN 'Accumulator'
+             WHEN role = 'WICKET_KEEPER' AND batting <= 22 THEN 'Defensive'
+             WHEN role = 'WICKET_KEEPER' THEN 'Balanced'
+             WHEN role = 'ALL_ROUNDER' AND batting >= 62 AND temperament <= 54 THEN 'Aggressive'
+             WHEN role = 'ALL_ROUNDER' AND temperament >= 64 THEN 'Accumulator'
+             WHEN role = 'ALL_ROUNDER' AND batting <= 24 THEN 'Defensive'
+             WHEN role = 'BATTER' AND batting >= 60 AND temperament <= 52 THEN 'Aggressive'
+             WHEN role = 'BATTER' AND temperament >= 64 THEN 'Accumulator'
+             WHEN role = 'BATTER' AND batting <= 22 THEN 'Defensive'
+             ELSE 'Balanced'
+           END
+         ),
+         bowler_style = COALESCE(
+           NULLIF(TRIM(bowler_style), ''),
+           CASE
+             WHEN role = 'WICKET_KEEPER' THEN 'Off-Spin Bowler'
+             WHEN role = 'BATTER' THEN 'Medium Pace Bowler (Seam Bowler)'
+             WHEN bowling >= 82 THEN 'Fast Bowler (Express Pace)'
+             WHEN bowling >= 74 THEN 'Fast-Medium Bowler'
+             WHEN bowling >= 67 THEN 'Swing Bowler'
+             WHEN bowling >= 60 AND (
+               COALESCE(NULLIF(TRIM(bowler_hand), ''), CASE WHEN MOD(id, 3) = 0 THEN 'Left' ELSE 'Right' END) = 'Left'
+             ) THEN 'Slow Left-Arm Orthodox'
+             WHEN bowling >= 60 THEN 'Off-Spin Bowler'
+             WHEN bowling >= 48 AND (
+               COALESCE(NULLIF(TRIM(bowler_hand), ''), CASE WHEN MOD(id, 3) = 0 THEN 'Left' ELSE 'Right' END) = 'Left'
+             ) THEN 'Slow Left-Arm Orthodox'
+             WHEN bowling >= 48 THEN 'Leg-Spin Bowler (including Chinaman)'
+             ELSE 'Medium Pace Bowler (Seam Bowler)'
+           END
+         ),
+         bowler_mentality = COALESCE(
+           NULLIF(TRIM(bowler_mentality), ''),
+           CASE
+             WHEN role IN ('BATTER', 'WICKET_KEEPER') THEN 'Economical'
+             WHEN role = 'ALL_ROUNDER' AND bowling >= 70 THEN 'Wicket Taker'
+             WHEN role = 'ALL_ROUNDER' THEN 'Economical'
+             WHEN bowling >= 80 THEN 'Wicket Taker'
+             WHEN fitness >= 72 THEN 'Death Over Specialist'
+             WHEN temperament >= 70 THEN 'Economical'
+             ELSE 'Powerplay Specialist'
+           END
+         )`
+  );
+
+  await dbClient.query(
+    `UPDATE players
+     SET batsman_type = CASE
+       WHEN role = 'BATTER' THEN
+         CASE
+           WHEN random() < 0.55 THEN 'Balanced'
+           WHEN random() < 0.82 THEN 'Accumulator'
+           ELSE 'Aggressive'
+         END
+       WHEN role = 'WICKET_KEEPER' THEN
+         CASE
+           WHEN random() < 0.68 THEN 'Balanced'
+           ELSE 'Accumulator'
+         END
+       WHEN role = 'ALL_ROUNDER' THEN
+         CASE
+           WHEN random() < 0.62 THEN 'Balanced'
+           WHEN random() < 0.86 THEN 'Accumulator'
+           ELSE 'Aggressive'
+         END
+       ELSE batsman_type
+     END
+     WHERE role IN ('BATTER', 'WICKET_KEEPER', 'ALL_ROUNDER')
+       AND batsman_type = 'Defensive'
+       AND batting >= 30`
   );
 
   await dbClient.query(

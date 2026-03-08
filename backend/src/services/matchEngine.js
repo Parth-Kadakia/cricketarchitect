@@ -122,7 +122,7 @@ function selectBowlers(players) {
 
   const backupBatters = players.filter((player) => {
     const role = String(player.role || '').toUpperCase();
-    return role === 'BATTER' && Number(player.bowling || 0) >= 48;
+    return role === 'BATTER' && Number(player.bowling || 0) >= 68;
   });
   const nonKeepers = players.filter((player) => String(player.role || '').toUpperCase() !== 'WICKET_KEEPER');
 
@@ -241,12 +241,49 @@ function pickFrom(list) {
 }
 
 function buildMatchConditions() {
+  const pitchConditions = weightedChoice([
+    { value: 'good', weight: 18 },
+    { value: 'green', weight: 18 },
+    { value: 'flat', weight: 8 },
+    { value: 'dusty', weight: 14 },
+    { value: 'dry', weight: 20 },
+    { value: 'damp', weight: 16 },
+    { value: 'bouncy', weight: 6 }
+  ]);
+
+  const weatherConditions = weightedChoice([
+    { value: 'clear', weight: 28 },
+    { value: 'overcast', weight: 32 },
+    { value: 'humid', weight: 14 },
+    { value: 'windy', weight: 16 },
+    { value: 'hot', weight: 6 },
+    { value: 'cold', weight: 4 }
+  ]);
+
+  const windConditions = weightedChoice([
+    { value: 'light', weight: 22 },
+    { value: 'moderate', weight: 44 },
+    { value: 'strong', weight: 34 }
+  ]);
+
+  const timeOfDay = weightedChoice([
+    { value: 'day', weight: 52 },
+    { value: 'day_night', weight: 34 },
+    { value: 'night', weight: 14 }
+  ]);
+
+  const groundSize = weightedChoice([
+    { value: 'Short', weight: 12 },
+    { value: 'Medium', weight: 38 },
+    { value: 'Large', weight: 50 }
+  ]);
+
   return {
-    pitchConditions: pickFrom(['good', 'green', 'flat', 'dusty', 'dry', 'damp', 'bouncy']),
-    weatherConditions: pickFrom(['clear', 'overcast', 'humid', 'windy', 'hot', 'cold']),
-    windConditions: pickFrom(['light', 'moderate', 'strong']),
-    timeOfDay: pickFrom(['day', 'day_night', 'night']),
-    groundSize: pickFrom(['Short', 'Medium', 'Large']),
+    pitchConditions,
+    weatherConditions,
+    windConditions,
+    timeOfDay,
+    groundSize,
     formatType: 'T20',
     totalOvers: 20
   };
@@ -1333,6 +1370,11 @@ function buildInningsFromApiPayload({
     row.currentOverRuns = 0;
   }
 
+  normalizeBowlingByRole({
+    bowlingTeam,
+    bowlingStats
+  });
+
   const commentaryLines = Array.isArray(inningsPayload?.commentary) ? inningsPayload.commentary : [];
   const events = [];
   for (let i = 0; i < commentaryLines.length; i += 1) {
@@ -1408,6 +1450,169 @@ function buildInningsFromApiPayload({
     battingId: battingFranchiseId,
     bowlingId: bowlingFranchiseId
   };
+}
+
+function normalizeBowlingByRole({ bowlingTeam, bowlingStats }) {
+  const roleOf = (player) => String(player?.role || '').toUpperCase();
+  const canPrimaryBowl = (player) => {
+    const role = roleOf(player);
+    if (role === 'BOWLER' || role === 'ALL_ROUNDER') {
+      return true;
+    }
+    return false;
+  };
+
+  let legalBowlers = bowlingTeam.filter(canPrimaryBowl);
+  if (legalBowlers.length < 3) {
+    const backups = [...bowlingTeam]
+      .filter((player) => roleOf(player) !== 'WICKET_KEEPER' && !legalBowlers.some((legal) => Number(legal.id) === Number(player.id)))
+      .sort((a, b) => Number(b.bowling || 0) - Number(a.bowling || 0));
+    while (legalBowlers.length < 3 && backups.length) {
+      legalBowlers.push(backups.shift());
+    }
+  }
+
+  if (!legalBowlers.length) {
+    return;
+  }
+
+  const legalIds = new Set(legalBowlers.map((player) => Number(player.id)));
+  const overflow = { balls: 0, runs: 0, wickets: 0, maidens: 0 };
+
+  for (const player of bowlingTeam) {
+    const playerId = Number(player.id);
+    const row = bowlingStats.get(playerId);
+    if (!row) {
+      continue;
+    }
+    if (legalIds.has(playerId)) {
+      continue;
+    }
+    const hasContribution =
+      Number(row.balls || 0) > 0 ||
+      Number(row.runs || 0) > 0 ||
+      Number(row.wickets || 0) > 0 ||
+      Number(row.maidens || 0) > 0;
+    if (!hasContribution) {
+      continue;
+    }
+
+    overflow.balls += Number(row.balls || 0);
+    overflow.runs += Number(row.runs || 0);
+    overflow.wickets += Number(row.wickets || 0);
+    overflow.maidens += Number(row.maidens || 0);
+
+    row.balls = 0;
+    row.runs = 0;
+    row.wickets = 0;
+    row.maidens = 0;
+    row.currentOverRuns = 0;
+  }
+
+  if (!overflow.balls && !overflow.runs && !overflow.wickets && !overflow.maidens) {
+    return;
+  }
+
+  const recipients = [...legalBowlers].sort((a, b) => {
+    const aRow = bowlingStats.get(Number(a.id)) || { balls: 0 };
+    const bRow = bowlingStats.get(Number(b.id)) || { balls: 0 };
+    if (Number(aRow.balls || 0) !== Number(bRow.balls || 0)) {
+      return Number(aRow.balls || 0) - Number(bRow.balls || 0);
+    }
+    return Number(b.bowling || 0) - Number(a.bowling || 0);
+  });
+
+  const addedBallsByPlayer = new Map();
+  let remainingBalls = Number(overflow.balls || 0);
+
+  while (remainingBalls > 0) {
+    let progressed = false;
+    for (const player of recipients) {
+      if (remainingBalls <= 0) {
+        break;
+      }
+
+      const row = bowlingStats.get(Number(player.id));
+      const currentBalls = Number(row?.balls || 0);
+      const cap = Math.max(0, 24 - currentBalls);
+      if (cap <= 0) {
+        continue;
+      }
+
+      const give = Math.min(remainingBalls, Math.min(6, cap));
+      row.balls = currentBalls + give;
+      addedBallsByPlayer.set(Number(player.id), Number(addedBallsByPlayer.get(Number(player.id)) || 0) + give);
+      remainingBalls -= give;
+      progressed = true;
+    }
+
+    if (!progressed) {
+      break;
+    }
+  }
+
+  if (remainingBalls > 0) {
+    const fallback = recipients[0];
+    const row = bowlingStats.get(Number(fallback.id));
+    row.balls = Number(row.balls || 0) + remainingBalls;
+    addedBallsByPlayer.set(Number(fallback.id), Number(addedBallsByPlayer.get(Number(fallback.id)) || 0) + remainingBalls);
+    remainingBalls = 0;
+  }
+
+  const totalAddedBalls = [...addedBallsByPlayer.values()].reduce((sum, value) => sum + Number(value || 0), 0);
+  const rankedRecipients = [...recipients].sort((a, b) => Number(b.bowling || 0) - Number(a.bowling || 0));
+
+  let runsLeft = Number(overflow.runs || 0);
+  for (let i = 0; i < rankedRecipients.length; i += 1) {
+    const player = rankedRecipients[i];
+    const row = bowlingStats.get(Number(player.id));
+    const added = Number(addedBallsByPlayer.get(Number(player.id)) || 0);
+    if (!added) {
+      continue;
+    }
+
+    const share =
+      i === rankedRecipients.length - 1
+        ? runsLeft
+        : Math.min(
+          runsLeft,
+          Math.round((Number(overflow.runs || 0) * added) / Math.max(1, totalAddedBalls))
+        );
+    row.runs = Number(row.runs || 0) + share;
+    runsLeft -= share;
+  }
+
+  while (runsLeft > 0) {
+    const target = rankedRecipients[0];
+    const row = bowlingStats.get(Number(target.id));
+    row.runs = Number(row.runs || 0) + 1;
+    runsLeft -= 1;
+  }
+
+  let wicketsLeft = Number(overflow.wickets || 0);
+  let wicketCursor = 0;
+  while (wicketsLeft > 0) {
+    const target = rankedRecipients[wicketCursor % rankedRecipients.length];
+    const row = bowlingStats.get(Number(target.id));
+    row.wickets = Number(row.wickets || 0) + 1;
+    wicketsLeft -= 1;
+    wicketCursor += 1;
+  }
+
+  let maidensLeft = Number(overflow.maidens || 0);
+  let maidenCursor = 0;
+  const maidenOrder = [...rankedRecipients].sort((a, b) => {
+    const aAdded = Number(addedBallsByPlayer.get(Number(a.id)) || 0);
+    const bAdded = Number(addedBallsByPlayer.get(Number(b.id)) || 0);
+    return bAdded - aAdded;
+  });
+  while (maidensLeft > 0) {
+    const target = maidenOrder[maidenCursor % maidenOrder.length];
+    const row = bowlingStats.get(Number(target.id));
+    row.maidens = Number(row.maidens || 0) + 1;
+    maidensLeft -= 1;
+    maidenCursor += 1;
+  }
 }
 
 function pickDismissalType() {

@@ -5,6 +5,7 @@ import { ensureActiveSeason, generateDoubleRoundRobinFixtures } from './leagueSe
 import { calculateFranchiseValuation } from './valuationService.js';
 import { ensureProminentCricketCities } from '../db/seedWorldCities.js';
 import { CAREER_MODES, INTERNATIONAL_COUNTRIES, normalizeCareerMode } from '../constants/gameModes.js';
+import { createPlayerTacticsFromProfile } from './playerTacticsService.js';
 import {
   activateManagerForFranchise,
   assertManagerCanTakeJobs,
@@ -82,87 +83,87 @@ function getBaseSkill(role, competitionMode = CAREER_MODES.CLUB) {
   if (competitionMode === CAREER_MODES.INTERNATIONAL) {
     if (role === 'BATTER') {
       return {
-        batting: [48, 56],
+        batting: [46, 62],
         bowling: [0, 10],
-        fielding: [44, 56],
-        fitness: [46, 58],
-        temperament: [45, 58],
-        potential: [48, 66]
+        fielding: [42, 58],
+        fitness: [42, 62],
+        temperament: [40, 62],
+        potential: [46, 70]
       };
     }
 
     if (role === 'BOWLER') {
       return {
-        batting: [12, 28],
-        bowling: [48, 56],
-        fielding: [44, 56],
-        fitness: [46, 60],
-        temperament: [45, 58],
-        potential: [48, 66]
+        batting: [10, 30],
+        bowling: [46, 62],
+        fielding: [42, 58],
+        fitness: [44, 66],
+        temperament: [40, 62],
+        potential: [46, 70]
       };
     }
 
     if (role === 'WICKET_KEEPER') {
       return {
-        batting: [44, 56],
+        batting: [42, 60],
         bowling: [0, 2],
-        fielding: [50, 62],
-        fitness: [46, 60],
-        temperament: [46, 60],
-        potential: [48, 66]
+        fielding: [48, 64],
+        fitness: [44, 62],
+        temperament: [42, 64],
+        potential: [46, 70]
       };
     }
 
     return {
-      batting: [44, 54],
-      bowling: [44, 54],
-      fielding: [44, 56],
-      fitness: [46, 60],
-      temperament: [45, 58],
-      potential: [48, 66]
+      batting: [42, 58],
+      bowling: [42, 58],
+      fielding: [42, 58],
+      fitness: [44, 64],
+      temperament: [40, 62],
+      potential: [46, 70]
     };
   }
 
   if (role === 'BATTER') {
     return {
-      batting: [28, 44],
+      batting: [26, 48],
       bowling: [0, 8],
-      fielding: [22, 36],
-      fitness: [24, 42],
-      temperament: [24, 42],
-      potential: [32, 58]
+      fielding: [20, 38],
+      fitness: [22, 48],
+      temperament: [20, 48],
+      potential: [30, 62]
     };
   }
 
   if (role === 'BOWLER') {
     return {
-      batting: [4, 20],
-      bowling: [34, 50],
-      fielding: [20, 36],
-      fitness: [26, 46],
-      temperament: [22, 42],
-      potential: [32, 58]
+      batting: [4, 22],
+      bowling: [32, 54],
+      fielding: [18, 38],
+      fitness: [24, 52],
+      temperament: [20, 48],
+      potential: [30, 62]
     };
   }
 
   if (role === 'WICKET_KEEPER') {
     return {
-      batting: [26, 42],
+      batting: [24, 46],
       bowling: [0, 2],
-      fielding: [34, 52],
-      fitness: [26, 46],
-      temperament: [24, 46],
-      potential: [32, 58]
+      fielding: [32, 54],
+      fitness: [24, 48],
+      temperament: [22, 50],
+      potential: [30, 62]
     };
   }
 
   return {
-    batting: [22, 38],
-    bowling: [24, 42],
-    fielding: [24, 40],
-    fitness: [26, 46],
-    temperament: [24, 44],
-    potential: [32, 58]
+    batting: [20, 42],
+    bowling: [22, 48],
+    fielding: [22, 42],
+    fitness: [24, 50],
+    temperament: [20, 48],
+    potential: [30, 62]
   };
 }
 
@@ -378,6 +379,14 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool, 
     const temperament = randomBetween(base.temperament);
     const potential = randomBetween(base.potential);
     const age = randomInt(16, 24);
+    const tactics = createPlayerTacticsFromProfile({
+      role,
+      batting,
+      bowling,
+      fielding,
+      fitness,
+      temperament
+    });
 
     const marketValue = Number((5 + (batting + bowling + fielding + potential) * 0.08).toFixed(2));
     const salary = Number((0.5 + marketValue * 0.06).toFixed(2));
@@ -393,6 +402,11 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool, 
         last_name,
         country_origin,
         role,
+        batsman_type,
+        batsman_hand,
+        bowler_hand,
+        bowler_style,
+        bowler_mentality,
         batting,
         bowling,
         fielding,
@@ -410,8 +424,9 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool, 
         squad_status
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10, $11, $12,
-        $13, $14, $15, 30, 30, $16, $17, $18, $19
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, $16, $17,
+        $18, $19, $20, 30, 30, $21, $22, $23, $24
       )`,
       [
         franchiseId,
@@ -420,6 +435,11 @@ export async function ensureStarterSquad(franchiseId, country, dbClient = pool, 
         name.lastName,
         country,
         role,
+        tactics.batsman_type,
+        tactics.batsman_hand,
+        tactics.bowler_hand,
+        tactics.bowler_style,
+        tactics.bowler_mentality,
         batting,
         bowling,
         fielding,
