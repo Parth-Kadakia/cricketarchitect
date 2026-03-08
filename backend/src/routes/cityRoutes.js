@@ -162,7 +162,7 @@ router.get(
                FROM cities c
                JOIN franchises f ON f.city_id = c.id
                WHERE f.owner_user_id IS NULL
-                 AND f.status = 'AVAILABLE'
+                 AND f.status IN ('AVAILABLE', 'AI_CONTROLLED')
                  AND ($1 = '' OR LOWER(c.name) LIKE '%' || $1 || '%' OR LOWER(c.country) LIKE '%' || $1 || '%')
                ORDER BY c.country, c.name
                LIMIT $2`;
