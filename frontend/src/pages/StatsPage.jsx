@@ -4,6 +4,7 @@ import NoFranchiseBox, { isNoFranchiseError } from '../components/NoFranchiseBox
 import { useAuth } from '../context/AuthContext';
 import PlayerDetailModal from '../components/PlayerDetailModal';
 import { setPageTitle } from '../utils/format';
+import { downloadExcel } from '../utils/excelExport';
 
 /* ── tiny helpers ── */
 function fmt(v) { return v == null ? '-' : Number(v).toLocaleString(); }
@@ -74,6 +75,58 @@ export default function StatsPage() {
 
   const currentList = tab === 'batting' ? batting : tab === 'bowling' ? bowling : allRounders;
 
+  function exportStatsExcel() {
+    const seasonLabel = seasonId
+      ? (seasons.find((s) => String(s.id) === String(seasonId))?.name || `Season ${seasonId}`)
+      : 'All Time';
+
+    const sheets = [];
+
+    if (batting.length) {
+      sheets.push({
+        name: 'Top Batsmen',
+        headers: ['#', 'Player', 'Team', 'Role', 'Age', 'Mat', 'Inn', 'Runs', 'Balls', 'Avg', 'SR', 'HS', '4s', '6s', 'NO', 'Rating'],
+        rows: batting.map((r, i) => [
+          i + 1, `${r.first_name} ${r.last_name}`, r.franchise_name,
+          String(r.role || '').replace(/_/g, ' '), r.age, r.matches, r.innings,
+          r.runs, r.balls, fmtDec(r.average), fmtDec(r.strike_rate, 1),
+          r.highest_score, r.fours, r.sixes, r.not_outs, fmtDec(r.avg_rating, 1)
+        ])
+      });
+    }
+
+    if (bowling.length) {
+      sheets.push({
+        name: 'Top Bowlers',
+        headers: ['#', 'Player', 'Team', 'Role', 'Age', 'Mat', 'Overs', 'Runs', 'Wkts', 'Avg', 'Econ', 'Best Wkts', 'Maidens', 'Rating'],
+        rows: bowling.map((r, i) => [
+          i + 1, `${r.first_name} ${r.last_name}`, r.franchise_name,
+          String(r.role || '').replace(/_/g, ' '), r.age, r.matches,
+          bowlOvers(r.bowling_balls), r.runs_conceded, r.wickets,
+          fmtDec(r.average), fmtDec(r.economy), r.best_wickets, r.maidens,
+          fmtDec(r.avg_rating, 1)
+        ])
+      });
+    }
+
+    if (allRounders.length) {
+      sheets.push({
+        name: 'All-Rounders',
+        headers: ['#', 'Player', 'Team', 'Role', 'Age', 'Mat', 'Runs', 'SR', 'Wkts', 'Econ', 'Catches', 'Rating'],
+        rows: allRounders.map((r, i) => [
+          i + 1, `${r.first_name} ${r.last_name}`, r.franchise_name,
+          String(r.role || '').replace(/_/g, ' '), r.age, r.matches,
+          r.runs, fmtDec(r.strike_rate, 1), r.wickets, fmtDec(r.economy),
+          r.catches, fmtDec(r.avg_rating, 1)
+        ])
+      });
+    }
+
+    if (!sheets.length) return;
+    const safeName = seasonLabel.replace(/\s+/g, '-').toLowerCase();
+    downloadExcel(`player-rankings-${safeName}.xls`, sheets);
+  }
+
   function openPlayer(row) {
     setSelectedPlayer(row);
   }
@@ -92,7 +145,11 @@ export default function StatsPage() {
           <h2 className="stats-title">Player Rankings</h2>
           <p className="stats-subtitle">Top 100 across all teams and leagues</p>
         </div>
-        <div className="stats-season-filter">
+        <div className="stats-header-actions">
+          <button type="button" className="stats-export-btn" onClick={exportStatsExcel} title="Download all tables as Excel">
+            📥 Export Excel
+          </button>
+          <div className="stats-season-filter">
           <label htmlFor="stats-season-select">Season</label>
           <select
             id="stats-season-select"
@@ -105,6 +162,7 @@ export default function StatsPage() {
               <option key={s.id} value={s.id}>{s.name} {s.status === 'ACTIVE' ? '(current)' : ''}</option>
             ))}
           </select>
+          </div>
         </div>
       </div>
 

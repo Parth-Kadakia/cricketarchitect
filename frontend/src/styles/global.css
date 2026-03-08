@@ -4701,6 +4701,40 @@ table.stats-table tr:hover td {
   color: var(--text-primary);
 }
 
+.stats-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stats-export-btn,
+.sb-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.42rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: rgba(62, 127, 69, 0.12);
+  color: #3e7f45;
+  border: 1px solid rgba(62, 127, 69, 0.25);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.stats-export-btn:hover,
+.sb-export-btn:hover {
+  background: rgba(62, 127, 69, 0.22);
+  border-color: rgba(62, 127, 69, 0.4);
+}
+
+.sb-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .stats-tabs {
   display: flex;
   gap: 4px;
