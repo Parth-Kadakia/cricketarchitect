@@ -52,6 +52,11 @@ server.listen(env.port, '0.0.0.0', async () => {
       [ADMIN_EMAIL.trim().toLowerCase()]
     );
 
+    // Remove legacy seed accounts
+    await pool.query(
+      `DELETE FROM users WHERE email IN ('admin@globalt20.com', 'demo@globalt20.com')`
+    );
+
     await bootstrapGameWorld();
 
     const released = await releaseInactiveFranchises();

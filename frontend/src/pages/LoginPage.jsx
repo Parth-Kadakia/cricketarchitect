@@ -76,11 +76,6 @@ export default function LoginPage() {
     }
   }
 
-  function fillDemo() {
-    setForm({ displayName: '', email: 'demo@globalt20.com', password: 'Demo@123' });
-    setMode('login');
-  }
-
   return (
     <div className="auth-page">
       <div className="auth-shell">
@@ -212,12 +207,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="auth-demo-bar">
-            <span>Want to explore first?</span>
-            <button type="button" className="auth-demo-btn" onClick={fillDemo}>
-              Use Demo Account
-            </button>
-          </div>
         </div>
       </div>
     </div>
