@@ -13,6 +13,112 @@ import { broadcast } from '../ws/realtime.js';
 
 const router = Router();
 
+/* ── Admin: aggregate game-wide statistics ── */
+router.get(
+  '/stats',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const [
+      userStats,
+      franchiseStats,
+      seasonStats,
+      matchStats,
+      playerStats,
+      topFranchises,
+      recentSignups,
+      careerModeBreakdown
+    ] = await Promise.all([
+      pool.query(`
+        SELECT COUNT(*)::int AS total_users,
+               COUNT(*) FILTER (WHERE manager_status = 'ACTIVE')::int AS active_managers,
+               COUNT(*) FILTER (WHERE manager_status = 'UNEMPLOYED')::int AS unemployed,
+               COUNT(*) FILTER (WHERE manager_status = 'RETIRED')::int AS retired,
+               SUM(manager_matches_managed)::int AS total_user_matches,
+               SUM(manager_wins_managed)::int AS total_user_wins,
+               SUM(manager_losses_managed)::int AS total_user_losses,
+               SUM(manager_titles)::int AS total_user_titles,
+               COUNT(*) FILTER (WHERE last_active_at > NOW() - INTERVAL '24 hours')::int AS active_24h,
+               COUNT(*) FILTER (WHERE last_active_at > NOW() - INTERVAL '7 days')::int AS active_7d,
+               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')::int AS signups_24h,
+               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS signups_7d
+        FROM users
+      `),
+      pool.query(`
+        SELECT COUNT(*)::int AS total_franchises,
+               COUNT(*) FILTER (WHERE owner_user_id IS NOT NULL)::int AS user_owned,
+               COUNT(*) FILTER (WHERE owner_user_id IS NULL AND status != 'AVAILABLE')::int AS cpu_controlled,
+               COUNT(*) FILTER (WHERE status = 'AVAILABLE')::int AS available,
+               COALESCE(ROUND(AVG(total_valuation)::numeric, 2), 0) AS avg_valuation,
+               COALESCE(MAX(total_valuation), 0) AS max_valuation,
+               COALESCE(SUM(wins)::int, 0) AS total_franchise_wins,
+               COALESCE(SUM(losses)::int, 0) AS total_franchise_losses,
+               COALESCE(SUM(championships)::int, 0) AS total_championships
+        FROM franchises
+      `),
+      pool.query(`
+        SELECT COUNT(*)::int AS total_seasons,
+               COUNT(*) FILTER (WHERE status = 'ACTIVE')::int AS active_seasons,
+               COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS completed_seasons,
+               MAX(season_number) AS latest_season_number
+        FROM seasons
+      `),
+      pool.query(`
+        SELECT COUNT(*)::int AS total_matches,
+               COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS completed_matches,
+               COUNT(*) FILTER (WHERE status = 'SCHEDULED')::int AS scheduled_matches,
+               COUNT(*) FILTER (WHERE status = 'LIVE')::int AS live_matches
+        FROM matches
+      `),
+      pool.query(`
+        SELECT COUNT(*)::int AS total_players,
+               COUNT(*) FILTER (WHERE squad_status = 'MAIN_SQUAD')::int AS main_squad,
+               COUNT(*) FILTER (WHERE squad_status = 'YOUTH')::int AS youth,
+               COUNT(*) FILTER (WHERE squad_status = 'RETIRED')::int AS retired_players,
+               COALESCE(ROUND(AVG(age)::numeric, 1), 0) AS avg_age,
+               COALESCE(ROUND(AVG(market_value)::numeric, 2), 0) AS avg_market_value,
+               COALESCE(ROUND(AVG(batting)::numeric, 1), 0) AS avg_batting,
+               COALESCE(ROUND(AVG(bowling)::numeric, 1), 0) AS avg_bowling,
+               COALESCE(ROUND(AVG(fielding)::numeric, 1), 0) AS avg_fielding
+        FROM players
+      `),
+      pool.query(`
+        SELECT f.franchise_name, c.name AS city_name, c.country,
+               f.total_valuation, f.wins, f.losses, f.championships,
+               f.current_league_tier,
+               u.display_name AS owner_name
+        FROM franchises f
+        LEFT JOIN cities c ON c.id = f.city_id
+        LEFT JOIN users u ON u.id = f.owner_user_id
+        ORDER BY f.total_valuation DESC
+        LIMIT 5
+      `),
+      pool.query(`
+        SELECT id, display_name, email, career_mode, manager_status, created_at
+        FROM users
+        ORDER BY created_at DESC
+        LIMIT 10
+      `),
+      pool.query(`
+        SELECT career_mode, COUNT(*)::int AS count
+        FROM users
+        GROUP BY career_mode
+      `)
+    ]);
+
+    return res.json({
+      users: userStats.rows[0],
+      franchises: franchiseStats.rows[0],
+      seasons: seasonStats.rows[0],
+      matches: matchStats.rows[0],
+      players: playerStats.rows[0],
+      topFranchises: topFranchises.rows,
+      recentSignups: recentSignups.rows,
+      careerModes: careerModeBreakdown.rows
+    });
+  })
+);
+
 /* ── Admin: list all users + their franchise/manager stats ── */
 router.get(
   '/users',
@@ -27,10 +133,22 @@ router.get(
              f.id AS franchise_id, f.franchise_name, f.status AS franchise_status,
              f.competition_mode, f.current_league_tier, f.wins AS f_wins, f.losses AS f_losses,
              f.championships, f.total_valuation, f.prospect_points, f.growth_points,
-             c.name AS city_name, c.country
+             f.fan_rating, f.financial_balance, f.academy_level,
+             c.name AS city_name, c.country,
+             COALESCE(sq.squad_size, 0)::int AS squad_size,
+             COALESCE(sq.main_xi, 0)::int AS main_xi,
+             COALESCE(sq.youth_count, 0)::int AS youth_count,
+             COALESCE(sq.avg_ovr, 0) AS avg_ovr
       FROM users u
       LEFT JOIN franchises f ON f.owner_user_id = u.id
       LEFT JOIN cities c ON c.id = f.city_id
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS squad_size,
+               COUNT(*) FILTER (WHERE squad_status = 'MAIN_SQUAD')::int AS main_xi,
+               COUNT(*) FILTER (WHERE squad_status = 'YOUTH')::int AS youth_count,
+               ROUND(AVG((batting + bowling + fielding + fitness + temperament) / 5.0)::numeric, 1) AS avg_ovr
+        FROM players WHERE franchise_id = f.id
+      ) sq ON TRUE
       ORDER BY u.created_at DESC
     `);
     return res.json({ users: rows });

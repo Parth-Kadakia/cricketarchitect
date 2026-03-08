@@ -1796,6 +1796,151 @@ img { max-width: 100%; display: block; }
   }
 }
 
+/* ── Main tabs ── */
+.admin-main-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--glass-border);
+  padding-bottom: 0;
+}
+.admin-main-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.admin-main-tab:hover { color: var(--text-primary); }
+.admin-main-tab.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.admin-main-tab svg { width: 15px; height: 15px; }
+
+/* ── Card deltas ── */
+.admin-card-delta {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+/* ── Overview stats grid ── */
+.admin-overview { display: flex; flex-direction: column; gap: 1rem; }
+
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+.admin-stats-section {
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.2rem;
+}
+.admin-stats-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+.admin-stats-section h4 svg { width: 14px; height: 14px; opacity: 0.65; }
+
+.admin-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 0.6rem 0.8rem;
+}
+.admin-mini-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.admin-mini-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.admin-mini-lbl {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.admin-val-green { color: var(--secondary); }
+
+/* ── Rank column ── */
+.admin-rank {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* ── Squad & pct columns ── */
+.admin-squad-cell {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+}
+.admin-pct-cell {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--accent);
+}
+.admin-titles-highlight {
+  color: var(--secondary);
+  font-weight: 700;
+}
+
+/* ── Expanded detail row ── */
+.admin-row-expanded { background: rgba(var(--accent-rgb, 99, 102, 241), 0.05) !important; }
+.admin-detail-row td {
+  padding: 0 !important;
+  border-top: none !important;
+}
+.admin-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  padding: 0.75rem 1.2rem 1rem;
+  background: var(--bg-surface);
+  border-top: 1px dashed var(--glass-border);
+}
+.admin-detail-col h5 {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 0.5rem;
+}
+.admin-detail-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+.admin-detail-items strong {
+  color: var(--text-primary);
+}
+
 /* ── 4. APP SHELL ──────────────────────────────────────── */
 .app-shell {
   display: grid;
