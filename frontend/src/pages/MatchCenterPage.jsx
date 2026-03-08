@@ -1001,17 +1001,26 @@ export default function MatchCenterPage() {
 
   function generateShareText(format) {
     const md = format === 'markdown';
+    const bb = format === 'bbcode';
     const ln = [];
-    const hr = md ? '---' : '━'.repeat(56);
+    const hr = md ? '---' : bb ? '' : '━'.repeat(56);
     const pad = (s, w, right) => { const str = String(s); return right ? str.padStart(w) : str.padEnd(w); };
 
     // Header
     const title = `${homeName} (${homeCountry}) vs ${awayName} (${awayCountry})`;
-    ln.push(md ? `## ${title}` : title);
-    ln.push(hr);
-    if (scorecard?.match?.result_summary) ln.push(md ? `**${scorecard.match.result_summary}**` : scorecard.match.result_summary);
+    if (bb) {
+      ln.push(`[size=5][b]${title}[/b][/size]`);
+    } else {
+      ln.push(md ? `## ${title}` : title);
+    }
+    if (!bb) ln.push(hr);
+    if (scorecard?.match?.result_summary) {
+      ln.push(bb ? `[b][color=green]${scorecard.match.result_summary}[/color][/b]` : md ? `**${scorecard.match.result_summary}**` : scorecard.match.result_summary);
+    }
     ln.push(tossSummary);
-    if (scorecard?.match?.player_of_match_name) ln.push(`Player of the Match: ${scorecard.match.player_of_match_name}`);
+    if (scorecard?.match?.player_of_match_name) {
+      ln.push(bb ? `[b]Player of the Match:[/b] ${scorecard.match.player_of_match_name}` : `Player of the Match: ${scorecard.match.player_of_match_name}`);
+    }
     ln.push('');
 
     // Per innings
@@ -1021,11 +1030,31 @@ export default function MatchCenterPage() {
       const batRows = getBattingRowsForInnings(inn);
       const bowlRows = getBowlingRowsForInnings(inn).filter((r) => Number(r.bowling_balls || 0) > 0);
 
-      ln.push(md ? `### Innings ${inn} — ${meta.battingName} ${meta.battingScore}` : `INNINGS ${inn} — ${meta.battingName}  ${meta.battingScore}`);
+      if (bb) {
+        ln.push(`[size=4][b]Innings ${inn} — ${meta.battingName} ${meta.battingScore}[/b][/size]`);
+      } else {
+        ln.push(md ? `### Innings ${inn} — ${meta.battingName} ${meta.battingScore}` : `INNINGS ${inn} — ${meta.battingName}  ${meta.battingScore}`);
+      }
       ln.push('');
 
       // Batting
-      if (md) {
+      if (bb) {
+        ln.push('[table]');
+        ln.push('[tr][th]Batter[/th][th]Dismissal[/th][th]R[/th][th]B[/th][th]SR[/th][th]4s[/th][th]6s[/th][/tr]');
+        for (const r of batRows) {
+          const runs = Number(r.batting_runs || 0);
+          const balls = Number(r.batting_balls || 0);
+          const sr = balls ? ((runs / balls) * 100).toFixed(1) : '-';
+          const isNO = r.not_out !== false && r.not_out !== 'false';
+          const dis = isNO ? (balls > 0 ? 'not out' : 'DNB') : (r.dismissal_text || 'Out');
+          const name = `${r.first_name} ${r.last_name}${isNO && balls > 0 ? '*' : ''}`;
+          const isTop = runs > 0 && runs === Math.max(...batRows.map((b) => Number(b.batting_runs || 0)));
+          const nameCell = isTop ? `[b][color=green]${name}[/color][/b]` : name;
+          const runsCell = isTop ? `[b]${runs}[/b]` : String(runs);
+          ln.push(`[tr][td]${nameCell}[/td][td]${dis}[/td][td]${runsCell}[/td][td]${balls}[/td][td]${sr}[/td][td]${r.fours || 0}[/td][td]${r.sixes || 0}[/td][/tr]`);
+        }
+        ln.push('[/table]');
+      } else if (md) {
         ln.push('| Batter | Dismissal | R | B | SR | 4s | 6s |');
         ln.push('|--------|-----------|--:|--:|---:|---:|---:|');
         for (const r of batRows) {
@@ -1055,7 +1084,22 @@ export default function MatchCenterPage() {
 
       // Bowling
       if (bowlRows.length) {
-        if (md) {
+        if (bb) {
+          ln.push('[table]');
+          ln.push('[tr][th]Bowler[/th][th]O[/th][th]M[/th][th]R[/th][th]W[/th][th]Econ[/th][/tr]');
+          for (const r of bowlRows) {
+            const balls = Number(r.bowling_balls || 0);
+            const overs = `${Math.floor(balls / 6)}.${balls % 6}`;
+            const runs = Number(r.bowling_runs || 0);
+            const wkts = Number(r.bowling_wickets || 0);
+            const econ = balls ? ((runs / balls) * 6).toFixed(1) : '-';
+            const isBest = wkts > 0 && wkts === Math.max(...bowlRows.map((b) => Number(b.bowling_wickets || 0)));
+            const nameCell = isBest ? `[b][color=green]${r.first_name} ${r.last_name}[/color][/b]` : `${r.first_name} ${r.last_name}`;
+            const wktsCell = isBest ? `[b]${wkts}[/b]` : String(wkts);
+            ln.push(`[tr][td]${nameCell}[/td][td]${overs}[/td][td]${r.maiden_overs || 0}[/td][td]${runs}[/td][td]${wktsCell}[/td][td]${econ}[/td][/tr]`);
+          }
+          ln.push('[/table]');
+        } else if (md) {
           ln.push('| Bowler | O | M | R | W | Econ |');
           ln.push('|--------|--:|--:|--:|--:|-----:|');
           for (const r of bowlRows) {
@@ -1078,7 +1122,7 @@ export default function MatchCenterPage() {
         }
         ln.push('');
       }
-      ln.push(hr);
+      if (!bb) ln.push(hr);
       ln.push('');
     }
 
@@ -1087,25 +1131,44 @@ export default function MatchCenterPage() {
       const overs = inningsCommentary[inn] || [];
       if (!overs.length) continue;
       const meta = inningsMeta[inn];
-      ln.push(md ? `### Ball-by-Ball — Innings ${inn}` : `BALL-BY-BALL — INNINGS ${inn}`);
+      if (bb) {
+        ln.push(`[size=4][b]Ball-by-Ball — Innings ${inn}[/b][/size]`);
+      } else {
+        ln.push(md ? `### Ball-by-Ball — Innings ${inn}` : `BALL-BY-BALL — INNINGS ${inn}`);
+      }
       ln.push('');
       // overs are stored newest-first, reverse for chronological
       const chronoOvers = [...overs].reverse();
       for (const ov of chronoOvers) {
-        ln.push(md ? `**Over ${ov.over}** (${ov.overRuns} runs) — ${ov.closingLine}` : `Over ${ov.over}  (${ov.overRuns} runs)  ${ov.closingLine}`);
+        if (bb) {
+          ln.push(`[b]Over ${ov.over}[/b] (${ov.overRuns} runs) — ${ov.closingLine}`);
+        } else {
+          ln.push(md ? `**Over ${ov.over}** (${ov.overRuns} runs) — ${ov.closingLine}` : `Over ${ov.over}  (${ov.overRuns} runs)  ${ov.closingLine}`);
+        }
         // balls are stored newest-first inside each over, reverse them
         const chronoBalls = [...ov.balls].reverse();
         for (const ball of chronoBalls) {
           const chip = ball.result === 'W' ? 'W!' : ball.result === '•' ? '·' : ball.result;
-          ln.push(`  ${ball.ballNo}  ${chip}  ${ball.text}`);
+          if (bb) {
+            const chipBB = ball.result === 'W' ? '[color=red][b]W![/b][/color]' :
+              (ball.result === '4' || ball.result === '6') ? `[color=blue][b]${ball.result}[/b][/color]` :
+              ball.result === '•' ? '[color=gray]·[/color]' : chip;
+            ln.push(`  ${ball.ballNo}  ${chipBB}  ${ball.text}`);
+          } else {
+            ln.push(`  ${ball.ballNo}  ${chip}  ${ball.text}`);
+          }
         }
         ln.push('');
       }
-      ln.push(hr);
+      if (!bb) ln.push(hr);
       ln.push('');
     }
 
-    ln.push(md ? '*Generated by Global T20 Cricket Manager*' : '— Global T20 Cricket Manager');
+    if (bb) {
+      ln.push('[i]Generated by Global T20 Cricket Manager[/i]');
+    } else {
+      ln.push(md ? '*Generated by Global T20 Cricket Manager*' : '— Global T20 Cricket Manager');
+    }
     return ln.join('\n');
   }
 
@@ -1611,6 +1674,10 @@ export default function MatchCenterPage() {
                 <button className="mc-share-option" onClick={() => copyShare('markdown')}>
                   📝 Copy as Markdown
                   <span className="mc-share-hint">Reddit, GitHub, docs</span>
+                </button>
+                <button className="mc-share-option" onClick={() => copyShare('bbcode')}>
+                  📋 Copy as BB Code
+                  <span className="mc-share-hint">Forums (phpBB, vBulletin, XenForo)</span>
                 </button>
                 <hr className="mc-share-divider" />
                 <button className="mc-share-option" onClick={downloadScorecardPNG}>
