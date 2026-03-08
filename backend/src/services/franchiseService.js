@@ -892,7 +892,7 @@ export async function claimFranchise({ userId, cityId, franchiseName, mode = CAR
 
     if (!worldId) {
       const newWorld = await client.query(
-        'INSERT INTO worlds (owner_user_id) VALUES ($1) RETURNING id',
+        'INSERT INTO worlds (creator_user_id) VALUES ($1) RETURNING id',
         [userId]
       );
       worldId = newWorld.rows[0].id;
