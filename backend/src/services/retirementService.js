@@ -177,9 +177,11 @@ export async function processSeasonRetirements(seasonId, dbClient = pool) {
   const candidates = await dbClient.query(
     `SELECT p.*, f.id AS franchise_id
      FROM players p
-     LEFT JOIN franchises f ON f.id = p.franchise_id
+     JOIN franchises f ON f.id = p.franchise_id
      WHERE p.squad_status IN ('MAIN_SQUAD', 'YOUTH', 'LOANED')
-       AND p.age >= 34`
+       AND p.age >= 34
+       AND f.world_id = (SELECT world_id FROM seasons WHERE id = $1)`,
+    [seasonId]
   );
 
   const retired = [];
@@ -213,9 +215,13 @@ export async function processSeasonRetirements(seasonId, dbClient = pool) {
   }
 
   await dbClient.query(
-    `UPDATE players
+    `UPDATE players p
      SET age = LEAST(45, age + 1)
-     WHERE squad_status <> 'RETIRED'`
+     FROM franchises f
+     WHERE f.id = p.franchise_id
+       AND p.squad_status <> 'RETIRED'
+       AND f.world_id = (SELECT world_id FROM seasons WHERE id = $1)`,
+    [seasonId]
   );
 
   for (const franchiseId of impacted) {

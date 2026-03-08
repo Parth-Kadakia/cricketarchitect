@@ -11,7 +11,7 @@ router.get(
   '/summary',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
 
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
@@ -59,7 +59,7 @@ router.get(
   '/transactions',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
 
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
@@ -82,7 +82,7 @@ router.get(
   '/valuations',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
 
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });

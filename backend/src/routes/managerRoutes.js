@@ -20,7 +20,7 @@ router.get(
   '/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const snapshot = await getManagerCareerSnapshot(req.user.id);
+    const snapshot = await getManagerCareerSnapshot(req.user.id, undefined, req.user.active_world_id || null);
     return res.json(snapshot);
   })
 );
@@ -32,10 +32,12 @@ router.get(
     const seasonId = Number(req.query.seasonId || 0) || null;
     const mode = req.query.mode ? String(req.query.mode) : null;
     const limit = Number(req.query.limit || 220);
-    const activeSeason = seasonId ? null : await getActiveSeason();
+    const worldId = req.user?.active_world_id || null;
+    const activeSeason = seasonId ? null : await getActiveSeason(undefined, worldId);
     const rows = await getManagerDirectory({
       seasonId: seasonId || activeSeason?.id || null,
       mode: mode || req.user?.career_mode || null,
+      worldId,
       limit
     });
     return res.json({ managers: rows });
@@ -62,7 +64,7 @@ router.get(
   '/offers',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const offers = await listManagerOffers(req.user.id);
+    const offers = await listManagerOffers(req.user.id, undefined, req.user.active_world_id || null);
     return res.json({ offers });
   })
 );

@@ -18,6 +18,126 @@ export async function ensureSchemaCompatibility(dbClient = pool) {
     return;
   }
 
+  /* ── World isolation: worlds table + world_id columns ── */
+  await dbClient.query(
+    `CREATE TABLE IF NOT EXISTS worlds (
+       id BIGSERIAL PRIMARY KEY,
+       creator_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+       competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )`
+  );
+  await dbClient.query("CREATE INDEX IF NOT EXISTS worlds_creator_idx ON worlds(creator_user_id)");
+  await dbClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active_world_id BIGINT REFERENCES worlds(id) ON DELETE SET NULL");
+  await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS world_id BIGINT REFERENCES worlds(id) ON DELETE CASCADE");
+  await dbClient.query("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS world_id BIGINT REFERENCES worlds(id) ON DELETE CASCADE");
+  await dbClient.query("ALTER TABLE managers ADD COLUMN IF NOT EXISTS world_id BIGINT REFERENCES worlds(id) ON DELETE CASCADE");
+  await dbClient.query("CREATE INDEX IF NOT EXISTS franchises_world_idx ON franchises(world_id)");
+  await dbClient.query("CREATE INDEX IF NOT EXISTS seasons_world_idx ON seasons(world_id, status)");
+  await dbClient.query("CREATE INDEX IF NOT EXISTS managers_world_idx ON managers(world_id)");
+
+  /* Backfill: create a world for each existing franchise owner and assign world_id */
+  await dbClient.query(
+    `INSERT INTO worlds (creator_user_id, competition_mode)
+     SELECT DISTINCT f.owner_user_id,
+            COALESCE(NULLIF(f.competition_mode, ''), 'CLUB')
+     FROM franchises f
+     WHERE f.owner_user_id IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM worlds w WHERE w.creator_user_id = f.owner_user_id
+       )`
+  );
+
+  await dbClient.query(
+    `UPDATE users u
+     SET active_world_id = w.id
+     FROM worlds w
+     WHERE w.creator_user_id = u.id
+       AND u.active_world_id IS NULL`
+  );
+
+  await dbClient.query(
+    `UPDATE franchises f
+     SET world_id = w.id
+     FROM users u
+     JOIN worlds w ON w.creator_user_id = u.id
+     WHERE f.owner_user_id = u.id
+       AND f.world_id IS NULL`
+  );
+
+  /* Assign AI franchises in the same world as the human franchise owner's world */
+  await dbClient.query(
+    `UPDATE franchises f
+     SET world_id = owner_world.wid
+     FROM (
+       SELECT DISTINCT ON (1) MIN(world_id) AS wid
+       FROM franchises
+       WHERE world_id IS NOT NULL
+     ) owner_world
+     WHERE f.world_id IS NULL`
+  );
+
+  await dbClient.query(
+    `UPDATE seasons s
+     SET world_id = owner_world.wid
+     FROM (
+       SELECT MIN(world_id) AS wid
+       FROM franchises
+       WHERE world_id IS NOT NULL
+     ) owner_world
+     WHERE s.world_id IS NULL`
+  );
+
+  await dbClient.query(
+    `UPDATE managers m
+     SET world_id = owner_world.wid
+     FROM (
+       SELECT MIN(world_id) AS wid
+       FROM franchises
+       WHERE world_id IS NOT NULL
+     ) owner_world
+     WHERE m.world_id IS NULL`
+  );
+
+  /* Remove old UNIQUE on managers(user_id) since a user can have managers in multiple worlds */
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF EXISTS (
+         SELECT 1 FROM pg_indexes
+         WHERE indexname = 'managers_user_id_key'
+       ) THEN
+         ALTER TABLE managers DROP CONSTRAINT IF EXISTS managers_user_id_key;
+       END IF;
+     END $$;`
+  );
+
+  /* Remove old UNIQUE on franchises(city_id) since cities can be reused across worlds */
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF EXISTS (
+         SELECT 1 FROM pg_indexes
+         WHERE indexname = 'franchises_city_id_key'
+       ) THEN
+         ALTER TABLE franchises DROP CONSTRAINT IF EXISTS franchises_city_id_key;
+       END IF;
+     END $$;`
+  );
+
+  /* Remove old UNIQUE on franchises(owner_user_id) since it's per-world now */
+  await dbClient.query(
+    `DO $$
+     BEGIN
+       IF EXISTS (
+         SELECT 1 FROM pg_indexes
+         WHERE indexname = 'franchises_owner_user_id_key'
+       ) THEN
+         ALTER TABLE franchises DROP CONSTRAINT IF EXISTS franchises_owner_user_id_key;
+       END IF;
+     END $$;`
+  );
+
   await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS current_league_tier INTEGER DEFAULT 4");
   await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS promotions INTEGER DEFAULT 0");
   await dbClient.query("ALTER TABLE franchises ADD COLUMN IF NOT EXISTS relegations INTEGER DEFAULT 0");

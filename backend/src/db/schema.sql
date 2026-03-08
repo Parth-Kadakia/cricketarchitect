@@ -25,6 +25,7 @@ DROP TABLE IF EXISTS players CASCADE;
 DROP TABLE IF EXISTS regions CASCADE;
 DROP TABLE IF EXISTS franchises CASCADE;
 DROP TABLE IF EXISTS cities CASCADE;
+DROP TABLE IF EXISTS worlds CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP FUNCTION IF EXISTS set_updated_at() CASCADE;
 
@@ -52,14 +53,25 @@ CREATE TABLE users (
   manager_matches_managed INTEGER NOT NULL DEFAULT 0,
   manager_wins_managed INTEGER NOT NULL DEFAULT 0,
   manager_losses_managed INTEGER NOT NULL DEFAULT 0,
+  active_world_id BIGINT REFERENCES worlds(id) ON DELETE SET NULL,
   last_active_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE worlds (
+  id BIGSERIAL PRIMARY KEY,
+  creator_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX worlds_creator_idx ON worlds(creator_user_id);
+
 CREATE TABLE managers (
   id BIGSERIAL PRIMARY KEY,
-  user_id BIGINT UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+  world_id BIGINT REFERENCES worlds(id) ON DELETE CASCADE,
+  user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
   display_name TEXT NOT NULL,
   nationality TEXT,
   competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
@@ -78,7 +90,9 @@ CREATE TABLE managers (
 
 CREATE INDEX managers_mode_idx ON managers(competition_mode, level DESC, reputation DESC);
 CREATE INDEX managers_cpu_idx ON managers(is_cpu, competition_mode);
-CREATE UNIQUE INDEX managers_cpu_display_name_uidx ON managers(display_name) WHERE is_cpu = TRUE;
+CREATE UNIQUE INDEX managers_cpu_display_name_uidx ON managers(world_id, display_name) WHERE is_cpu = TRUE;
+CREATE UNIQUE INDEX managers_user_world_uidx ON managers(user_id, world_id) WHERE user_id IS NOT NULL;
+CREATE INDEX managers_world_idx ON managers(world_id);
 
 CREATE TABLE cities (
   id BIGSERIAL PRIMARY KEY,
@@ -92,8 +106,9 @@ CREATE TABLE cities (
 
 CREATE TABLE franchises (
   id BIGSERIAL PRIMARY KEY,
-  city_id BIGINT NOT NULL UNIQUE REFERENCES cities(id) ON DELETE CASCADE,
-  owner_user_id BIGINT UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+  world_id BIGINT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+  city_id BIGINT NOT NULL REFERENCES cities(id) ON DELETE CASCADE,
+  owner_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
   franchise_name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'AVAILABLE' CHECK (status IN ('AVAILABLE', 'ACTIVE', 'AI_CONTROLLED', 'FOR_SALE')),
   academy_name TEXT NOT NULL,
@@ -120,6 +135,10 @@ CREATE TABLE franchises (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE UNIQUE INDEX franchises_world_city_uidx ON franchises(world_id, city_id);
+CREATE UNIQUE INDEX franchises_owner_uidx ON franchises(owner_user_id) WHERE owner_user_id IS NOT NULL;
+CREATE INDEX franchises_world_idx ON franchises(world_id);
+
 CREATE TABLE regions (
   id BIGSERIAL PRIMARY KEY,
   franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
@@ -133,8 +152,9 @@ CREATE TABLE regions (
 
 CREATE TABLE seasons (
   id BIGSERIAL PRIMARY KEY,
+  world_id BIGINT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
   season_number INTEGER NOT NULL,
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   year INTEGER NOT NULL,
   format TEXT NOT NULL DEFAULT 'T20',
   competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
@@ -146,6 +166,9 @@ CREATE TABLE seasons (
   end_date DATE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX seasons_world_name_uidx ON seasons(world_id, name);
+CREATE INDEX seasons_world_idx ON seasons(world_id, status);
 
 CREATE TABLE season_teams (
   id BIGSERIAL PRIMARY KEY,

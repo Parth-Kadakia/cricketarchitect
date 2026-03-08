@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import pool, { withTransaction } from '../config/db.js';
 import env from '../config/env.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, optionalAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { ensureProminentCricketCities } from '../db/seedWorldCities.js';
 import { INTERNATIONAL_COUNTRIES } from '../constants/gameModes.js';
@@ -134,11 +134,18 @@ router.get(
 
 router.get(
   '/',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const availableOnly = req.query.available === 'true';
     const q = String(req.query.q || '').trim().toLowerCase();
     const limit = Math.max(20, Math.min(2000, Number(req.query.limit || 600)));
-    const franchiseCount = Number((await pool.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
+    const worldId = req.user?.active_world_id || null;
+    const franchiseCount = Number(
+      (await pool.query(
+        'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+        [worldId]
+      )).rows[0].count
+    );
 
     if (franchiseCount === 0) {
       await ensureProminentCricketCities(pool);
@@ -163,18 +170,20 @@ router.get(
                JOIN franchises f ON f.city_id = c.id
                WHERE f.owner_user_id IS NULL
                  AND f.status IN ('AVAILABLE', 'AI_CONTROLLED')
+                 AND ($3::bigint IS NULL OR f.world_id = $3)
                  AND ($1 = '' OR LOWER(c.name) LIKE '%' || $1 || '%' OR LOWER(c.country) LIKE '%' || $1 || '%')
                ORDER BY c.country, c.name
                LIMIT $2`;
-      params = [q, limit];
+      params = [q, limit, worldId];
     } else {
       query = `SELECT c.*, f.id AS franchise_id, f.status AS franchise_status, f.owner_user_id
                FROM cities c
                JOIN franchises f ON f.city_id = c.id
-               WHERE ($1 = '' OR LOWER(c.name) LIKE '%' || $1 || '%' OR LOWER(c.country) LIKE '%' || $1 || '%')
+               WHERE ($3::bigint IS NULL OR f.world_id = $3)
+                 AND ($1 = '' OR LOWER(c.name) LIKE '%' || $1 || '%' OR LOWER(c.country) LIKE '%' || $1 || '%')
                ORDER BY c.country, c.name
                LIMIT $2`;
-      params = [q, limit];
+      params = [q, limit, worldId];
     }
 
     const cities = await pool.query(query, params);
@@ -199,7 +208,13 @@ router.post(
       return res.status(400).json({ message: 'name and country must be 120 characters or less.' });
     }
 
-    const franchiseCount = Number((await pool.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
+    const worldId = req.user?.active_world_id || null;
+    const franchiseCount = Number(
+      (await pool.query(
+        'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+        [worldId]
+      )).rows[0].count
+    );
     if (franchiseCount > 0) {
       return res.status(409).json({
         message: 'Custom city add is available before career kickoff only. Start a new save to add cities, then select one.'

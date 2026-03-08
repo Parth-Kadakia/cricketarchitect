@@ -3379,11 +3379,12 @@ export async function simulateRound(roundNo, options = {}) {
     batchChunkPauseMs = env.streetCricketBatchChunkPauseMs,
     leagueTier = null,
     simulationOperationId = null,
-    onSimulationProgress = null
+    onSimulationProgress = null,
+    worldId = null
   } = options;
   const activeSeason = seasonId
     ? (await pool.query('SELECT * FROM seasons WHERE id = $1', [seasonId])).rows[0] || null
-    : await getActiveSeason(pool);
+    : await getActiveSeason(pool, worldId);
 
   if (!activeSeason) {
     return { simulated: 0, roundNo: null, seasonId: null };
@@ -3557,7 +3558,7 @@ export async function simulateLeagueRound({ seasonId = null, roundNo = null, lea
   const tier = Number(leagueTier || 0);
   const activeSeason = seasonId
     ? (await pool.query('SELECT id, league_count FROM seasons WHERE id = $1', [seasonId])).rows[0] || null
-    : await getActiveSeason(pool);
+    : await getActiveSeason(pool, options.worldId || null);
   const maxTier = Number(activeSeason?.league_count || 4);
 
   if (!tier || tier < 1 || tier > maxTier) {
@@ -3576,7 +3577,7 @@ export async function simulateLeagueRound({ seasonId = null, roundNo = null, lea
 }
 
 export async function simulateMyLeagueRound(userId, options = {}) {
-  const activeSeason = await getActiveSeason(pool);
+  const activeSeason = await getActiveSeason(pool, options.worldId || null);
   if (!activeSeason) {
     return { simulated: 0, roundNo: null, seasonId: null, leagueTier: null };
   }
@@ -3613,10 +3614,11 @@ export async function simulateHalfSeason(options = {}) {
     useExternalFullMatchApi = env.streetCricketFullMatchApiEnabled,
     strictExternalFullMatchApi = false,
     simulationOperationId = null,
-    onSimulationProgress = null
+    onSimulationProgress = null,
+    worldId = null
   } = options;
 
-  const activeSeason = await getActiveSeason(pool);
+  const activeSeason = await getActiveSeason(pool, worldId);
   if (!activeSeason) {
     return { totalSimulated: 0, seasonId: null, roundsSimulated: [], totalMatches: 0 };
   }
@@ -3729,9 +3731,10 @@ export async function simulateSeasonToEnd(options = {}) {
     useExternalFullMatchApi = env.streetCricketFullMatchApiEnabled,
     strictExternalFullMatchApi = false,
     simulationOperationId = null,
-    onSimulationProgress = null
+    onSimulationProgress = null,
+    worldId = null
   } = options;
-  const activeSeason = await getActiveSeason(pool);
+  const activeSeason = await getActiveSeason(pool, worldId);
 
   if (!activeSeason) {
     return { totalSimulated: 0, seasonId: null, completedSeasonId: null, nextSeasonId: null };

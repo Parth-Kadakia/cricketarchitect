@@ -19,7 +19,7 @@ router.get(
   '/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
 
     if (!franchise) {
       return res.json({ franchise: null });
@@ -139,7 +139,7 @@ router.post(
       return res.status(400).json({ message: "mode must be 'ACADEMY_LEVEL' or 'YOUTH_RATING'." });
     }
 
-    const ownerFranchise = await getFranchiseByOwner(req.user.id);
+    const ownerFranchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
 
     if (!ownerFranchise || Number(ownerFranchise.id) !== Number(req.params.franchiseId)) {
       return res.status(403).json({ message: 'You can only upgrade your own academy.' });

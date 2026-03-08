@@ -480,8 +480,10 @@ export async function ensureFranchiseInfrastructure(franchiseId, dbClient = pool
   });
 }
 
-export async function initializeAllFranchises(dbClient = pool) {
-  const franchises = await dbClient.query('SELECT id FROM franchises ORDER BY id ASC');
+export async function initializeAllFranchises(dbClient = pool, worldId = null) {
+  const franchises = worldId
+    ? await dbClient.query('SELECT id FROM franchises WHERE world_id = $1 ORDER BY id ASC', [worldId])
+    : await dbClient.query('SELECT id FROM franchises ORDER BY id ASC');
 
   for (const franchise of franchises.rows) {
     await ensureFranchiseInfrastructure(franchise.id, dbClient);
@@ -489,7 +491,7 @@ export async function initializeAllFranchises(dbClient = pool) {
   }
 }
 
-async function getOwnedFranchise(userId, dbClient = pool) {
+async function getOwnedFranchise(userId, dbClient = pool, worldId = null) {
   const result = await dbClient.query(
     `SELECT f.*, c.name AS city_name, c.country, c.latitude, c.longitude,
             st.league_tier,
@@ -503,38 +505,42 @@ async function getOwnedFranchise(userId, dbClient = pool) {
             ), 0), 1) AS strength_rating
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
-     LEFT JOIN seasons s ON s.status = 'ACTIVE'
+     LEFT JOIN seasons s ON s.status = 'ACTIVE' AND ($2::bigint IS NULL OR s.world_id = $2)
      LEFT JOIN season_teams st ON st.season_id = s.id AND st.franchise_id = f.id
      WHERE f.owner_user_id = $1
+       AND ($2::bigint IS NULL OR f.world_id = $2)
      ORDER BY s.season_number DESC NULLS LAST
      LIMIT 1`,
-    [userId]
+    [userId, worldId]
   );
 
   return result.rows[0] || null;
 }
 
-export async function getFranchiseByOwner(userId, dbClient = pool) {
-  return getOwnedFranchise(userId, dbClient);
+export async function getFranchiseByOwner(userId, dbClient = pool, worldId = null) {
+  return getOwnedFranchise(userId, dbClient, worldId);
 }
 
-async function markCpuAndHumanOwnership(selectedFranchiseId, dbClient) {
+async function markCpuAndHumanOwnership(selectedFranchiseId, dbClient, worldId = null) {
   await dbClient.query(
     `UPDATE franchises
      SET status = CASE
        WHEN id = $1 THEN 'ACTIVE'
        WHEN owner_user_id IS NULL THEN 'AI_CONTROLLED'
        ELSE status
-     END`,
-    [selectedFranchiseId]
+     END
+     WHERE ($2::bigint IS NULL OR world_id = $2)`,
+    [selectedFranchiseId, worldId]
   );
 
   const season = await dbClient.query(
     `SELECT id
      FROM seasons
      WHERE status = 'ACTIVE'
+       AND ($1::bigint IS NULL OR world_id = $1)
      ORDER BY id DESC
-     LIMIT 1`
+     LIMIT 1`,
+    [worldId]
   );
 
   if (season.rows.length) {
@@ -555,7 +561,8 @@ async function createFranchiseRecord(
     status = 'AI_CONTROLLED',
     franchiseName = null,
     academyName = null,
-    competitionMode = CAREER_MODES.CLUB
+    competitionMode = CAREER_MODES.CLUB,
+    worldId = null
   },
   dbClient
 ) {
@@ -568,6 +575,7 @@ async function createFranchiseRecord(
       status,
       academy_name,
       competition_mode,
+      world_id,
       base_value,
       wins,
       losses,
@@ -582,7 +590,7 @@ async function createFranchiseRecord(
       growth_points,
       total_valuation
     ) VALUES (
-      $1, $2, $3, $4, $5, $6,
+      $1, $2, $3, $4, $5, $6, $7,
       100, 0, 0, 0, 0, 0,
       20, 100, 1, 20, 0, 0, 100
     )
@@ -593,14 +601,15 @@ async function createFranchiseRecord(
       franchiseName || buildTeamName(cityName),
       status,
       academyName || buildAcademyName(cityName),
-      resolvedMode
+      resolvedMode,
+      worldId
     ]
   );
 
   return inserted.rows[0];
 }
 
-async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, dbClient) {
+async function initializeCareerLeagueWithCity({ userId, city, franchiseName, worldId }, dbClient) {
   await ensureProminentCricketCities(dbClient);
 
   const managerFranchise = await createFranchiseRecord(
@@ -611,7 +620,8 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
       status: 'ACTIVE',
       franchiseName: franchiseName?.trim() || buildTeamName(city.name),
       academyName: buildAcademyName(city.name),
-      competitionMode: CAREER_MODES.CLUB
+      competitionMode: CAREER_MODES.CLUB,
+      worldId
     },
     dbClient
   );
@@ -702,7 +712,8 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
         cityName: cpuCity.name,
         ownerUserId: null,
         status: 'AI_CONTROLLED',
-        competitionMode: CAREER_MODES.CLUB
+        competitionMode: CAREER_MODES.CLUB,
+        worldId
       },
       dbClient
     );
@@ -721,7 +732,7 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
     [userId, CAREER_MODES.CLUB]
   );
 
-  const season = await ensureActiveSeason(dbClient);
+  const season = await ensureActiveSeason(dbClient, worldId);
   if (season) {
     await dbClient.query(
       `INSERT INTO season_teams (season_id, franchise_id, is_ai, league_tier, previous_league_tier, movement)
@@ -733,11 +744,11 @@ async function initializeCareerLeagueWithCity({ userId, city, franchiseName }, d
       [season.id, allFranchiseIds]
     );
 
-    await markCpuAndHumanOwnership(managerFranchise.id, dbClient);
+    await markCpuAndHumanOwnership(managerFranchise.id, dbClient, worldId);
     await generateDoubleRoundRobinFixtures(season.id, dbClient);
   }
 
-  await ensureFranchiseManagers(dbClient);
+  await ensureFranchiseManagers(dbClient, worldId);
 
   return managerFranchise;
 }
@@ -750,7 +761,7 @@ function buildInternationalAcademyName(country) {
   return `${country} National Cricket Academy`;
 }
 
-async function initializeInternationalCareerWithCountry({ userId, country, franchiseName }, dbClient) {
+async function initializeInternationalCareerWithCountry({ userId, country, franchiseName, worldId }, dbClient) {
   await ensureInternationalCountryCities(dbClient);
 
   const normalizedCountry = String(country || '').trim();
@@ -805,7 +816,8 @@ async function initializeInternationalCareerWithCountry({ userId, country, franc
       status: 'ACTIVE',
       franchiseName: franchiseName?.trim() || buildInternationalTeamName(officialCountry),
       academyName: buildInternationalAcademyName(officialCountry),
-      competitionMode: CAREER_MODES.INTERNATIONAL
+      competitionMode: CAREER_MODES.INTERNATIONAL,
+      worldId
     },
     dbClient
   );
@@ -826,7 +838,8 @@ async function initializeInternationalCareerWithCountry({ userId, country, franc
         status: 'AI_CONTROLLED',
         franchiseName: buildInternationalTeamName(countryName),
         academyName: buildInternationalAcademyName(countryName),
-        competitionMode: CAREER_MODES.INTERNATIONAL
+        competitionMode: CAREER_MODES.INTERNATIONAL,
+        worldId
       },
       dbClient
     );
@@ -846,7 +859,7 @@ async function initializeInternationalCareerWithCountry({ userId, country, franc
     [userId, CAREER_MODES.INTERNATIONAL]
   );
 
-  const season = await ensureActiveSeason(dbClient);
+  const season = await ensureActiveSeason(dbClient, worldId);
   if (season) {
     await dbClient.query(
       `INSERT INTO season_teams (season_id, franchise_id, is_ai, league_tier, previous_league_tier, movement)
@@ -858,11 +871,11 @@ async function initializeInternationalCareerWithCountry({ userId, country, franc
       [season.id, allFranchiseIds]
     );
 
-    await markCpuAndHumanOwnership(managerFranchise.id, dbClient);
+    await markCpuAndHumanOwnership(managerFranchise.id, dbClient, worldId);
     await generateDoubleRoundRobinFixtures(season.id, dbClient);
   }
 
-  await ensureFranchiseManagers(dbClient);
+  await ensureFranchiseManagers(dbClient, worldId);
 
   return managerFranchise;
 }
@@ -872,17 +885,33 @@ export async function claimFranchise({ userId, cityId, franchiseName, mode = CAR
     const managerUser = await assertManagerCanTakeJobs(userId, client);
 
     const careerMode = normalizeCareerMode(mode);
-    const owned = await getOwnedFranchise(userId, client);
+
+    /* ── Resolve or create the user's game world ── */
+    const userWorldRow = await client.query('SELECT active_world_id FROM users WHERE id = $1', [userId]);
+    let worldId = userWorldRow.rows[0]?.active_world_id || null;
+
+    if (!worldId) {
+      const newWorld = await client.query(
+        'INSERT INTO worlds (owner_user_id) VALUES ($1) RETURNING id',
+        [userId]
+      );
+      worldId = newWorld.rows[0].id;
+      await client.query('UPDATE users SET active_world_id = $1 WHERE id = $2', [worldId, userId]);
+    }
+
+    const owned = await getOwnedFranchise(userId, client, worldId);
     if (owned) {
       const error = new Error('You already manage a franchise in this save.');
       error.status = 400;
       throw error;
     }
-    const franchiseCount = Number((await client.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
+    const franchiseCount = Number(
+      (await client.query('SELECT COUNT(*)::int AS count FROM franchises WHERE world_id = $1', [worldId])).rows[0].count
+    );
 
     if (franchiseCount === 0) {
       const created = careerMode === CAREER_MODES.INTERNATIONAL
-        ? await initializeInternationalCareerWithCountry({ userId, country, franchiseName }, client)
+        ? await initializeInternationalCareerWithCountry({ userId, country, franchiseName, worldId }, client)
         : await (async () => {
           const cityResult = await client.query('SELECT id, name, country FROM cities WHERE id = $1', [cityId]);
           if (!cityResult.rows.length) {
@@ -890,7 +919,7 @@ export async function claimFranchise({ userId, cityId, franchiseName, mode = CAR
             error.status = 404;
             throw error;
           }
-          return initializeCareerLeagueWithCity({ userId, city: cityResult.rows[0], franchiseName }, client);
+          return initializeCareerLeagueWithCity({ userId, city: cityResult.rows[0], franchiseName, worldId }, client);
         })();
 
       const refreshed = await client.query(
@@ -912,14 +941,24 @@ export async function claimFranchise({ userId, cityId, franchiseName, mode = CAR
     }
 
     if (String(managerUser.manager_status || '').toUpperCase() === 'UNEMPLOYED') {
-      const error = new Error('You are currently unemployed. Review board offers or use the manager apply market.');
-      error.status = 403;
-      throw error;
+      const stintCheck = await client.query(
+        `SELECT 1 FROM manager_stints WHERE user_id = $1 LIMIT 1`,
+        [userId]
+      );
+      const hasEverManaged = stintCheck.rows.length > 0;
+
+      if (hasEverManaged) {
+        const error = new Error('You are currently unemployed. Review board offers or use the manager apply market.');
+        error.status = 403;
+        throw error;
+      }
     }
 
     const worldModesResult = await client.query(
       `SELECT DISTINCT competition_mode
-       FROM franchises`
+       FROM franchises
+       WHERE world_id = $1`,
+      [worldId]
     );
     const worldModes = new Set(
       worldModesResult.rows
@@ -986,8 +1025,9 @@ export async function claimFranchise({ userId, cityId, franchiseName, mode = CAR
       `SELECT *
        FROM franchises
        WHERE city_id = $1
+         AND world_id = $2
        FOR UPDATE`,
-      [resolvedCityId]
+      [resolvedCityId, worldId]
     );
 
     if (!franchiseResult.rows.length) {
@@ -1028,7 +1068,7 @@ export async function claimFranchise({ userId, cityId, franchiseName, mode = CAR
     );
 
     await ensureFranchiseInfrastructure(franchise.id, client);
-    await markCpuAndHumanOwnership(franchise.id, client);
+    await markCpuAndHumanOwnership(franchise.id, client, worldId);
     await activateManagerForFranchise({
       userId,
       franchiseId: Number(franchise.id),
@@ -1148,7 +1188,7 @@ export async function purchaseFranchise({ buyerUserId, franchiseId, newFranchise
       [buyerUserId, normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB)]
     );
 
-    await markCpuAndHumanOwnership(franchiseId, client);
+    await markCpuAndHumanOwnership(franchiseId, client, franchise.world_id || null);
     await activateManagerForFranchise({
       userId: buyerUserId,
       franchiseId: Number(franchiseId),
@@ -1168,8 +1208,13 @@ export async function purchaseFranchise({ buyerUserId, franchiseId, newFranchise
   });
 }
 
-export async function getMarketplaceData() {
-  const franchiseCount = Number((await pool.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
+export async function getMarketplaceData(worldId = null) {
+  const franchiseCount = Number(
+    (await pool.query(
+      'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+      [worldId]
+    )).rows[0].count
+  );
   const availableCities = await pool.query(
     franchiseCount === 0
       ? `SELECT c.*
@@ -1180,7 +1225,9 @@ export async function getMarketplaceData() {
          JOIN franchises f ON f.city_id = c.id
          WHERE f.owner_user_id IS NULL
            AND f.status = 'AVAILABLE'
-         ORDER BY c.country, c.name`
+           AND ($1::bigint IS NULL OR f.world_id = $1)
+         ORDER BY c.country, c.name`,
+    [worldId]
   );
 
   const allFranchises = await pool.query(
@@ -1202,7 +1249,9 @@ export async function getMarketplaceData() {
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
      LEFT JOIN users u ON u.id = f.owner_user_id
-     ORDER BY f.total_valuation DESC, c.name ASC`
+     WHERE ($1::bigint IS NULL OR f.world_id = $1)
+     ORDER BY f.total_valuation DESC, c.name ASC`,
+    [worldId]
   );
 
   const franchisesForSale = allFranchises.rows.filter((row) => row.status === 'FOR_SALE' || row.status === 'AVAILABLE');
@@ -1211,8 +1260,10 @@ export async function getMarketplaceData() {
     `SELECT fs.id, fs.franchise_id, fs.sale_value, fs.sold_at, f.franchise_name
      FROM franchise_sales fs
      JOIN franchises f ON f.id = fs.franchise_id
+     WHERE ($1::bigint IS NULL OR f.world_id = $1)
      ORDER BY fs.sold_at DESC
-     LIMIT 20`
+     LIMIT 20`,
+    [worldId]
   );
 
   return {

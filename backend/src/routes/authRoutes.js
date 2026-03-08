@@ -102,6 +102,7 @@ router.get(
   '/me',
   requireAuth,
   asyncHandler(async (req, res) => {
+    const worldId = req.user.active_world_id || null;
     const franchiseResult = await pool.query(
       `SELECT f.id, f.franchise_name, f.status, f.total_valuation, f.competition_mode, f.prospect_points, f.growth_points, f.academy_name,
               f.wins, f.losses, f.win_streak, f.best_win_streak, f.current_league_tier, f.promotions, f.relegations,
@@ -116,12 +117,13 @@ router.get(
               st.movement AS season_movement
        FROM franchises f
        JOIN cities c ON c.id = f.city_id
-       LEFT JOIN seasons s ON s.status = 'ACTIVE'
+       LEFT JOIN seasons s ON s.status = 'ACTIVE' AND ($2::bigint IS NULL OR s.world_id = $2)
        LEFT JOIN season_teams st ON st.season_id = s.id AND st.franchise_id = f.id
        WHERE f.owner_user_id = $1
+         AND ($2::bigint IS NULL OR f.world_id = $2)
        ORDER BY s.season_number DESC NULLS LAST
        LIMIT 1`,
-      [req.user.id]
+      [req.user.id, worldId]
     );
 
     return res.json({

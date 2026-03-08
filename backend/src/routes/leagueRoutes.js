@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import pool from '../config/db.js';
-import { requireAdmin, requireAuth } from '../middleware/auth.js';
+import { requireAdmin, requireAuth, optionalAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import {
   createSeason,
@@ -55,16 +55,20 @@ async function shouldRunCpuCycleForSeason(seasonId) {
 
 router.get(
   '/seasons',
+  optionalAuth,
   asyncHandler(async (req, res) => {
-    const seasons = await listSeasons(Math.max(5, Math.min(30, Number(req.query.limit || 12))));
+    const worldId = req.user?.active_world_id || null;
+    const seasons = await listSeasons(Math.max(5, Math.min(30, Number(req.query.limit || 12))), worldId);
     return res.json({ seasons });
   })
 );
 
 router.get(
   '/seasons/active',
+  optionalAuth,
   asyncHandler(async (req, res) => {
-    const season = await ensureActiveSeason(pool);
+    const worldId = req.user?.active_world_id || null;
+    const season = await ensureActiveSeason(pool, worldId);
     return res.json({ season });
   })
 );
@@ -96,9 +100,11 @@ router.get(
 /* ── All-time player leaderboards ── */
 router.get(
   '/all-stats',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 100, 200);
     const seasonFilter = Number(req.query.seasonId) || null;
+    const worldId = req.user?.active_world_id || null;
 
     const seasonClause = seasonFilter ? 'AND m.season_id = $1' : '';
     const params = seasonFilter ? [seasonFilter] : [];
@@ -197,7 +203,8 @@ router.get(
     );
 
     const seasons = await pool.query(
-      `SELECT id, season_number, name, status FROM seasons ORDER BY season_number`
+      `SELECT id, season_number, name, status FROM seasons WHERE ($1::bigint IS NULL OR world_id = $1) ORDER BY season_number`,
+      [worldId]
     );
 
     return res.json({
@@ -245,11 +252,13 @@ router.post(
 
 router.get(
   '/table',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     let seasonId = Number(req.query.seasonId || 0);
+    const worldId = req.user?.active_world_id || null;
 
     if (!seasonId) {
-      const activeSeason = await ensureActiveSeason(pool);
+      const activeSeason = await ensureActiveSeason(pool, worldId);
       if (!activeSeason) {
         return res.status(404).json({ message: 'No active season yet. Claim a city franchise to start your career.' });
       }
@@ -265,11 +274,13 @@ router.get(
 
 router.get(
   '/rounds',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     let seasonId = Number(req.query.seasonId || 0);
+    const worldId = req.user?.active_world_id || null;
 
     if (!seasonId) {
-      const activeSeason = await ensureActiveSeason(pool);
+      const activeSeason = await ensureActiveSeason(pool, worldId);
       if (!activeSeason) {
         return res.status(404).json({ message: 'No active season yet. Claim a city franchise to start your career.' });
       }
@@ -283,11 +294,13 @@ router.get(
 
 router.get(
   '/fixtures',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     let seasonId = Number(req.query.seasonId || 0);
+    const worldId = req.user?.active_world_id || null;
 
     if (!seasonId) {
-      const activeSeason = await ensureActiveSeason(pool);
+      const activeSeason = await ensureActiveSeason(pool, worldId);
       if (!activeSeason) {
         return res.status(404).json({ message: 'No active season yet. Claim a city franchise to start your career.' });
       }
@@ -479,12 +492,14 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const operationId = resolveOperationId(req, 'round');
+    const worldId = req.user?.active_world_id || null;
     const result = await simulateRound(null, {
       broadcast,
       useExternalBallApi: false,
       useExternalFullMatchApi: true,
       strictExternalFullMatchApi: true,
       simulationOperationId: operationId,
+      worldId,
       onSimulationProgress: async (payload) => {
         pushSimulationProgress({ action: 'SIMULATE_NEXT_ROUND', ...payload });
       }
@@ -520,6 +535,7 @@ router.post(
         useExternalFullMatchApi: true,
         strictExternalFullMatchApi: true,
         simulationOperationId: operationId,
+        worldId: req.user?.active_world_id || null,
         onSimulationProgress: async (payload) => {
           pushSimulationProgress({ action: 'SIMULATE_LEAGUE_ROUND', ...payload });
         }
@@ -546,6 +562,7 @@ router.post(
       useExternalFullMatchApi: true,
       strictExternalFullMatchApi: true,
       simulationOperationId: operationId,
+      worldId: req.user?.active_world_id || null,
       onSimulationProgress: async (payload) => {
         pushSimulationProgress({ action: 'SIMULATE_MY_LEAGUE_ROUND', ...payload });
       }
@@ -570,6 +587,7 @@ router.post(
       useExternalFullMatchApi: true,
       strictExternalFullMatchApi: true,
       simulationOperationId: operationId,
+      worldId: req.user?.active_world_id || null,
       onSimulationProgress: async (payload) => {
         pushSimulationProgress({ action: 'SIMULATE_HALF_SEASON', ...payload });
       }
@@ -594,6 +612,7 @@ router.post(
       useExternalFullMatchApi: true,
       strictExternalFullMatchApi: true,
       simulationOperationId: operationId,
+      worldId: req.user?.active_world_id || null,
       onSimulationProgress: async (payload) => {
         pushSimulationProgress({ action: 'SIMULATE_SEASON', ...payload });
       }

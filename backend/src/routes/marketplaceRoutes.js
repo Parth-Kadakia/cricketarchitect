@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import pool, { withTransaction } from '../config/db.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, optionalAuth } from '../middleware/auth.js';
 import { getMarketplaceData, getFranchiseByOwner } from '../services/franchiseService.js';
 import { getTransferFeed } from '../services/cpuManagerService.js';
 import { calculateFranchiseValuation } from '../services/valuationService.js';
@@ -11,18 +11,27 @@ const router = Router();
 
 router.get(
   '/',
+  optionalAuth,
   asyncHandler(async (req, res) => {
-    const data = await getMarketplaceData();
+    const worldId = req.user?.active_world_id || null;
+    const data = await getMarketplaceData(worldId);
     return res.json(data);
   })
 );
 
 router.get(
   '/cities',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const q = String(req.query.q || '').trim().toLowerCase();
     const limit = Math.max(20, Math.min(2000, Number(req.query.limit || 600)));
-    const franchiseCount = Number((await pool.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
+    const worldId = req.user?.active_world_id || null;
+    const franchiseCount = Number(
+      (await pool.query(
+        'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+        [worldId]
+      )).rows[0].count
+    );
 
     const cities = franchiseCount === 0
       ? await pool.query(
@@ -40,9 +49,10 @@ router.get(
          WHERE f.owner_user_id IS NULL
            AND f.status IN ('AVAILABLE', 'AI_CONTROLLED')
            AND ($1 = '' OR LOWER(c.name) LIKE '%' || $1 || '%' OR LOWER(c.country) LIKE '%' || $1 || '%')
+           AND ($3::bigint IS NULL OR f.world_id = $3)
          ORDER BY c.country, c.name
          LIMIT $2`,
-        [q, limit]
+        [q, limit, worldId]
       );
 
     return res.json({ cities: cities.rows });
@@ -51,7 +61,9 @@ router.get(
 
 router.get(
   '/franchises',
+  optionalAuth,
   asyncHandler(async (req, res) => {
+    const worldId = req.user?.active_world_id || null;
     const franchises = await pool.query(
         `SELECT
          f.id,
@@ -86,7 +98,9 @@ router.get(
        FROM franchises f
        JOIN cities c ON c.id = f.city_id
        LEFT JOIN users u ON u.id = f.owner_user_id
-       ORDER BY f.total_valuation DESC, c.name ASC`
+       WHERE ($1::bigint IS NULL OR f.world_id = $1)
+       ORDER BY f.total_valuation DESC, c.name ASC`,
+      [worldId]
     );
 
     return res.json({ franchises: franchises.rows });
@@ -95,13 +109,17 @@ router.get(
 
 router.get(
   '/auction-pool',
+  optionalAuth,
   asyncHandler(async (req, res) => {
+    const worldId = req.user?.active_world_id || null;
     const activeSeason = await pool.query(
       `SELECT competition_mode
        FROM seasons
        WHERE status = 'ACTIVE'
+         AND ($1::bigint IS NULL OR world_id = $1)
        ORDER BY id DESC
-       LIMIT 1`
+       LIMIT 1`,
+      [worldId]
     );
     const mode = normalizeCareerMode(activeSeason.rows[0]?.competition_mode || CAREER_MODES.CLUB);
     if (mode !== CAREER_MODES.CLUB) {
@@ -217,13 +235,17 @@ router.post(
 
 router.get(
   '/transfer-feed',
+  optionalAuth,
   asyncHandler(async (req, res) => {
+    const worldId = req.user?.active_world_id || null;
     const activeSeason = await pool.query(
       `SELECT competition_mode
        FROM seasons
        WHERE status = 'ACTIVE'
+         AND ($1::bigint IS NULL OR world_id = $1)
        ORDER BY id DESC
-       LIMIT 1`
+       LIMIT 1`,
+      [worldId]
     );
     const mode = normalizeCareerMode(activeSeason.rows[0]?.competition_mode || CAREER_MODES.CLUB);
     if (mode !== CAREER_MODES.CLUB) {
@@ -231,7 +253,7 @@ router.get(
     }
 
     const limit = Math.max(20, Math.min(250, Number(req.query.limit || 100)));
-    const feed = await getTransferFeed(limit);
+    const feed = await getTransferFeed(limit, undefined, worldId);
     return res.json({ feed });
   })
 );

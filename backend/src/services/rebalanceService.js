@@ -80,15 +80,17 @@ function overallOf(player) {
   return Number((sum / 5).toFixed(2));
 }
 
-export async function rebalanceSeasonPlayers({ seasonId = null, dryRun = false } = {}, dbClient = pool) {
+export async function rebalanceSeasonPlayers({ seasonId = null, dryRun = false, worldId = null } = {}, dbClient = pool) {
   let targetSeasonId = Number(seasonId || 0) || null;
   if (!targetSeasonId) {
     const season = await dbClient.query(
       `SELECT id
        FROM seasons
        WHERE status = 'ACTIVE'
+         AND ($1::bigint IS NULL OR world_id = $1)
        ORDER BY id DESC
-       LIMIT 1`
+       LIMIT 1`,
+      [worldId]
     );
     if (!season.rows.length) {
       return { seasonId: null, changedPlayers: 0, changedFranchises: 0, dryRun: Boolean(dryRun) };

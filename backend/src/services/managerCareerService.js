@@ -65,13 +65,15 @@ async function getUserRow(userId, dbClient = pool) {
   return userResult.rows[0] || null;
 }
 
-async function getActiveSeasonInfo(dbClient = pool) {
+async function getActiveSeasonInfo(dbClient = pool, worldId = null) {
   const result = await dbClient.query(
     `SELECT id, competition_mode, league_count, teams_per_league, status
      FROM seasons
      WHERE status = 'ACTIVE'
+       AND ($1::bigint IS NULL OR world_id = $1)
      ORDER BY id DESC
-     LIMIT 1`
+     LIMIT 1`,
+    [worldId]
   );
 
   return result.rows[0] || null;
@@ -152,9 +154,9 @@ async function getManagerEntityByUserId(userId, dbClient = pool) {
   return result.rows[0] || null;
 }
 
-async function ensureHumanManagerEntity(userId, dbClient = pool) {
+async function ensureHumanManagerEntity(userId, dbClient = pool, worldId = null) {
   const userResult = await dbClient.query(
-    `SELECT id, display_name, career_mode
+    `SELECT id, display_name, career_mode, active_world_id
      FROM users
      WHERE id = $1`,
     [userId]
@@ -164,6 +166,7 @@ async function ensureHumanManagerEntity(userId, dbClient = pool) {
   }
 
   const user = userResult.rows[0];
+  const resolvedWorldId = worldId || user.active_world_id || null;
   const normalizedMode = normalizeCareerMode(user.career_mode || CAREER_MODES.CLUB);
   const existing = await getManagerEntityByUserId(userId, dbClient);
   if (existing) {
@@ -204,8 +207,8 @@ async function ensureHumanManagerEntity(userId, dbClient = pool) {
   }
 
   const inserted = await dbClient.query(
-    `INSERT INTO managers (user_id, display_name, competition_mode, is_cpu, level, xp, reputation)
-     VALUES ($1, $2, $3, FALSE, 1, 0, 10)
+    `INSERT INTO managers (user_id, display_name, competition_mode, is_cpu, world_id, level, xp, reputation)
+     VALUES ($1, $2, $3, FALSE, $4, 1, 0, 10)
      RETURNING id,
                user_id,
                display_name,
@@ -220,16 +223,18 @@ async function ensureHumanManagerEntity(userId, dbClient = pool) {
                wins_managed,
                losses_managed,
                titles_won`,
-    [user.id, user.display_name, normalizedMode]
+    [user.id, user.display_name, normalizedMode, resolvedWorldId]
   );
 
   return inserted.rows[0];
 }
 
-async function buildUsedManagerNameKeySet(dbClient = pool) {
+async function buildUsedManagerNameKeySet(dbClient = pool, worldId = null) {
   const rows = await dbClient.query(
     `SELECT display_name
-     FROM managers`
+     FROM managers
+     WHERE ($1::bigint IS NULL OR world_id = $1)`,
+    [worldId]
   );
   const set = new Set();
   for (const row of rows.rows) {
@@ -364,7 +369,7 @@ async function ensureActiveManagerTeamStint({ managerId, franchiseId, competitio
   }
 }
 
-async function createCpuManager({ country, competitionMode, usedNameKeys, dbClient = pool }) {
+async function createCpuManager({ country, competitionMode, usedNameKeys, worldId = null, dbClient = pool }) {
   const MAX_NAME_RETRIES = 10;
   for (let attempt = 0; attempt < MAX_NAME_RETRIES; attempt += 1) {
     const name = pickUniquePlayerName(country || 'Global', usedNameKeys, { strictCountry: true });
@@ -377,10 +382,11 @@ async function createCpuManager({ country, competitionMode, usedNameKeys, dbClie
            nationality,
            competition_mode,
            is_cpu,
+           world_id,
            level,
            xp,
            reputation
-         ) VALUES (NULL, $1, $2, $3, TRUE, $4, 0, $5)
+         ) VALUES (NULL, $1, $2, $3, TRUE, $4, $5, 0, $6)
          RETURNING id,
                    user_id,
                    display_name,
@@ -399,6 +405,7 @@ async function createCpuManager({ country, competitionMode, usedNameKeys, dbClie
           displayName,
           country || null,
           normalizeCareerMode(competitionMode || CAREER_MODES.CLUB),
+          worldId,
           1,
           10
         ]
@@ -422,10 +429,11 @@ async function createCpuManager({ country, competitionMode, usedNameKeys, dbClie
        nationality,
        competition_mode,
        is_cpu,
+       world_id,
        level,
        xp,
        reputation
-     ) VALUES (NULL, $1, $2, $3, TRUE, $4, 0, $5)
+     ) VALUES (NULL, $1, $2, $3, TRUE, $4, $5, 0, $6)
      RETURNING id,
                user_id,
                display_name,
@@ -444,6 +452,7 @@ async function createCpuManager({ country, competitionMode, usedNameKeys, dbClie
       fallbackDisplay,
       country || null,
       normalizeCareerMode(competitionMode || CAREER_MODES.CLUB),
+      worldId,
       1,
       10
     ]
@@ -525,11 +534,17 @@ async function getFranchiseManagerSummary(franchiseId, dbClient = pool) {
   return result.rows[0] || null;
 }
 
-async function ensureCpuManagerForFranchise({ franchiseId, competitionMode, country, seasonId = null, dbClient = pool, usedNameKeys = null }) {
+async function ensureCpuManagerForFranchise({ franchiseId, competitionMode, country, seasonId = null, worldId = null, dbClient = pool, usedNameKeys = null }) {
   const summary = await getFranchiseManagerSummary(franchiseId, dbClient);
   if (!summary) {
     return null;
   }
+
+  /* derive worldId from franchise when not provided */
+  const resolvedWorldId = worldId || (await (async () => {
+    const wRow = await dbClient.query('SELECT world_id FROM franchises WHERE id = $1', [franchiseId]);
+    return wRow.rows[0]?.world_id || null;
+  })());
 
   let needsReplacement =
     !summary.current_manager_id ||
@@ -564,7 +579,7 @@ async function ensureCpuManagerForFranchise({ franchiseId, competitionMode, coun
     return Number(summary.current_manager_id);
   }
 
-  const poolKeys = usedNameKeys || (await buildUsedManagerNameKeySet(dbClient));
+  const poolKeys = usedNameKeys || (await buildUsedManagerNameKeySet(dbClient, resolvedWorldId));
   // Also exclude managers still set as current_manager_id on any franchise
   const candidate = await dbClient.query(
     `SELECT m.id
@@ -573,12 +588,13 @@ async function ensureCpuManagerForFranchise({ franchiseId, competitionMode, coun
      LEFT JOIN franchises f ON f.current_manager_id = m.id
      WHERE m.is_cpu = TRUE
        AND m.competition_mode = $1
+       AND ($2::bigint IS NULL OR m.world_id = $2)
        AND mts.id IS NULL
        AND f.id IS NULL
      ORDER BY m.reputation DESC, m.level DESC, m.id ASC
      LIMIT 1
      FOR UPDATE OF m SKIP LOCKED`,
-    [normalizeCareerMode(competitionMode || summary.competition_mode || CAREER_MODES.CLUB)]
+    [normalizeCareerMode(competitionMode || summary.competition_mode || CAREER_MODES.CLUB), resolvedWorldId]
   );
 
   let managerId = candidate.rows[0]?.id ? Number(candidate.rows[0].id) : null;
@@ -587,6 +603,7 @@ async function ensureCpuManagerForFranchise({ franchiseId, competitionMode, coun
       country: country || summary.country || 'Global',
       competitionMode: normalizeCareerMode(competitionMode || summary.competition_mode || CAREER_MODES.CLUB),
       usedNameKeys: poolKeys,
+      worldId: resolvedWorldId,
       dbClient
     });
     managerId = Number(created.id);
@@ -604,10 +621,10 @@ async function ensureCpuManagerForFranchise({ franchiseId, competitionMode, coun
   return managerId;
 }
 
-export async function ensureFranchiseManagers(dbClient = pool) {
-  const season = await getActiveSeasonInfo(dbClient);
+export async function ensureFranchiseManagers(dbClient = pool, worldId = null) {
+  const season = await getActiveSeasonInfo(dbClient, worldId);
   const seasonId = season?.id ? Number(season.id) : null;
-  const usedNameKeys = await buildUsedManagerNameKeySet(dbClient);
+  const usedNameKeys = await buildUsedManagerNameKeySet(dbClient, worldId);
 
   const franchises = await dbClient.query(
     `SELECT f.id,
@@ -617,7 +634,9 @@ export async function ensureFranchiseManagers(dbClient = pool) {
             c.country
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
-     ORDER BY f.id ASC`
+     WHERE ($1::bigint IS NULL OR f.world_id = $1)
+     ORDER BY f.id ASC`,
+    [worldId]
   );
 
   for (const franchise of franchises.rows) {
@@ -653,17 +672,20 @@ export async function ensureFranchiseManagers(dbClient = pool) {
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
      WHERE f.current_manager_id IS NULL
-     ORDER BY f.id ASC`
+       AND ($1::bigint IS NULL OR f.world_id = $1)
+     ORDER BY f.id ASC`,
+    [worldId]
   );
   if (unmanaged.rows.length) {
     console.warn(`[ManagerCareer] ${unmanaged.rows.length} franchise(s) still without a manager after initial pass — fixing now`);
-    const freshKeys = await buildUsedManagerNameKeySet(dbClient);
+    const freshKeys = await buildUsedManagerNameKeySet(dbClient, worldId);
     for (const row of unmanaged.rows) {
       await ensureCpuManagerForFranchise({
         franchiseId: Number(row.id),
         competitionMode: normalizeCareerMode(row.competition_mode || CAREER_MODES.CLUB),
         country: row.country,
         seasonId,
+        worldId,
         dbClient,
         usedNameKeys: freshKeys
       });
@@ -1236,7 +1258,7 @@ function computeOfferScore({ candidate, managerPoints, preferredTier }) {
   return Number((pressure * 0.42 + tierFit * 0.24 + reputationFit * 0.24 + valuationAdj * 0.1 + Math.random() * 8).toFixed(2));
 }
 
-async function determineApplyUnlockState(user, dbClient = pool) {
+async function determineApplyUnlockState(user, dbClient = pool, worldId = null) {
   const status = String(user?.manager_status || MANAGER_STATUSES.UNEMPLOYED).toUpperCase();
   if (status !== MANAGER_STATUSES.UNEMPLOYED) {
     return {
@@ -1247,7 +1269,7 @@ async function determineApplyUnlockState(user, dbClient = pool) {
   }
 
   const unemployedSince = user?.manager_unemployed_since;
-  const activeSeason = await getActiveSeasonInfo(dbClient);
+  const activeSeason = await getActiveSeasonInfo(dbClient, worldId);
 
   if (!unemployedSince || !activeSeason) {
     return {
@@ -1277,8 +1299,8 @@ async function determineApplyUnlockState(user, dbClient = pool) {
   };
 }
 
-async function listApplyMarketCandidates({ userId, mode, limit = 14, dbClient = pool }) {
-  const activeSeason = await getActiveSeasonInfo(dbClient);
+async function listApplyMarketCandidates({ userId, mode, worldId = null, limit = 14, dbClient = pool }) {
+  const activeSeason = await getActiveSeasonInfo(dbClient, worldId);
   const seasonId = activeSeason?.id || null;
 
   const candidates = await dbClient.query(
@@ -1302,12 +1324,13 @@ async function listApplyMarketCandidates({ userId, mode, limit = 14, dbClient = 
      WHERE f.owner_user_id IS NULL
        AND f.status IN ('AI_CONTROLLED', 'AVAILABLE', 'FOR_SALE')
        AND f.competition_mode = $1
+       AND ($4::bigint IS NULL OR f.world_id = $4)
      ORDER BY f.current_league_tier ASC,
               COALESCE(st.league_position, st.position, 999) ASC,
               f.total_valuation DESC,
               f.id ASC
      LIMIT $3`,
-    [mode, seasonId, limit]
+    [mode, seasonId, limit, worldId]
   );
 
   return candidates.rows;
@@ -1334,7 +1357,12 @@ export async function assertManagerCanTakeJobs(userId, dbClient = pool) {
 export async function activateManagerForFranchise({ userId, franchiseId, competitionMode, dbClient = pool }) {
   await assertManagerCanTakeJobs(userId, dbClient);
   const normalizedMode = normalizeCareerMode(competitionMode || CAREER_MODES.CLUB);
-  const humanManager = await ensureHumanManagerEntity(userId, dbClient);
+
+  /* derive worldId from the franchise being activated */
+  const fwRow = await dbClient.query('SELECT world_id FROM franchises WHERE id = $1', [franchiseId]);
+  const worldId = fwRow.rows[0]?.world_id || null;
+
+  const humanManager = await ensureHumanManagerEntity(userId, dbClient, worldId);
   if (humanManager) {
     const managerMode = normalizeCareerMode(humanManager.competition_mode || CAREER_MODES.CLUB);
     if (managerMode !== normalizedMode || Boolean(humanManager.is_cpu)) {
@@ -1407,7 +1435,7 @@ export async function activateManagerForFranchise({ userId, franchiseId, competi
     [userId]
   );
 
-  const activeSeason = await getActiveSeasonInfo(dbClient);
+  const activeSeason = await getActiveSeasonInfo(dbClient, worldId);
   if (humanManager) {
     await assignManagerToFranchise({
       managerId: Number(humanManager.id),
@@ -1461,20 +1489,26 @@ export async function transitionManagerToUnemployed({
   const targetFranchiseId = Number(franchiseId || closedStint?.franchise_id || 0) || null;
 
   if (targetFranchiseId) {
+    /* derive worldId from franchise for season lookups */
+    const twRow = await dbClient.query('SELECT world_id FROM franchises WHERE id = $1', [targetFranchiseId]);
+    const worldId = twRow.rows[0]?.world_id || null;
+
     await closeActiveBoardProfiles(userId, targetFranchiseId, dbClient);
     if (releaseTeam) {
       await closeActiveManagerTeamStint(targetFranchiseId, endReason, dbClient);
       await releaseFranchiseOwnership(targetFranchiseId, dbClient);
       await ensureCpuManagerForFranchise({
         franchiseId: targetFranchiseId,
-        seasonId: (await getActiveSeasonInfo(dbClient))?.id || null,
+        seasonId: (await getActiveSeasonInfo(dbClient, worldId))?.id || null,
+        worldId,
         dbClient
       });
     } else {
       await closeActiveManagerTeamStint(targetFranchiseId, endReason, dbClient);
       await ensureCpuManagerForFranchise({
         franchiseId: targetFranchiseId,
-        seasonId: (await getActiveSeasonInfo(dbClient))?.id || null,
+        seasonId: (await getActiveSeasonInfo(dbClient, worldId))?.id || null,
+        worldId,
         dbClient
       });
     }
@@ -1804,6 +1838,7 @@ export async function finalizeManagerSeasonEvaluations(seasonId, dbClient = pool
 export async function generateManagerOffersForUser(userId, options = {}) {
   const {
     seasonId = null,
+    worldId = null,
     dbClient = pool,
     minOffers = MIN_OFFERS,
     maxOffers = MAX_OFFERS
@@ -1827,7 +1862,7 @@ export async function generateManagerOffersForUser(userId, options = {}) {
         [seasonId]
       )
     ).rows[0] || null
-    : await getActiveSeasonInfo(dbClient);
+    : await getActiveSeasonInfo(dbClient, worldId);
 
   const effectiveSeasonId = Number(activeSeason?.id || 0) || null;
   const currentRound = await getCurrentRegularRound(effectiveSeasonId, dbClient);
@@ -1877,6 +1912,7 @@ export async function generateManagerOffersForUser(userId, options = {}) {
      WHERE f.owner_user_id IS NULL
        AND f.status IN ('AI_CONTROLLED', 'AVAILABLE', 'FOR_SALE')
        AND f.competition_mode = $2
+       AND ($4::bigint IS NULL OR f.world_id = $4)
        AND NOT EXISTS (
          SELECT 1
          FROM manager_offers mo
@@ -1885,7 +1921,7 @@ export async function generateManagerOffersForUser(userId, options = {}) {
            AND mo.status = 'PENDING'
        )
      ORDER BY f.current_league_tier ASC, COALESCE(st.league_position, st.position, 999) ASC, f.total_valuation DESC`,
-    [effectiveSeasonId, preferredMode, userId]
+    [effectiveSeasonId, preferredMode, userId, worldId]
   );
 
   if (!candidates.rows.length) {
@@ -1929,13 +1965,13 @@ export async function generateManagerOffersForUser(userId, options = {}) {
   return listManagerOffers(userId, dbClient);
 }
 
-export async function listManagerOffers(userId, dbClient = pool) {
+export async function listManagerOffers(userId, dbClient = pool, worldId = null) {
   const user = await getUserRow(userId, dbClient);
   if (!user) {
     return [];
   }
 
-  const activeSeason = await getActiveSeasonInfo(dbClient);
+  const activeSeason = await getActiveSeasonInfo(dbClient, worldId);
   const currentRound = await getCurrentRegularRound(activeSeason?.id || null, dbClient);
   await expireOutdatedOffers({
     userId,
@@ -2274,7 +2310,10 @@ export async function processCpuManagerLifecycleForRound({ seasonId, roundNo, db
 
   let fired = 0;
   let hired = 0;
-  const usedNameKeys = await buildUsedManagerNameKeySet(dbClient);
+  /* derive worldId from the season for proper scoping */
+  const swRow = await dbClient.query('SELECT world_id FROM seasons WHERE id = $1', [seasonId]);
+  const worldId = swRow.rows[0]?.world_id || null;
+  const usedNameKeys = await buildUsedManagerNameKeySet(dbClient, worldId);
 
   for (const team of teams.rows) {
     const franchiseId = Number(team.franchise_id);
@@ -2403,7 +2442,9 @@ export async function finalizeGlobalManagerSeasonLifecycle(seasonId, dbClient = 
     [seasonId]
   );
 
-  const usedNameKeys = await buildUsedManagerNameKeySet(dbClient);
+  const seasonWorldRow = await dbClient.query('SELECT world_id FROM seasons WHERE id = $1', [seasonId]);
+  const lifecycleWorldId = seasonWorldRow.rows[0]?.world_id || null;
+  const usedNameKeys = await buildUsedManagerNameKeySet(dbClient, lifecycleWorldId);
   const touchedManagers = new Set();
   let seasonBonusesApplied = 0;
   let fired = 0;
@@ -2517,7 +2558,7 @@ export async function finalizeGlobalManagerSeasonLifecycle(seasonId, dbClient = 
   return { seasonBonusesApplied, fired, hired };
 }
 
-export async function getManagerDirectory({ seasonId = null, mode = null, limit = 200, dbClient = pool } = {}) {
+export async function getManagerDirectory({ seasonId = null, mode = null, worldId = null, limit = 200, dbClient = pool } = {}) {
   const seasonParam = seasonId ? Number(seasonId) : null;
   const normalizedMode = mode ? normalizeCareerMode(mode) : null;
   const cappedLimit = Math.max(25, Math.min(500, Number(limit || 200)));
@@ -2552,9 +2593,10 @@ export async function getManagerDirectory({ seasonId = null, mode = null, limit 
      LEFT JOIN cities c ON c.id = f.city_id
      LEFT JOIN season_teams st ON st.franchise_id = f.id AND st.season_id = $1
      WHERE ($2::text IS NULL OR m.competition_mode = $2)
+       AND ($4::bigint IS NULL OR m.world_id = $4)
      ORDER BY m.level DESC, m.reputation DESC, m.titles_won DESC, m.matches_managed DESC
      LIMIT $3`,
-    [seasonParam, normalizedMode, cappedLimit]
+    [seasonParam, normalizedMode, cappedLimit, worldId]
   );
 
   return rows.rows;
@@ -2649,7 +2691,7 @@ export async function getManagerProfile(managerId, dbClient = pool) {
   };
 }
 
-export async function getManagerCareerSnapshot(userId, dbClient = pool) {
+export async function getManagerCareerSnapshot(userId, dbClient = pool, worldId = null) {
   const user = await getUserRow(userId, dbClient);
   if (!user) {
     const error = new Error('User not found.');
@@ -2659,9 +2701,17 @@ export async function getManagerCareerSnapshot(userId, dbClient = pool) {
 
   const worldState = await dbClient.query(
     `SELECT COUNT(*)::int AS franchise_count
-     FROM franchises`
+     FROM franchises
+     WHERE ($1::bigint IS NULL OR world_id = $1)`,
+    [worldId]
   );
   const worldFranchiseCount = Number(worldState.rows[0]?.franchise_count || 0);
+
+  const stintCheck = await dbClient.query(
+    `SELECT 1 FROM manager_stints WHERE user_id = $1 LIMIT 1`,
+    [userId]
+  );
+  const hasEverManaged = stintCheck.rows.length > 0;
 
   const currentTeamResult = await dbClient.query(
     `SELECT f.id,
@@ -2678,16 +2728,17 @@ export async function getManagerCareerSnapshot(userId, dbClient = pool) {
             COALESCE(st.league_position, st.position)::int AS league_position
      FROM franchises f
      JOIN cities c ON c.id = f.city_id
-     LEFT JOIN seasons s ON s.status = 'ACTIVE'
+     LEFT JOIN seasons s ON s.status = 'ACTIVE' AND ($2::bigint IS NULL OR s.world_id = $2)
      LEFT JOIN season_teams st ON st.season_id = s.id AND st.franchise_id = f.id
      WHERE f.owner_user_id = $1
+       AND ($2::bigint IS NULL OR f.world_id = $2)
      ORDER BY s.id DESC NULLS LAST
      LIMIT 1`,
-    [userId]
+    [userId, worldId]
   );
 
   const currentTeam = currentTeamResult.rows[0] || null;
-  const activeSeason = await getActiveSeasonInfo(dbClient);
+  const activeSeason = await getActiveSeasonInfo(dbClient, worldId);
 
   let boardProfile = null;
   let boardExpectations = [];
@@ -2735,20 +2786,21 @@ export async function getManagerCareerSnapshot(userId, dbClient = pool) {
     )
   ).rows[0] || null;
 
-  let offers = await listManagerOffers(userId, dbClient);
+  let offers = await listManagerOffers(userId, dbClient, worldId);
   const managerStatus = String(user.manager_status || MANAGER_STATUSES.UNEMPLOYED).toUpperCase();
   if (
     managerStatus === MANAGER_STATUSES.UNEMPLOYED &&
     worldFranchiseCount > 0 &&
     !offers.some((offer) => String(offer.status || '').toUpperCase() === OFFER_STATUSES.PENDING)
   ) {
-    offers = await generateManagerOffersForUser(userId, { dbClient });
+    offers = await generateManagerOffersForUser(userId, { worldId, dbClient });
   }
-  const unlockState = await determineApplyUnlockState(user, dbClient);
+  const unlockState = await determineApplyUnlockState(user, dbClient, worldId);
   const applyMarket = unlockState.unlocked
     ? await listApplyMarketCandidates({
       userId,
       mode: normalizeCareerMode(user.career_mode || currentTeam?.competition_mode || CAREER_MODES.CLUB),
+      worldId,
       dbClient
     })
     : [];
@@ -2768,6 +2820,7 @@ export async function getManagerCareerSnapshot(userId, dbClient = pool) {
       lossesManaged: Number(user.manager_losses_managed || 0)
     },
     worldFranchiseCount,
+    hasEverManaged,
     currentTeam,
     activeSeason,
     activeStint,

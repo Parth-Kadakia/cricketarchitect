@@ -110,13 +110,14 @@ async function refreshPositions(seasonId, dbClient = pool) {
   }
 }
 
-async function buildRandomTierAssignments(teamCount, leagueCount, dbClient = pool) {
+async function buildRandomTierAssignments(teamCount, leagueCount, worldId = null, dbClient = pool) {
   const franchises = await dbClient.query(
     `SELECT id, owner_user_id
      FROM franchises
+     WHERE ($2::bigint IS NULL OR world_id = $2)
      ORDER BY random()
      LIMIT $1`,
-    [teamCount]
+    [teamCount, worldId]
   );
 
   const shuffled = shuffleRows(franchises.rows);
@@ -130,7 +131,7 @@ async function buildRandomTierAssignments(teamCount, leagueCount, dbClient = poo
   }));
 }
 
-async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCount, leagueCount, dbClient = pool) {
+async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCount, leagueCount, worldId = null, dbClient = pool) {
   const previousRows = await dbClient.query(
     `SELECT st.franchise_id,
             st.league_tier,
@@ -147,7 +148,7 @@ async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCoun
   );
 
   if (!previousRows.rows.length) {
-    return buildRandomTierAssignments(teamCount, dbClient);
+    return buildRandomTierAssignments(teamCount, leagueCount, worldId, dbClient);
   }
 
   let selectedRows = previousRows.rows.slice(0, teamCount);
@@ -163,9 +164,10 @@ async function buildTierAssignmentsFromPreviousSeason(previousSeasonId, teamCoun
               owner_user_id
        FROM franchises
        WHERE ($1::bigint[] IS NULL OR id <> ALL($1::bigint[]))
+         AND ($4::bigint IS NULL OR world_id = $4)
        ORDER BY random()
        LIMIT $3`,
-      [selectedIds.length ? selectedIds : null, leagueCount, teamCount - selectedRows.length]
+      [selectedIds.length ? selectedIds : null, leagueCount, teamCount - selectedRows.length, worldId]
     );
 
     selectedRows = [...selectedRows, ...extras.rows];
@@ -263,35 +265,38 @@ async function applyFranchiseTierUpdates(assignments, dbClient = pool) {
   }
 }
 
-export async function listSeasons(limit = 12, dbClient = pool) {
+export async function listSeasons(limit = 12, worldId = null, dbClient = pool) {
   const seasons = await dbClient.query(
     `SELECT id,
-            season_number,
-            name,
-            year,
-            competition_mode,
-            team_count,
-            league_count,
-            teams_per_league,
-            status,
-            start_date,
-            end_date
+           season_number,
+           name,
+           year,
+           competition_mode,
+           team_count,
+           league_count,
+           teams_per_league,
+           status,
+           start_date,
+           end_date
      FROM seasons
+     WHERE ($1::bigint IS NULL OR world_id = $1)
      ORDER BY season_number DESC
-     LIMIT $1`,
-    [limit]
+     LIMIT $2`,
+    [worldId, limit]
   );
 
   return seasons.rows;
 }
 
-export async function getActiveSeason(dbClient = pool) {
+export async function getActiveSeason(dbClient = pool, worldId = null) {
   const active = await dbClient.query(
     `SELECT *
      FROM seasons
      WHERE status = 'ACTIVE'
+       AND ($1::bigint IS NULL OR world_id = $1)
      ORDER BY season_number DESC
-     LIMIT 1`
+     LIMIT 1`,
+    [worldId]
   );
 
   return active.rows[0] || null;
@@ -305,7 +310,8 @@ export async function createSeason({
   competitionMode = CAREER_MODES.CLUB,
   leagueCount = null,
   seasonNumber = null,
-  previousSeasonId = null
+  previousSeasonId = null,
+  worldId = null
 }, dbClient = pool) {
   const resolvedMode = normalizeCareerMode(competitionMode || CAREER_MODES.CLUB);
   const resolvedLeagueCount = resolveLeagueCount(resolvedMode, leagueCount);
@@ -316,7 +322,10 @@ export async function createSeason({
     throw error;
   }
 
-  const availableTeamCount = Number((await dbClient.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
+  const availableTeamCount = Number((await dbClient.query(
+    'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+    [worldId]
+  )).rows[0].count);
   const resolvedTeamCount = Math.min(requestedTeamCount, availableTeamCount);
 
   if (resolvedTeamCount < 2) {
@@ -327,17 +336,26 @@ export async function createSeason({
 
   const nextSeasonNumber =
     seasonNumber ||
-    Number((await dbClient.query('SELECT COALESCE(MAX(season_number), 0) AS season_number FROM seasons')).rows[0].season_number) + 1;
+    Number((await dbClient.query(
+      'SELECT COALESCE(MAX(season_number), 0) AS season_number FROM seasons WHERE ($1::bigint IS NULL OR world_id = $1)',
+      [worldId]
+    )).rows[0].season_number) + 1;
 
   let seasonName = name || (resolvedMode === CAREER_MODES.INTERNATIONAL
     ? `International T20 Season ${nextSeasonNumber}`
     : `Global T20 Season ${nextSeasonNumber}`);
 
   // Ensure the name is unique — if a season with this name already exists, append a suffix
-  const nameCheck = await dbClient.query('SELECT id FROM seasons WHERE name = $1', [seasonName]);
+  const nameCheck = await dbClient.query(
+    'SELECT id FROM seasons WHERE name = $1 AND ($2::bigint IS NULL OR world_id = $2)',
+    [seasonName, worldId]
+  );
   if (nameCheck.rows.length) {
     const maxNum = Number(
-      (await dbClient.query("SELECT COALESCE(MAX(season_number), 0) AS mn FROM seasons")).rows[0].mn
+      (await dbClient.query(
+        'SELECT COALESCE(MAX(season_number), 0) AS mn FROM seasons WHERE ($1::bigint IS NULL OR world_id = $1)',
+        [worldId]
+      )).rows[0].mn
     );
     const uniqueNum = Math.max(nextSeasonNumber, maxNum) + 1;
     seasonName = name
@@ -347,17 +365,17 @@ export async function createSeason({
   const teamsPerLeague = Math.ceil(resolvedTeamCount / resolvedLeagueCount);
 
   const inserted = await dbClient.query(
-    `INSERT INTO seasons (season_number, name, year, format, competition_mode, team_count, league_count, teams_per_league, status, start_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE', CURRENT_DATE)
+    `INSERT INTO seasons (season_number, name, year, format, competition_mode, team_count, league_count, teams_per_league, status, start_date, world_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE', CURRENT_DATE, $9)
      RETURNING *`,
-    [nextSeasonNumber, seasonName, year, format, resolvedMode, resolvedTeamCount, resolvedLeagueCount, teamsPerLeague]
+    [nextSeasonNumber, seasonName, year, format, resolvedMode, resolvedTeamCount, resolvedLeagueCount, teamsPerLeague, worldId]
   );
 
   const season = inserted.rows[0];
 
   const assignments = previousSeasonId
-    ? await buildTierAssignmentsFromPreviousSeason(previousSeasonId, resolvedTeamCount, resolvedLeagueCount, dbClient)
-    : await buildRandomTierAssignments(resolvedTeamCount, resolvedLeagueCount, dbClient);
+    ? await buildTierAssignmentsFromPreviousSeason(previousSeasonId, resolvedTeamCount, resolvedLeagueCount, worldId, dbClient)
+    : await buildRandomTierAssignments(resolvedTeamCount, resolvedLeagueCount, worldId, dbClient);
 
   for (const assignment of assignments) {
     await dbClient.query(
@@ -382,13 +400,16 @@ export async function createSeason({
   return season;
 }
 
-export async function ensureActiveSeason(dbClient = pool) {
-  const active = await getActiveSeason(dbClient);
+export async function ensureActiveSeason(dbClient = pool, worldId = null) {
+  const active = await getActiveSeason(dbClient, worldId);
   if (active) {
     return active;
   }
 
-  const franchiseCount = Number((await dbClient.query('SELECT COUNT(*)::int AS count FROM franchises')).rows[0].count);
+  const franchiseCount = Number((await dbClient.query(
+    'SELECT COUNT(*)::int AS count FROM franchises WHERE ($1::bigint IS NULL OR world_id = $1)',
+    [worldId]
+  )).rows[0].count);
   if (franchiseCount < 2) {
     return null;
   }
@@ -396,9 +417,11 @@ export async function ensureActiveSeason(dbClient = pool) {
   const modeResult = await dbClient.query(
     `SELECT competition_mode, COUNT(*)::int AS count
      FROM franchises
+     WHERE ($1::bigint IS NULL OR world_id = $1)
      GROUP BY competition_mode
      ORDER BY COUNT(*) DESC
-     LIMIT 1`
+     LIMIT 1`,
+    [worldId]
   );
   const competitionMode = normalizeCareerMode(modeResult.rows[0]?.competition_mode || CAREER_MODES.CLUB);
   const leagueCount = resolveLeagueCount(competitionMode);
@@ -414,7 +437,8 @@ export async function ensureActiveSeason(dbClient = pool) {
       teamCount,
       format: 'T20',
       competitionMode,
-      leagueCount
+      leagueCount,
+      worldId
     },
     dbClient
   );
@@ -994,7 +1018,9 @@ export async function createNextSeasonFromCompleted(completedSeasonId, dbClient 
     return null;
   }
 
-  const existingActive = await getActiveSeason(dbClient);
+  const completedWorldId = completed.rows[0].world_id || null;
+
+  const existingActive = await getActiveSeason(dbClient, completedWorldId);
   if (existingActive) {
     return existingActive;
   }
@@ -1002,7 +1028,7 @@ export async function createNextSeasonFromCompleted(completedSeasonId, dbClient 
   // Guard: if a season with this number already exists (e.g. stale retry), skip to its record
   const nextNumber = Number(completed.rows[0].season_number) + 1;
   const existingNext = await dbClient.query(
-    'SELECT * FROM seasons WHERE season_number = $1', [nextNumber]
+    'SELECT * FROM seasons WHERE season_number = $1 AND ($2::bigint IS NULL OR world_id = $2)', [nextNumber, completedWorldId]
   );
   if (existingNext.rows.length) {
     return existingNext.rows[0];
@@ -1027,7 +1053,8 @@ export async function createNextSeasonFromCompleted(completedSeasonId, dbClient 
       competitionMode,
       leagueCount,
       seasonNumber: nextNumber,
-      previousSeasonId: completedSeasonId
+      previousSeasonId: completedSeasonId,
+      worldId: completedWorldId
     },
     dbClient
   );

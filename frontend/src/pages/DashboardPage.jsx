@@ -425,7 +425,9 @@ export default function DashboardPage() {
       );
     }
 
-    if (hasWorld && managerStatus === 'UNEMPLOYED') {
+    const hasEverManaged = Boolean(managerCareer?.hasEverManaged);
+
+    if (hasWorld && managerStatus === 'UNEMPLOYED' && hasEverManaged) {
       return (
         <div className="db-page">
           {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}

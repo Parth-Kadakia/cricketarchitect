@@ -14,7 +14,7 @@ router.get(
   '/',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
@@ -92,11 +92,11 @@ router.get(
        FROM franchises f
        JOIN cities c ON c.id = f.city_id
        LEFT JOIN users u ON u.id = f.owner_user_id
-       LEFT JOIN seasons s ON s.status = 'ACTIVE'
+       LEFT JOIN seasons s ON s.status = 'ACTIVE' AND ($2::bigint IS NULL OR s.world_id = $2)
        LEFT JOIN season_teams st ON st.season_id = s.id AND st.franchise_id = f.id
        WHERE f.id = $1
        LIMIT 1`,
-      [franchiseId]
+      [franchiseId, req.user.active_world_id || null]
     );
 
     if (!franchiseResult.rows.length) {
@@ -272,7 +272,7 @@ router.get(
   '/lineup',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
@@ -307,7 +307,7 @@ router.put(
       return res.status(400).json({ message: 'Starting XI cannot include duplicate players.' });
     }
 
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
@@ -339,7 +339,7 @@ router.post(
   '/demote/:playerId',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
@@ -353,7 +353,7 @@ router.post(
   '/promote/:playerId',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
@@ -373,7 +373,7 @@ router.post(
       return res.status(400).json({ message: 'targetFranchiseId is required.' });
     }
 
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
@@ -391,7 +391,7 @@ router.post(
   '/release/:playerId',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id);
+    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }

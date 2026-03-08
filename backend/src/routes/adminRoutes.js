@@ -42,7 +42,7 @@ router.post(
   requireAuth,
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const season = await bootstrapGameWorld(pool);
+    const season = await bootstrapGameWorld(pool, req.user.active_world_id || null);
     return res.json({ season });
   })
 );
@@ -67,7 +67,7 @@ router.post(
   requireAuth,
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const season = await getActiveSeason(pool);
+    const season = await getActiveSeason(pool, req.user.active_world_id || null);
 
     if (!season) {
       return res.status(400).json({ message: 'No active season found.' });
@@ -89,7 +89,7 @@ router.post(
     const dryRun = Boolean(req.body?.dryRun);
 
     const result = await rebalanceSeasonPlayers(
-      { seasonId: requestedSeasonId, dryRun },
+      { seasonId: requestedSeasonId, dryRun, worldId: req.user.active_world_id || null },
       pool
     );
 
@@ -108,7 +108,7 @@ router.post(
   requireAuth,
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const season = await getActiveSeason(pool);
+    const season = await getActiveSeason(pool, req.user.active_world_id || null);
 
     if (!season) {
       return res.status(400).json({ message: 'No active season found.' });
@@ -133,9 +133,10 @@ router.post(
     const userId = req.user.id;
 
     /* Find the user's current franchise (if any) */
+    const worldId = req.user.active_world_id || null;
     const franchiseRow = (await pool.query(
-      `SELECT id FROM franchises WHERE owner_user_id = $1 LIMIT 1`,
-      [userId]
+      `SELECT id FROM franchises WHERE owner_user_id = $1 AND ($2::bigint IS NULL OR world_id = $2) LIMIT 1`,
+      [userId, worldId]
     )).rows[0];
 
     const franchiseId = franchiseRow?.id || null;

@@ -97,8 +97,10 @@ export async function calculateFranchiseValuation(franchiseId, seasonId = null, 
   };
 }
 
-export async function recalculateAllFranchiseValuations(seasonId = null, dbClient = pool) {
-  const franchises = await dbClient.query('SELECT id FROM franchises');
+export async function recalculateAllFranchiseValuations(seasonId = null, dbClient = pool, worldId = null) {
+  const franchises = worldId
+    ? await dbClient.query('SELECT id FROM franchises WHERE world_id = $1', [worldId])
+    : await dbClient.query('SELECT id FROM franchises');
   const results = [];
 
   for (const franchise of franchises.rows) {

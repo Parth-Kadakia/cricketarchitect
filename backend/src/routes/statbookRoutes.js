@@ -2,6 +2,7 @@ import { Router } from 'express';
 import pool from '../config/db.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { getMatchScorecard } from '../services/matchEngine.js';
+import { optionalAuth } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -30,14 +31,18 @@ function oversFromBalls(balls) {
 
 router.get(
   '/overview',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
+    const worldId = req.user?.active_world_id || null;
 
     const [seasons, teams, totals, boundaries, highestTeamTotal, lowestTeamTotal, highestIndividual, bestBowling, milestones] = await Promise.all([
       pool.query(
         `SELECT id, season_number, name, status
          FROM seasons
-         ORDER BY season_number DESC`
+         WHERE ($1::bigint IS NULL OR world_id = $1)
+         ORDER BY season_number DESC`,
+        [worldId]
       ),
       pool.query(
         `WITH filtered AS (
@@ -265,9 +270,11 @@ router.get(
 
 router.get(
   '/player-records',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
     const limit = parseLimit(req.query.limit, 20, 100);
+    const worldId = req.user?.active_world_id || null;
 
     const [aggregates, bestBowlingInnings, fastestFifty, fastestHundred] = await Promise.all([
       pool.query(
@@ -299,8 +306,9 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+           AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
          GROUP BY p.id, p.first_name, p.last_name, p.role, f.franchise_name, c.country`,
-        [seasonId]
+        [seasonId, worldId]
       ),
       pool.query(
         `SELECT pms.match_id,
@@ -320,10 +328,11 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+           AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
            AND pms.bowling_balls > 0
          ORDER BY pms.bowling_wickets DESC, pms.bowling_runs ASC, pms.bowling_balls ASC
          LIMIT $2`,
-        [seasonId, limit]
+        [seasonId, limit, worldId]
       ),
       pool.query(
         `SELECT pms.match_id,
@@ -342,10 +351,11 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+           AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
            AND pms.batting_runs >= 50
          ORDER BY pms.batting_balls ASC, pms.batting_runs DESC
          LIMIT 1`,
-        [seasonId]
+        [seasonId, worldId]
       ),
       pool.query(
         `SELECT pms.match_id,
@@ -364,10 +374,11 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+           AND ($2::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
            AND pms.batting_runs >= 100
          ORDER BY pms.batting_balls ASC, pms.batting_runs DESC
          LIMIT 1`,
-        [seasonId]
+        [seasonId, worldId]
       )
     ]);
 
@@ -413,9 +424,11 @@ router.get(
 
 router.get(
   '/team-records',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
     const limit = parseLimit(req.query.limit, 20, 100);
+    const worldId = req.user?.active_world_id || null;
 
     const [teamPerformance, highestTotals, lowestTotals, biggestWinsByRuns, biggestWinsByWickets] = await Promise.all([
       pool.query(
@@ -432,10 +445,11 @@ router.get(
          JOIN franchises f ON f.id = st.franchise_id
          JOIN cities c ON c.id = f.city_id
          WHERE ($1::bigint IS NULL OR st.season_id = $1::bigint)
+           AND ($3::bigint IS NULL OR st.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
          GROUP BY f.id, f.franchise_name, c.country
          ORDER BY SUM(st.won) DESC, SUM(st.points) DESC
          LIMIT $2`,
-        [seasonId, limit]
+        [seasonId, limit, worldId]
       ),
       pool.query(
         `WITH filtered_matches AS (
@@ -443,6 +457,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+             AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -470,7 +485,7 @@ router.get(
          WHERE i.runs IS NOT NULL
          ORDER BY i.runs DESC, i.wickets ASC
          LIMIT $2`,
-        [seasonId, limit]
+        [seasonId, limit, worldId]
       ),
       pool.query(
         `WITH filtered_matches AS (
@@ -478,6 +493,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+             AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -505,7 +521,7 @@ router.get(
          WHERE i.runs IS NOT NULL
          ORDER BY i.runs ASC, i.wickets DESC
          LIMIT $2`,
-        [seasonId, limit]
+        [seasonId, limit, worldId]
       ),
       pool.query(
         `SELECT m.id AS match_id,
@@ -523,10 +539,11 @@ router.get(
          LEFT JOIN franchises wf ON wf.id = m.winner_franchise_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+           AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
            AND lower(COALESCE(m.result_summary, '')) ~ 'by\\s+[0-9]+\\s+runs'
          ORDER BY margin_runs DESC
          LIMIT $2`,
-        [seasonId, limit]
+        [seasonId, limit, worldId]
       ),
       pool.query(
         `SELECT m.id AS match_id,
@@ -544,10 +561,11 @@ router.get(
          LEFT JOIN franchises wf ON wf.id = m.winner_franchise_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
+           AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))
            AND lower(COALESCE(m.result_summary, '')) ~ 'by\\s+[0-9]+\\s+wickets'
          ORDER BY margin_wickets DESC
          LIMIT $2`,
-        [seasonId, limit]
+        [seasonId, limit, worldId]
       )
     ]);
 
@@ -642,11 +660,13 @@ router.get(
 
 router.get(
   '/match-archive',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
     const teamId = parseId(req.query.teamId);
     const limit = parseLimit(req.query.limit, 30, 200);
     const offset = Math.max(0, Number(req.query.offset || 0));
+    const worldId = req.user?.active_world_id || null;
 
     const [count, matches] = await Promise.all([
       pool.query(
@@ -654,8 +674,9 @@ router.get(
          FROM matches m
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND ($2::bigint IS NULL OR m.home_franchise_id = $2::bigint OR m.away_franchise_id = $2::bigint)`,
-        [seasonId, teamId]
+           AND ($2::bigint IS NULL OR m.home_franchise_id = $2::bigint OR m.away_franchise_id = $2::bigint)
+           AND ($3::bigint IS NULL OR m.season_id IN (SELECT id FROM seasons WHERE world_id = $3))`,
+        [seasonId, teamId, worldId]
       ),
       pool.query(
         `SELECT m.id,
@@ -693,9 +714,10 @@ router.get(
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
            AND ($2::bigint IS NULL OR m.home_franchise_id = $2::bigint OR m.away_franchise_id = $2::bigint)
+           AND ($5::bigint IS NULL OR s.world_id = $5)
          ORDER BY m.id DESC
          LIMIT $3 OFFSET $4`,
-        [seasonId, teamId, limit, offset]
+        [seasonId, teamId, limit, offset, worldId]
       )
     ]);
 

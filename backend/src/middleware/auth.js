@@ -19,7 +19,7 @@ export async function requireAuth(req, res, next) {
 
     const payload = verifyToken(token);
     const { rows } = await pool.query(
-      `SELECT id, email, display_name, role, career_mode, last_active_at,
+      `SELECT id, email, display_name, role, career_mode, last_active_at, active_world_id,
               manager_status, manager_points, manager_unemployed_since, manager_retired_at,
               manager_firings, manager_titles, manager_matches_managed, manager_wins_managed, manager_losses_managed
        FROM users
@@ -38,6 +38,37 @@ export async function requireAuth(req, res, next) {
     return next();
   } catch (error) {
     return res.status(401).json({ message: 'Invalid or expired token.' });
+  }
+}
+
+/**
+ * Like requireAuth but silently continues when no token is present.
+ * Sets req.user when a valid token is found.
+ */
+export async function optionalAuth(req, res, next) {
+  try {
+    const token = parseAuthHeader(req.headers.authorization);
+    if (!token) {
+      return next();
+    }
+
+    const payload = verifyToken(token);
+    const { rows } = await pool.query(
+      `SELECT id, email, display_name, role, career_mode, last_active_at, active_world_id,
+              manager_status, manager_points, manager_unemployed_since, manager_retired_at,
+              manager_firings, manager_titles, manager_matches_managed, manager_wins_managed, manager_losses_managed
+       FROM users
+       WHERE id = $1`,
+      [payload.sub]
+    );
+
+    if (rows.length) {
+      req.user = rows[0];
+    }
+
+    return next();
+  } catch {
+    return next();
   }
 }
 

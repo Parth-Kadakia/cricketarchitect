@@ -49,11 +49,17 @@ async function cpuSellPlayer(franchiseId, franchiseName, seasonId, dbClient = po
 
 async function cpuBuyAuctionPlayer(franchiseId, franchiseName, seasonId, dbClient = pool) {
   const auctionPlayers = await dbClient.query(
-    `SELECT id, first_name, last_name, market_value
-     FROM players
-     WHERE squad_status = 'AUCTION'
-     ORDER BY market_value DESC
-     LIMIT 12`
+    `SELECT p.id, p.first_name, p.last_name, p.market_value
+     FROM players p
+     WHERE p.squad_status = 'AUCTION'
+       AND EXISTS (
+         SELECT 1 FROM transfer_feed tf
+         WHERE tf.player_id = p.id
+           AND tf.season_id = $1
+       )
+     ORDER BY p.market_value DESC
+     LIMIT 12`,
+    [seasonId]
   );
 
   if (!auctionPlayers.rows.length) {
@@ -104,6 +110,7 @@ async function cpuLoanRequest(franchiseId, franchiseName, seasonId, dbClient = p
      FROM franchises
      WHERE id <> $1
        AND status = 'AI_CONTROLLED'
+       AND world_id = (SELECT world_id FROM franchises WHERE id = $1)
      ORDER BY random()
      LIMIT 1`,
     [franchiseId]
@@ -326,7 +333,7 @@ export async function runCpuMarketCycle(seasonId, dbClient = pool) {
   return actions;
 }
 
-export async function getTransferFeed(limit = 100, dbClient = pool) {
+export async function getTransferFeed(limit = 100, dbClient = pool, worldId = null) {
   const feed = await dbClient.query(
     `SELECT tf.*, sf.franchise_name AS source_franchise_name, tf2.franchise_name AS target_franchise_name,
             p.first_name, p.last_name
@@ -334,9 +341,13 @@ export async function getTransferFeed(limit = 100, dbClient = pool) {
      LEFT JOIN franchises sf ON sf.id = tf.source_franchise_id
      LEFT JOIN franchises tf2 ON tf2.id = tf.target_franchise_id
      LEFT JOIN players p ON p.id = tf.player_id
+     WHERE ($2::bigint IS NULL
+            OR sf.world_id = $2
+            OR tf2.world_id = $2
+            OR tf.season_id IN (SELECT id FROM seasons WHERE world_id = $2))
      ORDER BY tf.created_at DESC
      LIMIT $1`,
-    [limit]
+    [limit, worldId]
   );
 
   return feed.rows;
