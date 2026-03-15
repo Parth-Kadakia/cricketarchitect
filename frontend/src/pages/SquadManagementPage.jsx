@@ -127,6 +127,17 @@ export default function SquadManagementPage() {
     });
   }
 
+  function moveLineupPlayer(index, direction) {
+    setSelectedLineup((cur) => {
+      const next = [...cur];
+      const target = index + direction;
+      if (index < 0 || index >= next.length || target < 0 || target >= next.length) return cur;
+      const [moved] = next.splice(index, 1);
+      next.splice(target, 0, moved);
+      return next;
+    });
+  }
+
   const grouped = useMemo(() => {
     if (!squadData?.players) return { main: [], youth: [], other: [] };
     const sort = (arr) => [...arr].sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9));
@@ -161,6 +172,26 @@ export default function SquadManagementPage() {
     return { total: allPlayers.length, avg: avg.toFixed(1), batsmen, bowlers, allRounders, keepers, mainCount: grouped.main.length, youthCount: grouped.youth.length };
   }, [allPlayers, grouped]);
 
+  const lineupSummary = useMemo(() => {
+    const players = orderedLineup.map((entry) => entry.player).filter(Boolean);
+    const byRole = {
+      BATTER: players.filter((p) => p.role === 'BATTER').length,
+      WICKET_KEEPER: players.filter((p) => p.role === 'WICKET_KEEPER').length,
+      ALL_ROUNDER: players.filter((p) => p.role === 'ALL_ROUNDER').length,
+      BOWLER: players.filter((p) => p.role === 'BOWLER').length
+    };
+    const bowlingOptions = byRole.BOWLER + byRole.ALL_ROUNDER;
+    const battingCore = byRole.BATTER + byRole.WICKET_KEEPER + byRole.ALL_ROUNDER;
+    const avgOverall = players.length
+      ? (players.reduce((sum, p) => sum + Number(p.overall || 0), 0) / players.length).toFixed(1)
+      : '0.0';
+    const warnings = [];
+    if (players.length > 0 && byRole.WICKET_KEEPER === 0) warnings.push('No wicket-keeper selected.');
+    if (players.length > 0 && bowlingOptions < 4) warnings.push('You have fewer than 4 bowling options.');
+    if (players.length > 0 && battingCore < 6) warnings.push('The batting unit looks thin.');
+    return { ...byRole, bowlingOptions, battingCore, avgOverall, warnings };
+  }, [orderedLineup]);
+
   const filteredRoster = useMemo(() => {
     let list = allPlayers;
     if (rosterFilter !== 'ALL') list = list.filter((p) => p.squad_status === rosterFilter);
@@ -178,6 +209,30 @@ export default function SquadManagementPage() {
   return (
     <div className="sq-page">
       {error && <div className="sq-error">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
+
+      <section className="sq-page-hero">
+        <div className="sq-page-hero-copy">
+          <span className="sq-page-kicker">Squad Command</span>
+          <h1 className="sq-page-title">Shape the team, set the XI, control the roster.</h1>
+          <p className="sq-page-sub">
+            Review every player card, build a balanced match-day XI, and move players between the main squad and youth pathway without leaving this screen.
+          </p>
+        </div>
+        <div className="sq-page-hero-meta">
+          <div className="sq-page-hero-stat">
+            <span>Current XI</span>
+            <strong>{selectedLineup.length}/11</strong>
+          </div>
+          <div className="sq-page-hero-stat">
+            <span>Avg OVR</span>
+            <strong>{squadStats?.avg || '0.0'}</strong>
+          </div>
+          <div className="sq-page-hero-stat">
+            <span>Ready Now</span>
+            <strong>{grouped.main.length}</strong>
+          </div>
+        </div>
+      </section>
 
       {/* Header stats strip */}
       {squadStats && (
@@ -209,7 +264,10 @@ export default function SquadManagementPage() {
           {grouped.main.length > 0 && (
             <section className="sq-section">
               <div className="sq-section-header">
-                <h3>Main Squad</h3>
+                <div>
+                  <h3>Main Squad</h3>
+                  <p className="sq-hint">First-team players available for selection right now.</p>
+                </div>
                 <span className="sq-badge">{grouped.main.length}</span>
               </div>
               <div className="sq-card-grid">
@@ -222,7 +280,10 @@ export default function SquadManagementPage() {
           {grouped.youth.length > 0 && (
             <section className="sq-section">
               <div className="sq-section-header">
-                <h3>Youth Academy</h3>
+                <div>
+                  <h3>Youth Academy</h3>
+                  <p className="sq-hint">Prospects developing below the senior squad.</p>
+                </div>
                 <span className="sq-badge sq-badge--youth">{grouped.youth.length}</span>
               </div>
               <div className="sq-card-grid">
@@ -234,7 +295,13 @@ export default function SquadManagementPage() {
           )}
           {grouped.other.length > 0 && (
             <section className="sq-section">
-              <div className="sq-section-header"><h3>Other</h3><span className="sq-badge">{grouped.other.length}</span></div>
+              <div className="sq-section-header">
+                <div>
+                  <h3>Other</h3>
+                  <p className="sq-hint">Loaned, inactive, or otherwise unavailable players.</p>
+                </div>
+                <span className="sq-badge">{grouped.other.length}</span>
+              </div>
               <div className="sq-card-grid">
                 {grouped.other.map((p) => (
                   <PlayerCard key={p.id} player={p} onOpen={setSelectedPlayer} StatBar={StatBar} OverallRing={OverallRing} RolePill={RolePill} />
@@ -252,7 +319,7 @@ export default function SquadManagementPage() {
             <div className="sq-section-header">
               <div>
                 <h3>Playing XI</h3>
-                <p className="sq-hint">Select exactly 11 players. Drag to reorder batting position.</p>
+                <p className="sq-hint">Select exactly 11 players. Use the arrows to adjust batting order from opener to No. 11.</p>
               </div>
               <button
                 className={`sq-btn sq-btn--primary ${selectedLineup.length === 11 ? '' : 'sq-btn--disabled'}`}
@@ -264,23 +331,69 @@ export default function SquadManagementPage() {
               </button>
             </div>
 
+            <div className="sq-lineup-summary">
+              <div className="sq-lineup-summary-grid">
+                <div className="sq-lineup-summary-card">
+                  <span>Avg XI OVR</span>
+                  <strong>{lineupSummary.avgOverall}</strong>
+                </div>
+                <div className="sq-lineup-summary-card">
+                  <span>Batters</span>
+                  <strong>{lineupSummary.BATTER}</strong>
+                </div>
+                <div className="sq-lineup-summary-card">
+                  <span>Keepers</span>
+                  <strong>{lineupSummary.WICKET_KEEPER}</strong>
+                </div>
+                <div className="sq-lineup-summary-card">
+                  <span>All-Rounders</span>
+                  <strong>{lineupSummary.ALL_ROUNDER}</strong>
+                </div>
+                <div className="sq-lineup-summary-card">
+                  <span>Bowlers</span>
+                  <strong>{lineupSummary.BOWLER}</strong>
+                </div>
+                <div className="sq-lineup-summary-card">
+                  <span>Bowling Options</span>
+                  <strong>{lineupSummary.bowlingOptions}</strong>
+                </div>
+              </div>
+              {lineupSummary.warnings.length > 0 && (
+                <div className="sq-lineup-warnings">
+                  {lineupSummary.warnings.map((warning) => (
+                    <span key={warning} className="sq-lineup-warning">{warning}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Selected slots */}
             <div className="sq-lineup-slots">
               {Array.from({ length: 11 }, (_, i) => {
                 const entry = orderedLineup[i];
                 return (
                   <div key={i} className={`sq-lineup-slot ${entry ? 'filled' : ''}`}>
-                    <span className="sq-slot-num">{i + 1}</span>
+                    <div className="sq-slot-num-wrap">
+                      <span className="sq-slot-num">{i + 1}</span>
+                      <span className="sq-slot-label">{i < 2 ? 'Open' : i < 5 ? 'Top' : i < 7 ? 'Middle' : 'Lower'}</span>
+                    </div>
                     {entry?.player ? (
-                      <div className="sq-slot-info">
-                        <strong>{entry.player.first_name} {entry.player.last_name}</strong>
-                        <RolePill role={entry.player.role} />
-                      </div>
+                      <>
+                        <div className="sq-slot-info">
+                          <strong>{entry.player.first_name} {entry.player.last_name}</strong>
+                          <div className="sq-slot-meta">
+                            <RolePill role={entry.player.role} />
+                            <span>OVR {Number(entry.player.overall || 0).toFixed(1)}</span>
+                          </div>
+                        </div>
+                        <div className="sq-slot-actions">
+                          <button type="button" className="sq-slot-move" disabled={i === 0} onClick={() => moveLineupPlayer(i, -1)} aria-label="Move up">↑</button>
+                          <button type="button" className="sq-slot-move" disabled={i === orderedLineup.length - 1} onClick={() => moveLineupPlayer(i, 1)} aria-label="Move down">↓</button>
+                          <button type="button" className="sq-slot-remove" onClick={() => toggleLineup(entry.playerId)} aria-label="Remove from lineup">×</button>
+                        </div>
+                      </>
                     ) : (
-                      <span className="sq-slot-empty">Empty Slot</span>
-                    )}
-                    {entry && (
-                      <button type="button" className="sq-slot-remove" onClick={() => toggleLineup(entry.playerId)}>×</button>
+                      <span className="sq-slot-empty">Tap a player below to assign this batting slot.</span>
                     )}
                   </div>
                 );
@@ -288,7 +401,12 @@ export default function SquadManagementPage() {
             </div>
 
             {/* Player picker */}
-            <h4 className="sq-picker-heading">Available Players</h4>
+            <div className="sq-section-header sq-section-header--compact">
+              <div>
+                <h4 className="sq-picker-heading">Available Players</h4>
+                <p className="sq-hint">Tap any player to add or remove them from the XI.</p>
+              </div>
+            </div>
             <div className="sq-picker-grid">
               {[...grouped.main, ...grouped.youth].map((p) => {
                 const isIn = selectedLineup.includes(Number(p.id));
@@ -306,6 +424,7 @@ export default function SquadManagementPage() {
                     </div>
                     <div className="sq-picker-chip-bot">
                       <RolePill role={p.role} />
+                      <span className="sq-picker-tag">{p.country_origin || p.country}</span>
                       <span className="sq-picker-ovr">{Number(p.overall || 0).toFixed(1)}</span>
                     </div>
                   </button>
@@ -321,7 +440,10 @@ export default function SquadManagementPage() {
         <div className="sq-tab-content">
           <section className="sq-section">
             <div className="sq-section-header">
-              <h3>Roster Management</h3>
+              <div>
+                <h3>Roster Management</h3>
+                <p className="sq-hint">Promote, demote, or release players without leaving the squad screen.</p>
+              </div>
             </div>
 
             <div className="sq-roster-controls">

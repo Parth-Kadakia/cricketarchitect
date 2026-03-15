@@ -2,11 +2,16 @@ import pool from '../config/db.js';
 import { processSeasonRetirements } from './retirementService.js';
 import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
 import { ensureManagerBoardProfilesForSeason } from './managerCareerService.js';
+import {
+  ensureCpuInternationalSeries,
+  ensureInternationalCycleSchedule,
+  maybeProgressInternationalCompetition
+} from './internationalCalendarService.js';
 
 const DEFAULT_LEAGUE_TEAM_COUNT = 52;
 const DEFAULT_INTERNATIONAL_TEAM_COUNT = 100;
 const DEFAULT_CLUB_LEAGUE_COUNT = 4;
-const DEFAULT_INTERNATIONAL_LEAGUE_COUNT = 10;
+const DEFAULT_INTERNATIONAL_LEAGUE_COUNT = 1;
 const PROMOTION_SPOTS = 2;
 
 function resolveLeagueCount(competitionMode, requestedLeagueCount = null) {
@@ -128,6 +133,26 @@ async function buildRandomTierAssignments(teamCount, leagueCount, worldId = null
     leagueTier: (index % leagueCount) + 1,
     previousLeagueTier: null,
     movement: 'NEW'
+  }));
+}
+
+async function buildInternationalAssignments(teamCount, worldId = null, dbClient = pool) {
+  const franchises = await dbClient.query(
+    `SELECT id, owner_user_id
+     FROM franchises
+     WHERE world_id = $2
+       AND COALESCE(NULLIF(competition_mode, ''), 'CLUB') = 'INTERNATIONAL'
+     ORDER BY id ASC
+     LIMIT $1`,
+    [teamCount, worldId]
+  );
+
+  return franchises.rows.map((row) => ({
+    franchiseId: Number(row.id),
+    isAi: !row.owner_user_id,
+    leagueTier: 1,
+    previousLeagueTier: 1,
+    movement: 'STAY'
   }));
 }
 
@@ -275,6 +300,12 @@ export async function listSeasons(limit = 12, worldId = null, dbClient = pool) {
            team_count,
            league_count,
            teams_per_league,
+           cycle_length_years,
+           current_cycle_year,
+           current_phase,
+           calendar_date,
+           cycle_start_date,
+           cycle_end_date,
            status,
            start_date,
            end_date
@@ -342,7 +373,7 @@ export async function createSeason({
     )).rows[0].season_number) + 1;
 
   let seasonName = name || (resolvedMode === CAREER_MODES.INTERNATIONAL
-    ? `International T20 Season ${nextSeasonNumber}`
+    ? `International T20 Cycle ${nextSeasonNumber}`
     : `Global T20 Season ${nextSeasonNumber}`);
 
   // Ensure the name is unique — if a season with this name already exists, append a suffix
@@ -360,22 +391,63 @@ export async function createSeason({
     const uniqueNum = Math.max(nextSeasonNumber, maxNum) + 1;
     seasonName = name
       ? `${name} (${uniqueNum})`
-      : (resolvedMode === CAREER_MODES.INTERNATIONAL ? `International T20 Season ${uniqueNum}` : `Global T20 Season ${uniqueNum}`);
+      : (resolvedMode === CAREER_MODES.INTERNATIONAL ? `International T20 Cycle ${uniqueNum}` : `Global T20 Season ${uniqueNum}`);
   }
   const teamsPerLeague = Math.ceil(resolvedTeamCount / resolvedLeagueCount);
+  const cycleLengthYears = resolvedMode === CAREER_MODES.INTERNATIONAL ? 4 : 1;
+  const seasonStartDate = resolvedMode === CAREER_MODES.INTERNATIONAL
+    ? `${Number(year)}-01-05`
+    : null;
 
   const inserted = await dbClient.query(
-    `INSERT INTO seasons (season_number, name, year, format, competition_mode, team_count, league_count, teams_per_league, status, start_date, world_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE', CURRENT_DATE, $9)
+    `INSERT INTO seasons (
+       season_number,
+       name,
+       year,
+       format,
+       competition_mode,
+       team_count,
+       league_count,
+       teams_per_league,
+       cycle_length_years,
+       current_cycle_year,
+       current_phase,
+       calendar_date,
+       cycle_start_date,
+       status,
+       start_date,
+       world_id
+     )
+     VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8,
+       $9, 1, $10, $11, $12,
+       'ACTIVE', COALESCE($12::date, CURRENT_DATE), $13
+     )
      RETURNING *`,
-    [nextSeasonNumber, seasonName, year, format, resolvedMode, resolvedTeamCount, resolvedLeagueCount, teamsPerLeague, worldId]
+    [
+      nextSeasonNumber,
+      seasonName,
+      year,
+      format,
+      resolvedMode,
+      resolvedTeamCount,
+      resolvedLeagueCount,
+      teamsPerLeague,
+      cycleLengthYears,
+      resolvedMode === CAREER_MODES.INTERNATIONAL ? 'FTP' : 'REGULAR',
+      seasonStartDate,
+      seasonStartDate,
+      worldId
+    ]
   );
 
   const season = inserted.rows[0];
 
-  const assignments = previousSeasonId
-    ? await buildTierAssignmentsFromPreviousSeason(previousSeasonId, resolvedTeamCount, resolvedLeagueCount, worldId, dbClient)
-    : await buildRandomTierAssignments(resolvedTeamCount, resolvedLeagueCount, worldId, dbClient);
+  const assignments = resolvedMode === CAREER_MODES.INTERNATIONAL
+    ? await buildInternationalAssignments(resolvedTeamCount, worldId, dbClient)
+    : previousSeasonId
+      ? await buildTierAssignmentsFromPreviousSeason(previousSeasonId, resolvedTeamCount, resolvedLeagueCount, worldId, dbClient)
+      : await buildRandomTierAssignments(resolvedTeamCount, resolvedLeagueCount, worldId, dbClient);
 
   for (const assignment of assignments) {
     await dbClient.query(
@@ -403,6 +475,9 @@ export async function createSeason({
 export async function ensureActiveSeason(dbClient = pool, worldId = null) {
   const active = await getActiveSeason(dbClient, worldId);
   if (active) {
+    if (normalizeCareerMode(active.competition_mode || CAREER_MODES.CLUB) === CAREER_MODES.INTERNATIONAL) {
+      await ensureCpuInternationalSeries(Number(active.id), dbClient);
+    }
     return active;
   }
 
@@ -445,6 +520,17 @@ export async function ensureActiveSeason(dbClient = pool, worldId = null) {
 }
 
 export async function generateDoubleRoundRobinFixtures(seasonId, dbClient = pool) {
+  const seasonCheck = await dbClient.query(
+    `SELECT competition_mode
+     FROM seasons
+     WHERE id = $1`,
+    [seasonId]
+  );
+  const seasonMode = normalizeCareerMode(seasonCheck.rows[0]?.competition_mode || CAREER_MODES.CLUB);
+  if (seasonMode === CAREER_MODES.INTERNATIONAL) {
+    return ensureInternationalCycleSchedule(Number(seasonId), dbClient);
+  }
+
   const existing = await dbClient.query('SELECT COUNT(*)::int AS count FROM matches WHERE season_id = $1', [seasonId]);
   if (Number(existing.rows[0].count) > 0) {
     return { inserted: 0, skipped: true };
@@ -537,6 +623,10 @@ export async function generateDoubleRoundRobinFixtures(seasonId, dbClient = pool
     }
   }
 
+  if (normalizeCareerMode(season?.competition_mode || CAREER_MODES.CLUB) === CAREER_MODES.INTERNATIONAL) {
+    await ensureCpuInternationalSeries(Number(seasonId), dbClient);
+  }
+
   return { inserted, skipped: false };
 }
 
@@ -581,6 +671,29 @@ export async function getLeagueTable(seasonId, dbClient = pool) {
 }
 
 export async function getSeasonRoundOverview(seasonId, dbClient = pool) {
+  const seasonMeta = await dbClient.query(
+    `SELECT competition_mode
+     FROM seasons
+     WHERE id = $1`,
+    [seasonId]
+  );
+  if (normalizeCareerMode(seasonMeta.rows[0]?.competition_mode || CAREER_MODES.CLUB) === CAREER_MODES.INTERNATIONAL) {
+    const years = await dbClient.query(
+      `SELECT s.cycle_year AS round_no,
+              COUNT(*)::int AS total_matches,
+              COUNT(*) FILTER (WHERE m.status = 'COMPLETED')::int AS completed_matches,
+              COUNT(*) FILTER (WHERE m.status = 'LIVE')::int AS live_matches
+       FROM international_series s
+       JOIN matches m ON m.series_id = s.id
+       WHERE s.season_id = $1
+         AND s.series_type = 'BILATERAL'
+       GROUP BY s.cycle_year
+       ORDER BY s.cycle_year`,
+      [seasonId]
+    );
+    return years.rows;
+  }
+
   const rounds = await dbClient.query(
     `SELECT round_no,
             COUNT(*)::int AS total_matches,
@@ -598,6 +711,17 @@ export async function getSeasonRoundOverview(seasonId, dbClient = pool) {
 }
 
 export async function getSeasonPlayerLeaders(seasonId, dbClient = pool) {
+  const seasonMeta = await dbClient.query(
+    `SELECT competition_mode
+     FROM seasons
+     WHERE id = $1`,
+    [seasonId]
+  );
+  const isInternational = normalizeCareerMode(seasonMeta.rows[0]?.competition_mode || CAREER_MODES.CLUB) === CAREER_MODES.INTERNATIONAL;
+  const stageFilter = isInternational
+    ? `AND m.stage IN ('SERIES', 'WORLD_CUP_GROUP', 'WORLD_CUP_QF', 'WORLD_CUP_SF', 'WORLD_CUP_FINAL')`
+    : `AND m.stage = 'REGULAR'`;
+
   const batting = await dbClient.query(
     `SELECT p.id AS player_id,
             p.first_name,
@@ -616,7 +740,7 @@ export async function getSeasonPlayerLeaders(seasonId, dbClient = pool) {
      JOIN players p ON p.id = pms.player_id
      JOIN franchises f ON f.id = p.franchise_id
      WHERE m.season_id = $1
-       AND m.stage = 'REGULAR'
+       ${stageFilter}
      GROUP BY p.id, p.first_name, p.last_name, f.id, f.franchise_name
      HAVING SUM(pms.batting_balls) > 0
      ORDER BY runs DESC, strike_rate DESC
@@ -640,8 +764,8 @@ export async function getSeasonPlayerLeaders(seasonId, dbClient = pool) {
      JOIN players p ON p.id = pms.player_id
      JOIN franchises f ON f.id = p.franchise_id
      WHERE m.season_id = $1
-       AND m.stage = 'REGULAR'
-       AND p.role IN ('BOWLER', 'ALL_ROUNDER')
+       ${stageFilter}
+       AND p.role = 'BOWLER'
      GROUP BY p.id, p.first_name, p.last_name, f.id, f.franchise_name
      HAVING SUM(pms.bowling_balls) > 0
      ORDER BY wickets DESC, economy ASC
@@ -682,7 +806,20 @@ export async function updateSeasonTableWithMatch(matchId, dbClient = pool) {
     return null;
   }
 
-  if (match.stage !== 'REGULAR') {
+  const seasonMeta = await dbClient.query(
+    `SELECT competition_mode
+     FROM seasons
+     WHERE id = $1`,
+    [match.season_id]
+  );
+  const isInternational = normalizeCareerMode(seasonMeta.rows[0]?.competition_mode || CAREER_MODES.CLUB) === CAREER_MODES.INTERNATIONAL;
+  const trackedInternationalStages = new Set(['SERIES', 'WORLD_CUP_GROUP', 'WORLD_CUP_QF', 'WORLD_CUP_SF', 'WORLD_CUP_FINAL']);
+
+  if (!isInternational && match.stage !== 'REGULAR') {
+    return getLeagueTable(match.season_id, dbClient);
+  }
+
+  if (isInternational && !trackedInternationalStages.has(String(match.stage || '').toUpperCase())) {
     return getLeagueTable(match.season_id, dbClient);
   }
 
@@ -909,52 +1046,8 @@ async function finalizeSeasonIfChampionKnown(seasonId, dbClient = pool) {
 }
 
 async function finalizeInternationalSeason(seasonId, dbClient = pool) {
-  const seasonResult = await dbClient.query(
-    `SELECT status, league_count
-     FROM seasons
-     WHERE id = $1`,
-    [seasonId]
-  );
-  if (!seasonResult.rows.length || seasonResult.rows[0].status === 'COMPLETED') {
-    return false;
-  }
-
-  const leagueCount = Number(seasonResult.rows[0].league_count || DEFAULT_INTERNATIONAL_LEAGUE_COUNT);
-  const table = await getLeagueTable(seasonId, dbClient);
-
-  for (let tier = 1; tier <= leagueCount; tier += 1) {
-    const winner = table
-      .filter((row) => Number(row.league_tier) === tier)
-      .sort((a, b) => Number(a.league_position || 999) - Number(b.league_position || 999))[0];
-
-    if (!winner) {
-      continue;
-    }
-
-    const winnerId = Number(winner.franchise_id);
-    await dbClient.query(
-      `UPDATE franchises
-       SET fan_rating = LEAST(100, fan_rating + 3)
-       WHERE id = $1`,
-      [winnerId]
-    );
-
-    await dbClient.query(
-      `INSERT INTO trophy_cabinet (franchise_id, season_id, title)
-       VALUES ($1, $2, $3)`,
-      [winnerId, seasonId, `League ${tier} Division Winner`]
-    );
-  }
-
-  await dbClient.query(
-    `UPDATE seasons
-     SET status = 'COMPLETED',
-         end_date = CURRENT_DATE
-     WHERE id = $1`,
-    [seasonId]
-  );
-
-  return true;
+  const result = await maybeProgressInternationalCompetition(seasonId, dbClient);
+  return result.state === 'SEASON_COMPLETED';
 }
 
 export async function progressSeasonStructure(seasonId, dbClient = pool) {
@@ -978,13 +1071,21 @@ export async function progressSeasonStructure(seasonId, dbClient = pool) {
       )
     ).rows[0].count
   );
+  const seriesRemaining = Number(
+    (
+      await dbClient.query(
+        `SELECT COUNT(*)::int AS count
+         FROM matches
+         WHERE season_id = $1
+           AND stage = 'SERIES'
+           AND status <> 'COMPLETED'`,
+        [seasonId]
+      )
+    ).rows[0].count
+  );
 
   if (competitionMode === CAREER_MODES.INTERNATIONAL) {
-    if (regularRemaining === 0) {
-      const completed = await finalizeInternationalSeason(seasonId, dbClient);
-      return { state: completed ? 'SEASON_COMPLETED' : 'PROGRESSED' };
-    }
-    return { state: 'PROGRESSED' };
+    return maybeProgressInternationalCompetition(seasonId, dbClient);
   }
 
   if (regularRemaining === 0) {
@@ -1036,12 +1137,12 @@ export async function createNextSeasonFromCompleted(completedSeasonId, dbClient 
 
   await processSeasonRetirements(completedSeasonId, dbClient);
 
-  const nextYear = Number(completed.rows[0].year) + 1;
+  const nextYear = Number(completed.rows[0].year) + Number(completed.rows[0].cycle_length_years || 1);
   const teamCount = Number(completed.rows[0].team_count);
   const competitionMode = normalizeCareerMode(completed.rows[0].competition_mode || CAREER_MODES.CLUB);
   const leagueCount = resolveLeagueCount(competitionMode, completed.rows[0].league_count);
   const nextSeasonName = competitionMode === CAREER_MODES.INTERNATIONAL
-    ? `International T20 Season ${nextNumber}`
+    ? `International T20 Cycle ${nextNumber}`
     : `Global T20 Season ${nextNumber}`;
 
   const season = await createSeason(
@@ -1096,12 +1197,39 @@ export async function getSeasonSummary(seasonId, dbClient = pool) {
      ORDER BY league_tier`,
     [seasonId]
   );
+  const seriesOverview = await dbClient.query(
+    `SELECT COUNT(*)::int AS total_series,
+            COUNT(*) FILTER (
+              WHERE NOT EXISTS (
+                SELECT 1
+                FROM matches m
+                WHERE m.series_id = s.id
+                  AND m.status <> 'COMPLETED'
+              )
+            )::int AS completed_series
+     FROM international_series s
+     WHERE s.season_id = $1`,
+    [seasonId]
+  );
+  const worldCupOverview = await dbClient.query(
+    `SELECT stage,
+            COUNT(*)::int AS total_matches,
+            COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS completed_matches
+     FROM matches
+     WHERE season_id = $1
+       AND stage IN ('WORLD_CUP_GROUP', 'WORLD_CUP_QF', 'WORLD_CUP_SF', 'WORLD_CUP_FINAL')
+     GROUP BY stage
+     ORDER BY stage`,
+    [seasonId]
+  );
 
   return {
     season: seasonResult.rows[0],
     rounds,
     table,
     fixtures: fixtureCounts.rows[0],
-    leagueOverview: leagueOverview.rows
+    leagueOverview: leagueOverview.rows,
+    seriesOverview: seriesOverview.rows[0] || { total_series: 0, completed_series: 0 },
+    worldCupOverview: worldCupOverview.rows
   };
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
+import CountryLabel from '../components/CountryLabel';
 import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
@@ -12,6 +13,10 @@ const TABS = [
 ];
 
 function MovementArrow({ value }) {
+  const raw = String(value || '').toUpperCase();
+  if (raw === 'PROMOTED') return <span className="lg-movement lg-movement--up">▲ Promoted</span>;
+  if (raw === 'RELEGATED') return <span className="lg-movement lg-movement--down">▼ Relegated</span>;
+  if (raw === 'STAY') return <span className="lg-movement lg-movement--none">—</span>;
   const v = Number(value || 0);
   if (v > 0) return <span className="lg-movement lg-movement--up">▲ {v}</span>;
   if (v < 0) return <span className="lg-movement lg-movement--down">▼ {Math.abs(v)}</span>;
@@ -53,19 +58,25 @@ export default function LeagueTablePage() {
 
   useEffect(() => { setPageTitle('League Table'); }, []);
 
-  const tableByLeague = useMemo(
-    () =>
-      [...new Set((table || []).map((row) => Number(row.league_tier || 0)).filter((tier) => tier > 0))]
-        .sort((a, b) => a - b)
-        .map((tier) => ({
-          tier,
-          rows: (table || []).filter((row) => Number(row.league_tier) === tier)
-        }))
-        .filter((g) => g.rows.length > 0),
-    [table]
-  );
-  const maxTier = Number(summary?.season?.league_count || tableByLeague.length || 4);
-  const tabs = useMemo(() => (isInternational ? TABS.filter((tabItem) => tabItem.key !== 'knockouts') : TABS), [isInternational]);
+  const tableByLeague = useMemo(() => {
+    if (isInternational) {
+      return table.length ? [{ tier: 1, rows: table }] : [];
+    }
+    return [...new Set((table || []).map((row) => Number(row.league_tier || 0)).filter((tier) => tier > 0))]
+      .sort((a, b) => a - b)
+      .map((tier) => ({
+        tier,
+        rows: (table || []).filter((row) => Number(row.league_tier) === tier)
+      }))
+      .filter((g) => g.rows.length > 0);
+  }, [isInternational, table]);
+  const maxTier = isInternational ? 1 : Number(summary?.season?.league_count || tableByLeague.length || 4);
+  const tabs = useMemo(() => {
+    if (!isInternational) {
+      return TABS;
+    }
+    return (playoffFixtures.length || finalFixtures.length) ? TABS : TABS.filter((tabItem) => tabItem.key !== 'knockouts');
+  }, [finalFixtures.length, isInternational, playoffFixtures.length]);
 
   const progressPct = useMemo(() => {
     if (!summary?.fixtures) return 0;
@@ -92,8 +103,8 @@ export default function LeagueTablePage() {
         setSummary(summaryResp || null);
         setSeasonStats(statsResp || { batting: [], bowling: [] });
         const fixtures = fixturesResp.fixtures || [];
-        setPlayoffFixtures(fixtures.filter((f) => f.stage === 'PLAYOFF'));
-        setFinalFixtures(fixtures.filter((f) => f.stage === 'FINAL'));
+        setPlayoffFixtures(fixtures.filter((f) => ['PLAYOFF', 'WORLD_CUP_QF', 'WORLD_CUP_SF'].includes(f.stage)));
+        setFinalFixtures(fixtures.filter((f) => ['FINAL', 'WORLD_CUP_FINAL'].includes(f.stage)));
       }
     } catch (e) { setError(e.message); }
     finally { if (initial) setLoading(false); }
@@ -118,8 +129,8 @@ export default function LeagueTablePage() {
       setSummary(summaryResp || null);
       setSeasonStats(statsResp || { batting: [], bowling: [] });
       const fixtures = fixturesResp.fixtures || [];
-      setPlayoffFixtures(fixtures.filter((f) => f.stage === 'PLAYOFF'));
-      setFinalFixtures(fixtures.filter((f) => f.stage === 'FINAL'));
+      setPlayoffFixtures(fixtures.filter((f) => ['PLAYOFF', 'WORLD_CUP_QF', 'WORLD_CUP_SF'].includes(f.stage)));
+      setFinalFixtures(fixtures.filter((f) => ['FINAL', 'WORLD_CUP_FINAL'].includes(f.stage)));
     } catch (e) { setError(e.message); }
   }
 
@@ -158,7 +169,7 @@ export default function LeagueTablePage() {
   /* ── League Table share helpers ── */
 
   function generateLeagueBBCode() {
-    const seasonName = currentSeason?.name || 'League';
+    const seasonName = currentSeason?.name || (isInternational ? 'Global Rankings' : 'League');
     const ln = [];
 
     ln.push(`[size=5][b]${seasonName}[/b][/size]`);
@@ -168,7 +179,7 @@ export default function LeagueTablePage() {
     ln.push('');
 
     for (const group of tableByLeague) {
-      ln.push(`[size=4][b]League ${group.tier}[/b][/size]`);
+      ln.push(`[size=4][b]${isInternational ? 'Global Rankings' : `League ${group.tier}`}[/b][/size]`);
       ln.push('');
       ln.push('[table]');
       ln.push('[tr][th]#[/th][th]Franchise[/th][th]City[/th][th]P[/th][th]W[/th][th]L[/th][th]T[/th][th]Pts[/th][th]NRR[/th][/tr]');
@@ -264,7 +275,7 @@ export default function LeagueTablePage() {
     let y = PAD;
 
     // ── HEADER ──
-    const seasonName = currentSeason?.name || 'League';
+    const seasonName = currentSeason?.name || (isInternational ? 'Global Rankings' : 'League');
     rrect(PAD, y, contentW, HEADER_H, 10);
     ctx.fillStyle = COL.leaf;
     ctx.fill();
@@ -283,8 +294,8 @@ export default function LeagueTablePage() {
     // Column positions
     const cols = [
       { label: '#', x: PAD + 8, align: 'center', w: 24 },
-      { label: 'FRANCHISE', x: PAD + 36, align: 'left', w: 260 },
-      { label: 'CITY', x: PAD + 300, align: 'left', w: 120 },
+      { label: isInternational ? 'TEAM' : 'FRANCHISE', x: PAD + 36, align: 'left', w: 260 },
+      { label: isInternational ? 'COUNTRY' : 'CITY', x: PAD + 300, align: 'left', w: 120 },
       { label: 'P', x: PAD + 430, align: 'right' },
       { label: 'W', x: PAD + 470, align: 'right' },
       { label: 'L', x: PAD + 510, align: 'right' },
@@ -301,7 +312,7 @@ export default function LeagueTablePage() {
       ctx.textAlign = 'left';
       ctx.font = FONT('700', 12);
       ctx.fillStyle = COL.leaf;
-      ctx.fillText(`League ${group.tier}`, PAD + 4, y + 20);
+      ctx.fillText(isInternational ? 'Global Rankings' : `League ${group.tier}`, PAD + 4, y + 20);
       ctx.strokeStyle = COL.border;
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -370,7 +381,7 @@ export default function LeagueTablePage() {
         // City
         ctx.font = BODY('400', 9);
         ctx.fillStyle = COL.muted;
-        const city = row.city || '-';
+        const city = isInternational ? (row.country || '-') : (row.city || '-');
         ctx.fillText(city.length > 16 ? city.slice(0, 14) + '…' : city, cols[2].x, y + 16);
 
         // P, W, L, T
@@ -444,6 +455,11 @@ export default function LeagueTablePage() {
         <div className="lg-header-title">
           <h2>{currentSeason?.name || 'League'}</h2>
           <span className="lg-header-teams">{summary?.season?.team_count || table.length} Teams</span>
+          {isInternational && (
+            <span className="lg-header-teams">
+              {summary?.season?.current_phase || 'FTP'} • {summary?.season?.calendar_date || '—'}
+            </span>
+          )}
           {/* Share dropdown */}
           <div className="lg-share-wrap" ref={shareRef}>
             <button type="button" className="lg-share-btn" onClick={() => setShareOpen((prev) => !prev)} title="Share league table">
@@ -495,7 +511,7 @@ export default function LeagueTablePage() {
         <div className="sq-tab-content">
           <p className="lg-info-text">
             {isInternational
-              ? 'Each division winner takes the league title. Top-two and bottom-two movement applies between tiers each season.'
+              ? 'International mode uses one global ranking table across the full FTP cycle. The top 32 teams qualify for the World Cup at the end of Year 4.'
               : 'League winners qualify for semifinals. Bottom-two and top-two movement applies between tiers each season.'}
           </p>
           {tableByLeague.map((group) => {
@@ -506,7 +522,7 @@ export default function LeagueTablePage() {
                 <button type="button" className="lg-tier-header" onClick={() => toggleTier(group.tier)}>
                   <div className="lg-tier-header-left">
                     <span className={`lg-tier-badge lg-tier-badge--${group.tier}`}>{group.tier}</span>
-                    <h3>League {group.tier}</h3>
+                    <h3>{isInternational ? 'Global Rankings' : `League ${group.tier}`}</h3>
                     <span className="lg-tier-count">{rowCount} teams</span>
                   </div>
                   <span className={`lg-tier-chevron ${expanded ? 'open' : ''}`}>▾</span>
@@ -518,22 +534,22 @@ export default function LeagueTablePage() {
                         <thead>
                           <tr>
                             <th className="lg-th-pos">#</th>
-                            <th>Franchise</th>
-                            <th>City</th>
+                            <th>{isInternational ? 'Team' : 'Franchise'}</th>
+                            {!isInternational && <th>City</th>}
                             <th className="lg-th-num">P</th>
                             <th className="lg-th-num">W</th>
                             <th className="lg-th-num">L</th>
                             <th className="lg-th-num">T</th>
                             <th className="lg-th-num">Pts</th>
                             <th className="lg-th-nrr">NRR</th>
-                            <th className="lg-th-num">Move</th>
+                            {!isInternational && <th className="lg-th-num">Move</th>}
                           </tr>
                         </thead>
                         <tbody>
                           {group.rows.map((row, i) => {
-                            const pos = Number(row.league_position);
-                            const isPromo = pos <= 2 && group.tier > 1;
-                            const isRelegation = pos >= rowCount - 1 && group.tier < maxTier;
+                            const pos = Number(row.league_position || row.position || i + 1);
+                            const isPromo = !isInternational && pos <= 2 && group.tier > 1;
+                            const isRelegation = !isInternational && pos >= rowCount - 1 && group.tier < maxTier;
                             const isLeader = pos === 1;
                             const zoneCls = isLeader ? 'leader' : isPromo ? 'promo' : isRelegation ? 'releg' : '';
                             return (
@@ -542,36 +558,41 @@ export default function LeagueTablePage() {
                                   <span className={`lg-pos-badge ${zoneCls ? `lg-pos--${zoneCls}` : ''}`}>{pos}</span>
                                 </td>
                                 <td className="lg-td-name">
-                                  <TeamNameButton
-                                    franchiseId={row.franchise_id}
-                                    name={row.franchise_name}
-                                    country={row.country}
-                                    city={row.city}
-                                    className="lg-team-link"
-                                  >
-                                    {row.franchise_name}
-                                  </TeamNameButton>
-                                  {row.country && <span className="lg-country-tag">{row.country}</span>}
+                                  <div className="lg-team-with-flag">
+                                    {isInternational && row.country && <CountryLabel country={row.country} className="lg-team-flag" showName={false} />}
+                                    <TeamNameButton
+                                      franchiseId={row.franchise_id}
+                                      name={row.franchise_name}
+                                      country={row.country}
+                                      city={row.city}
+                                      className="lg-team-link"
+                                    >
+                                      {row.franchise_name}
+                                    </TeamNameButton>
+                                    {!isInternational && row.country && <CountryLabel country={row.country} className="lg-country-tag" />}
+                                  </div>
                                 </td>
-                                <td className="lg-td-city">{row.city || '-'}</td>
+                                {!isInternational && <td className="lg-td-city">{row.city || '-'}</td>}
                                 <td className="lg-th-num">{row.played}</td>
                                 <td className="lg-th-num"><strong>{row.won}</strong></td>
                                 <td className="lg-th-num">{row.lost}</td>
                                 <td className="lg-th-num">{row.tied}</td>
                                 <td className="lg-td-pts"><strong>{row.points}</strong></td>
                                 <td><NrrBadge value={row.net_run_rate} /></td>
-                                <td><MovementArrow value={row.movement} /></td>
+                                {!isInternational && <td><MovementArrow value={row.movement} /></td>}
                               </tr>
                             );
                           })}
                         </tbody>
                       </table>
                     </div>
-                    <div className="lg-zone-legend">
-                      {group.tier > 1 && <span className="lg-legend-item lg-legend--promo">● Promotion Zone</span>}
-                      {group.tier < maxTier && <span className="lg-legend-item lg-legend--releg">● Relegation Zone</span>}
-                      <span className="lg-legend-item lg-legend--leader">● League Leader</span>
-                    </div>
+                    {!isInternational && (
+                      <div className="lg-zone-legend">
+                        {group.tier > 1 && <span className="lg-legend-item lg-legend--promo">● Promotion Zone</span>}
+                        {group.tier < maxTier && <span className="lg-legend-item lg-legend--releg">● Relegation Zone</span>}
+                        <span className="lg-legend-item lg-legend--leader">● League Leader</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>
@@ -661,11 +682,11 @@ export default function LeagueTablePage() {
           {/* Playoffs */}
           <section className="lg-ko-section">
             <div className="lg-ko-header">
-              <h3>Semifinals</h3>
+              <h3>{isInternational ? 'World Cup Knockouts' : 'Semifinals'}</h3>
               <span className="lg-ko-count">{playoffFixtures.length} match{playoffFixtures.length !== 1 ? 'es' : ''}</span>
             </div>
             {playoffFixtures.length === 0 ? (
-              <div className="sq-empty">No playoff fixtures for this season.</div>
+              <div className="sq-empty">{isInternational ? 'No World Cup knockout fixtures for this cycle yet.' : 'No playoff fixtures for this season.'}</div>
             ) : (
               <div className="lg-ko-grid">
                 {playoffFixtures.map((f, i) => (
@@ -679,7 +700,7 @@ export default function LeagueTablePage() {
                         <TeamNameButton franchiseId={f.home_franchise_id} name={f.home_franchise_name} country={f.home_country} className="lg-team-link">
                           {f.home_franchise_name}
                         </TeamNameButton>
-                        <span className="lg-match-country">{f.home_country || ''}</span>
+                        <CountryLabel country={f.home_country} className="lg-match-country" />
                         <span className="lg-match-score">{scoreLabel(f.home_score, f.home_wickets, f.home_balls)}</span>
                       </div>
                       <span className="lg-match-vs">vs</span>
@@ -687,7 +708,7 @@ export default function LeagueTablePage() {
                         <TeamNameButton franchiseId={f.away_franchise_id} name={f.away_franchise_name} country={f.away_country} className="lg-team-link">
                           {f.away_franchise_name}
                         </TeamNameButton>
-                        <span className="lg-match-country">{f.away_country || ''}</span>
+                        <CountryLabel country={f.away_country} className="lg-match-country" />
                         <span className="lg-match-score">{scoreLabel(f.away_score, f.away_wickets, f.away_balls)}</span>
                       </div>
                     </div>
@@ -700,10 +721,10 @@ export default function LeagueTablePage() {
           {/* Final */}
           <section className="lg-ko-section">
             <div className="lg-ko-header">
-              <h3>🏆 Final</h3>
+              <h3>{isInternational ? '🏆 World Cup Final' : '🏆 Final'}</h3>
             </div>
             {finalFixtures.length === 0 ? (
-              <div className="sq-empty">No final fixture for this season.</div>
+              <div className="sq-empty">{isInternational ? 'No World Cup final fixture for this cycle yet.' : 'No final fixture for this season.'}</div>
             ) : (
               <div className="lg-ko-grid">
                 {finalFixtures.map((f, i) => (
@@ -717,7 +738,7 @@ export default function LeagueTablePage() {
                         <TeamNameButton franchiseId={f.home_franchise_id} name={f.home_franchise_name} country={f.home_country} className="lg-team-link">
                           {f.home_franchise_name}
                         </TeamNameButton>
-                        <span className="lg-match-country">{f.home_country || ''}</span>
+                        <CountryLabel country={f.home_country} className="lg-match-country" />
                         <span className="lg-match-score">{scoreLabel(f.home_score, f.home_wickets, f.home_balls)}</span>
                       </div>
                       <span className="lg-match-vs">vs</span>
@@ -725,7 +746,7 @@ export default function LeagueTablePage() {
                         <TeamNameButton franchiseId={f.away_franchise_id} name={f.away_franchise_name} country={f.away_country} className="lg-team-link">
                           {f.away_franchise_name}
                         </TeamNameButton>
-                        <span className="lg-match-country">{f.away_country || ''}</span>
+                        <CountryLabel country={f.away_country} className="lg-match-country" />
                         <span className="lg-match-score">{scoreLabel(f.away_score, f.away_wickets, f.away_balls)}</span>
                       </div>
                     </div>

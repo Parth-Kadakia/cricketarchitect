@@ -317,6 +317,24 @@ export async function ensureFranchiseLineup(franchiseId, dbClient = pool, option
 
   if (mode === 'auto') {
     selectedPlayers = bestPlayers;
+  } else if (mode === 'preserve') {
+    if (currentLineup.length >= 11) {
+      selectedPlayers = currentLineup;
+    } else if (currentLineup.length > 0) {
+      const selectedIds = new Set(currentLineup.map((row) => Number(row.id)));
+      const merged = [...currentLineup];
+      for (const player of bestPlayers) {
+        const id = Number(player.id);
+        if (merged.length >= 11) break;
+        if (!selectedIds.has(id)) {
+          merged.push(player);
+          selectedIds.add(id);
+        }
+      }
+      selectedPlayers = merged.slice(0, 11);
+    } else {
+      selectedPlayers = bestPlayers;
+    }
   } else if (currentLineup.length >= 11) {
     const bestStrength = lineupStrength(bestPlayers);
     const currentStrength = lineupStrength(currentLineup);

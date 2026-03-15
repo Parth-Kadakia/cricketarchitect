@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
-import pool from '../config/db.js';
+import pool, { withTransaction } from '../config/db.js';
 import { requireAdmin, requireAuth, optionalAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import {
@@ -16,6 +16,7 @@ import {
 import {
   getMatchScorecard,
   isMatchSimulationRunning,
+  simulateInternationalNextDay,
   simulateLeagueRound,
   simulateMatchLive,
   simulateMatchOutsideCenter,
@@ -24,6 +25,12 @@ import {
   simulateRound,
   simulateSeasonToEnd
 } from '../services/matchEngine.js';
+import {
+  getInternationalCalendar,
+  getInternationalCalendarOverview,
+  getSeriesMatchesForManager,
+  scheduleInternationalSeries
+} from '../services/internationalCalendarService.js';
 import { runCpuMarketCycle } from '../services/cpuManagerService.js';
 import { broadcast } from '../ws/realtime.js';
 import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
@@ -51,6 +58,17 @@ async function shouldRunCpuCycleForSeason(seasonId) {
     [seasonId]
   );
   return normalizeCareerMode(season.rows[0]?.competition_mode || CAREER_MODES.CLUB) === CAREER_MODES.CLUB;
+}
+
+async function getActiveSeasonMode(worldId) {
+  const activeSeason = await ensureActiveSeason(pool, worldId);
+  if (!activeSeason) {
+    return { season: null, mode: CAREER_MODES.CLUB };
+  }
+  return {
+    season: activeSeason,
+    mode: normalizeCareerMode(activeSeason.competition_mode || CAREER_MODES.CLUB)
+  };
 }
 
 router.get(
@@ -185,15 +203,15 @@ router.get(
               COALESCE(ROUND(SUM(pms.bowling_runs)::numeric / NULLIF(SUM(pms.bowling_wickets), 0), 2), 0) AS average,
               COALESCE(ROUND((SUM(pms.bowling_runs)::numeric * 6) / NULLIF(SUM(pms.bowling_balls), 0), 2), 0) AS economy,
               ROUND(AVG(pms.player_rating), 2) AS avg_rating
-       FROM player_match_stats pms
-       JOIN matches m ON m.id = pms.match_id
-       JOIN players p ON p.id = pms.player_id
-       JOIN franchises f ON f.id = p.franchise_id
-       WHERE m.status = 'COMPLETED' ${filterClause}
-         AND p.role IN ('BOWLER', 'ALL_ROUNDER')
-       GROUP BY p.id, p.first_name, p.last_name, p.role, p.age, f.id, f.franchise_name
-       HAVING SUM(pms.bowling_balls) > 0
-       ORDER BY wickets DESC, economy ASC
+      FROM player_match_stats pms
+      JOIN matches m ON m.id = pms.match_id
+      JOIN players p ON p.id = pms.player_id
+      JOIN franchises f ON f.id = p.franchise_id
+      WHERE m.status = 'COMPLETED' ${filterClause}
+         AND p.role = 'BOWLER'
+      GROUP BY p.id, p.first_name, p.last_name, p.role, p.age, f.id, f.franchise_name
+      HAVING SUM(pms.bowling_balls) > 0
+      ORDER BY wickets DESC, economy ASC
        LIMIT ${limitParam}`,
       [...params, limit]
     );
@@ -356,6 +374,7 @@ router.get(
       `SELECT
          m.id,
          m.stage,
+         m.group_name,
          m.league_tier,
          m.round_no,
          m.matchday_label,
@@ -394,6 +413,145 @@ router.get(
     );
 
     return res.json({ seasonId, fixtures: fixtures.rows });
+  })
+);
+
+router.get(
+  '/calendar',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    let seasonId = Number(req.query.seasonId || 0);
+    const worldId = req.user?.active_world_id || null;
+
+    if (!worldId) {
+      return res.status(403).json({ message: 'No active world.' });
+    }
+
+    if (!seasonId) {
+      const activeSeason = await ensureActiveSeason(pool, worldId);
+      if (!activeSeason) {
+        return res.status(404).json({ message: 'No active season yet.' });
+      }
+      seasonId = Number(activeSeason.id);
+    } else {
+      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      if (!check.rows.length) {
+        return res.status(403).json({ message: 'Season not found in your world.' });
+      }
+    }
+
+    const offsetDays = Number(req.query.offsetDays || 0);
+    const spanDays = Number(req.query.spanDays || 14);
+    const calendar = await getInternationalCalendar(req.user.id, seasonId, pool, { offsetDays, spanDays });
+    return res.json(calendar);
+  })
+);
+
+router.get(
+  '/calendar/all',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    let seasonId = Number(req.query.seasonId || 0);
+    const worldId = req.user?.active_world_id || null;
+
+    if (!worldId) {
+      return res.status(403).json({ message: 'No active world.' });
+    }
+
+    if (!seasonId) {
+      const activeSeason = await ensureActiveSeason(pool, worldId);
+      if (!activeSeason) {
+        return res.status(404).json({ message: 'No active season yet.' });
+      }
+      seasonId = Number(activeSeason.id);
+    } else {
+      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      if (!check.rows.length) {
+        return res.status(403).json({ message: 'Season not found in your world.' });
+      }
+    }
+
+    const offsetDays = Number(req.query.offsetDays || 0);
+    const spanDays = Number(req.query.spanDays || 14);
+    const calendar = await getInternationalCalendarOverview(seasonId, pool, { offsetDays, spanDays });
+    return res.json(calendar);
+  })
+);
+
+router.post(
+  '/calendar/series',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const seasonId = Number(req.body?.seasonId || 0);
+    const opponentFranchiseId = Number(req.body?.opponentFranchiseId || 0);
+    const windowNo = Number(req.body?.windowNo || 0);
+    const venue = String(req.body?.venue || 'HOME');
+    const worldId = req.user?.active_world_id || null;
+
+    if (!worldId) {
+      return res.status(403).json({ message: 'No active world.' });
+    }
+    if (!seasonId || !opponentFranchiseId || !windowNo) {
+      return res.status(400).json({ message: 'seasonId, opponentFranchiseId, and windowNo are required.' });
+    }
+
+    const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+    if (!check.rows.length) {
+      return res.status(403).json({ message: 'Season not found in your world.' });
+    }
+
+    const result = await withTransaction(async (dbClient) => {
+      await scheduleInternationalSeries(
+        {
+          userId: req.user.id,
+          seasonId,
+          opponentFranchiseId,
+          venue,
+          windowNo
+        },
+        dbClient
+      );
+      return getInternationalCalendar(req.user.id, seasonId, dbClient);
+    });
+
+    return res.status(201).json(result);
+  })
+);
+
+router.post(
+  '/calendar/series/:seriesId/simulate',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const seriesId = Number(req.params.seriesId || 0);
+    if (!seriesId) {
+      return res.status(400).json({ message: 'Invalid series id.' });
+    }
+
+    const matches = await getSeriesMatchesForManager(req.user.id, seriesId, pool);
+    if (!matches.length) {
+      return res.status(404).json({ message: 'Series not found for your managed team.' });
+    }
+
+    let simulated = 0;
+    for (const match of matches) {
+      if (String(match.status || '').toUpperCase() === 'COMPLETED') {
+        continue;
+      }
+
+      await simulateMatchOutsideCenter(match.id, {
+        broadcast,
+        useExternalBallApi: false,
+        useExternalFullMatchApi: true,
+        strictExternalFullMatchApi: true
+      });
+      simulated += 1;
+    }
+
+    const calendar = await getInternationalCalendar(req.user.id, Number(matches[0].season_id), pool);
+    return res.json({
+      simulated,
+      calendar
+    });
   })
 );
 
@@ -570,11 +728,37 @@ router.post(
 );
 
 router.post(
+  '/simulate-next-day',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const operationId = resolveOperationId(req, 'next-day');
+    const worldId = req.user?.active_world_id || null;
+    const result = await simulateInternationalNextDay({
+      broadcast,
+      useExternalBallApi: false,
+      useExternalFullMatchApi: true,
+      strictExternalFullMatchApi: true,
+      simulationOperationId: operationId,
+      worldId,
+      onSimulationProgress: async (payload) => {
+        pushSimulationProgress({ action: 'SIMULATE_NEXT_DAY', ...payload });
+      }
+    });
+
+    return res.json({ ...result, operationId });
+  })
+);
+
+router.post(
   '/simulate-next-round',
   requireAuth,
   asyncHandler(async (req, res) => {
     const operationId = resolveOperationId(req, 'round');
     const worldId = req.user?.active_world_id || null;
+    const { mode } = await getActiveSeasonMode(worldId);
+    if (mode === CAREER_MODES.INTERNATIONAL) {
+      return res.status(409).json({ message: 'International mode uses daily FTP simulation. Use Simulate Next Day instead.' });
+    }
     const result = await simulateRound(null, {
       broadcast,
       useExternalBallApi: false,
@@ -608,6 +792,13 @@ router.post(
       return res.status(400).json({ message: 'leagueTier is required.' });
     }
 
+    if (seasonId) {
+      const seasonMeta = await pool.query('SELECT competition_mode FROM seasons WHERE id = $1', [seasonId]);
+      if (normalizeCareerMode(seasonMeta.rows[0]?.competition_mode || CAREER_MODES.CLUB) === CAREER_MODES.INTERNATIONAL) {
+        return res.status(409).json({ message: 'International mode does not use league rounds.' });
+      }
+    }
+
     const result = await simulateLeagueRound(
       { seasonId, roundNo, leagueTier },
       {
@@ -637,6 +828,11 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const operationId = resolveOperationId(req, 'my-league');
+    const worldId = req.user?.active_world_id || null;
+    const { mode } = await getActiveSeasonMode(worldId);
+    if (mode === CAREER_MODES.INTERNATIONAL) {
+      return res.status(409).json({ message: 'International mode does not use league rounds. Use Simulate Next Day.' });
+    }
     const result = await simulateMyLeagueRound(req.user.id, {
       broadcast,
       autoCreateNextSeason: false,
@@ -644,7 +840,7 @@ router.post(
       useExternalFullMatchApi: true,
       strictExternalFullMatchApi: true,
       simulationOperationId: operationId,
-      worldId: req.user?.active_world_id || null,
+      worldId,
       onSimulationProgress: async (payload) => {
         pushSimulationProgress({ action: 'SIMULATE_MY_LEAGUE_ROUND', ...payload });
       }
@@ -663,13 +859,18 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const operationId = resolveOperationId(req, 'half-season');
+    const worldId = req.user?.active_world_id || null;
+    const { mode } = await getActiveSeasonMode(worldId);
+    if (mode === CAREER_MODES.INTERNATIONAL) {
+      return res.status(409).json({ message: 'International mode advances by calendar day or full cycle, not half-season rounds.' });
+    }
     const result = await simulateHalfSeason({
       broadcast,
       useExternalBallApi: false,
       useExternalFullMatchApi: true,
       strictExternalFullMatchApi: true,
       simulationOperationId: operationId,
-      worldId: req.user?.active_world_id || null,
+      worldId,
       onSimulationProgress: async (payload) => {
         pushSimulationProgress({ action: 'SIMULATE_HALF_SEASON', ...payload });
       }

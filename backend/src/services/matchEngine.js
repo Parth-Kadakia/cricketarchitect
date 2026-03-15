@@ -9,6 +9,10 @@ import {
   progressSeasonStructure,
   updateSeasonTableWithMatch
 } from './leagueService.js';
+import {
+  ensureInternationalCycleSchedule,
+  maybeProgressInternationalCompetition
+} from './internationalCalendarService.js';
 import { simulateBallViaStreetApi, simulateMatchViaStreetApi, simulateTossViaStreetApi } from './streetCricketService.js';
 import { calculateFranchiseValuation } from './valuationService.js';
 import { ensureFranchiseLineup } from './lineupService.js';
@@ -22,9 +26,62 @@ import {
 const activeSimulations = new Set();
 const MATCH_WIN_CASH_REWARD = 10;
 const MATCH_LOSS_CASH_REWARD = 5;
+const WIN_PROGRESSION_REWARD = 5;
+const LOSS_PROGRESSION_REWARD = 1;
+const EXTERNAL_FULL_MATCH_BULK_LIMIT = 50;
+const EXTERNAL_FULL_MATCH_BULK_COOLDOWN_MS = 60_000;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getExternalBulkThrottleState(state = null) {
+  if (state && typeof state === 'object') {
+    return state;
+  }
+
+  return { processedSinceCooldown: 0 };
+}
+
+async function maybeApplyExternalBulkCooldown({
+  useExternalFullMatchApi = false,
+  throttleState = null,
+  waitMs = EXTERNAL_FULL_MATCH_BULK_COOLDOWN_MS,
+  onSimulationProgress = null,
+  progressPayload = null
+} = {}) {
+  if (!useExternalFullMatchApi || !throttleState) {
+    return;
+  }
+
+  if (Number(throttleState.processedSinceCooldown || 0) < EXTERNAL_FULL_MATCH_BULK_LIMIT) {
+    return;
+  }
+
+  await maybeEmitSimulationProgress(onSimulationProgress, {
+    ...progressPayload,
+    phase: 'cooldown',
+    waitMs
+  });
+  await delay(waitMs);
+  throttleState.processedSinceCooldown = 0;
+}
+
+function toDateKey(value) {
+  const parsed = value instanceof Date ? new Date(value.getTime()) : new Date(`${String(value).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString().slice(0, 10);
+}
+
+function addUtcDays(value, days) {
+  const parsed = value instanceof Date ? new Date(value.getTime()) : new Date(`${String(value).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  parsed.setUTCDate(parsed.getUTCDate() + Number(days || 0));
+  return parsed;
 }
 
 async function maybeEmitSimulationProgress(handler, payload) {
@@ -1868,12 +1925,12 @@ async function loadMatchTeams(match, dbClient = pool) {
   await ensureFranchiseLineup(
     Number(match.home_franchise_id),
     dbClient,
-    { mode: metaById.get(Number(match.home_franchise_id))?.owner_user_id ? 'smart' : 'auto' }
+    { mode: metaById.get(Number(match.home_franchise_id))?.owner_user_id ? 'preserve' : 'auto' }
   );
   await ensureFranchiseLineup(
     Number(match.away_franchise_id),
     dbClient,
-    { mode: metaById.get(Number(match.away_franchise_id))?.owner_user_id ? 'smart' : 'auto' }
+    { mode: metaById.get(Number(match.away_franchise_id))?.owner_user_id ? 'preserve' : 'auto' }
   );
 
   // Primary query: active squad players
@@ -2463,17 +2520,28 @@ async function updateFranchiseResults(homeId, awayId, winnerId, dbClient = pool)
     await dbClient.query(
       `UPDATE franchises
        SET fan_rating = LEAST(100, fan_rating + 0.4),
+           prospect_points = prospect_points + $4,
+           growth_points = growth_points + $4,
            financial_balance = financial_balance + $3
        WHERE id IN ($1, $2)`,
-      [homeId, awayId, MATCH_LOSS_CASH_REWARD]
+      [homeId, awayId, MATCH_LOSS_CASH_REWARD, LOSS_PROGRESSION_REWARD]
     );
 
     await dbClient.query(
       `INSERT INTO transactions (franchise_id, transaction_type, amount, description)
        VALUES
-         ($1, 'PRIZE_MONEY', $3, $4),
-         ($2, 'PRIZE_MONEY', $3, $4)`,
-      [homeId, awayId, MATCH_LOSS_CASH_REWARD, `Match reward: +$${MATCH_LOSS_CASH_REWARD.toFixed(2)} (tie/no result)`]
+         ($1, 'PRIZE_MONEY', $3, $5),
+         ($2, 'PRIZE_MONEY', $3, $5),
+         ($1, 'POINT_REWARD', 0, $6),
+         ($2, 'POINT_REWARD', 0, $6)`,
+      [
+        homeId,
+        awayId,
+        MATCH_LOSS_CASH_REWARD,
+        LOSS_PROGRESSION_REWARD,
+        `Match reward: +$${MATCH_LOSS_CASH_REWARD.toFixed(2)} (tie/no result)`,
+        `Match progression reward: +${LOSS_PROGRESSION_REWARD} prospect point, +${LOSS_PROGRESSION_REWARD} growth point (tie/no result)`
+      ]
     );
     return;
   }
@@ -2486,11 +2554,11 @@ async function updateFranchiseResults(homeId, awayId, winnerId, dbClient = pool)
          win_streak = win_streak + 1,
          best_win_streak = GREATEST(best_win_streak, win_streak + 1),
          fan_rating = LEAST(100, fan_rating + 2),
-         prospect_points = prospect_points + 5,
-         growth_points = growth_points + 5,
+         prospect_points = prospect_points + $3,
+         growth_points = growth_points + $3,
          financial_balance = financial_balance + $2
      WHERE id = $1`,
-    [winnerId, MATCH_WIN_CASH_REWARD]
+    [winnerId, MATCH_WIN_CASH_REWARD, WIN_PROGRESSION_REWARD]
   );
 
   await dbClient.query(
@@ -2498,9 +2566,11 @@ async function updateFranchiseResults(homeId, awayId, winnerId, dbClient = pool)
      SET losses = losses + 1,
          win_streak = 0,
          fan_rating = GREATEST(5, fan_rating - 1.2),
+         prospect_points = prospect_points + $3,
+         growth_points = growth_points + $3,
          financial_balance = financial_balance + $2
      WHERE id = $1`,
-    [loserId, MATCH_LOSS_CASH_REWARD]
+    [loserId, MATCH_LOSS_CASH_REWARD, LOSS_PROGRESSION_REWARD]
   );
 
   await dbClient.query(
@@ -2521,8 +2591,14 @@ async function updateFranchiseResults(homeId, awayId, winnerId, dbClient = pool)
   await dbClient.query(
     `INSERT INTO transactions (franchise_id, transaction_type, amount, description)
      VALUES
-       ($1, 'POINT_REWARD', 0, 'Match win reward: +5 prospect points, +5 growth points')`,
-    [winnerId]
+       ($1, 'POINT_REWARD', 0, $3),
+       ($2, 'POINT_REWARD', 0, $4)`,
+    [
+      winnerId,
+      loserId,
+      `Match win reward: +${WIN_PROGRESSION_REWARD} prospect points, +${WIN_PROGRESSION_REWARD} growth points`,
+      `Match loss reward: +${LOSS_PROGRESSION_REWARD} prospect point, +${LOSS_PROGRESSION_REWARD} growth point`
+    ]
   );
 }
 
@@ -3377,6 +3453,7 @@ export async function simulateRound(roundNo, options = {}) {
     strictExternalFullMatchApi = false,
     batchChunkSize = env.streetCricketBatchChunkSize,
     batchChunkPauseMs = env.streetCricketBatchChunkPauseMs,
+    externalBulkThrottleState = null,
     leagueTier = null,
     simulationOperationId = null,
     onSimulationProgress = null,
@@ -3390,7 +3467,7 @@ export async function simulateRound(roundNo, options = {}) {
     return { simulated: 0, roundNo: null, seasonId: null };
   }
 
-  const stageFilter = includePlayoffs ? `AND stage IN ('REGULAR', 'PLAYOFF', 'FINAL')` : `AND stage = 'REGULAR'`;
+  const stageFilter = includePlayoffs ? `AND stage IN ('REGULAR', 'PLAYOFF', 'FINAL', 'SERIES')` : `AND stage = 'REGULAR'`;
   const tierFilter = leagueTier ? `AND league_tier = $2` : '';
   const tierParams = leagueTier ? [activeSeason.id, Number(leagueTier)] : [activeSeason.id];
   const firstIncompleteRound = Number(
@@ -3457,15 +3534,43 @@ export async function simulateRound(roundNo, options = {}) {
   });
 
   let simulated = 0;
-  const chunkSize = Math.max(1, Number(batchChunkSize || 1));
-  const pauseMs = Math.max(0, Number(batchChunkPauseMs || 0));
-  const chunks = [];
-  for (let i = 0; i < matches.rows.length; i += chunkSize) {
-    chunks.push(matches.rows.slice(i, i + chunkSize));
-  }
+  const throttleState = getExternalBulkThrottleState(externalBulkThrottleState);
+  const configuredChunkSize = Math.max(1, Number(batchChunkSize || 1));
+  const chunkSize = useExternalFullMatchApi
+    ? Math.min(EXTERNAL_FULL_MATCH_BULK_LIMIT, configuredChunkSize)
+    : configuredChunkSize;
+  const pauseMs = useExternalFullMatchApi
+    ? Math.max(EXTERNAL_FULL_MATCH_BULK_COOLDOWN_MS, Number(batchChunkPauseMs || 0))
+    : Math.max(0, Number(batchChunkPauseMs || 0));
+  const pendingMatches = [...matches.rows];
+  const estimatedChunkTotal = Math.max(1, Math.ceil(totalMatches / Math.max(1, chunkSize)));
+  let chunkIndex = 0;
 
-  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
-    const chunk = chunks[chunkIndex];
+  while (pendingMatches.length) {
+    await maybeApplyExternalBulkCooldown({
+      useExternalFullMatchApi,
+      throttleState,
+      waitMs: pauseMs,
+      onSimulationProgress,
+      progressPayload: {
+        scope: 'ROUND',
+        operationId: simulationOperationId,
+        seasonId: Number(activeSeason.id),
+        roundNo: Number(targetRound),
+        leagueTier: leagueTier ? Number(leagueTier) : null,
+        completed: simulated,
+        total: totalMatches,
+        nextChunk: chunkIndex + 1
+      }
+    });
+
+    const remainingExternalAllowance = useExternalFullMatchApi
+      ? Math.max(1, EXTERNAL_FULL_MATCH_BULK_LIMIT - Number(throttleState.processedSinceCooldown || 0))
+      : chunkSize;
+    const currentChunkSize = Math.max(1, Math.min(chunkSize, remainingExternalAllowance, pendingMatches.length));
+    const chunk = pendingMatches.splice(0, currentChunkSize);
+    chunkIndex += 1;
+
     await Promise.all(
       chunk.map(async (match) => {
         try {
@@ -3494,13 +3599,18 @@ export async function simulateRound(roundNo, options = {}) {
           matchId: Number(match.id),
           completed: simulated,
           total: totalMatches,
-          chunkIndex: chunkIndex + 1,
-          chunkTotal: chunks.length
+          chunkIndex,
+          chunkTotal: estimatedChunkTotal
         });
       })
     );
 
-    if (pauseMs > 0 && chunkIndex < chunks.length - 1) {
+    if (useExternalFullMatchApi) {
+      throttleState.processedSinceCooldown = Number(throttleState.processedSinceCooldown || 0) + chunk.length;
+      continue;
+    }
+
+    if (pauseMs > 0 && pendingMatches.length) {
       await maybeEmitSimulationProgress(onSimulationProgress, {
         scope: 'ROUND',
         phase: 'cooldown',
@@ -3511,7 +3621,7 @@ export async function simulateRound(roundNo, options = {}) {
         completed: simulated,
         total: totalMatches,
         waitMs: pauseMs,
-        nextChunk: chunkIndex + 2
+        nextChunk: chunkIndex + 1
       });
       await delay(pauseMs);
     }
@@ -3664,6 +3774,7 @@ export async function simulateHalfSeason(options = {}) {
   );
 
   let totalSimulated = 0;
+  const externalBulkThrottleState = getExternalBulkThrottleState();
   await maybeEmitSimulationProgress(onSimulationProgress, {
     scope: 'HALF_SEASON',
     phase: 'start',
@@ -3683,22 +3794,25 @@ export async function simulateHalfSeason(options = {}) {
       useExternalBallApi,
       useExternalFullMatchApi,
       strictExternalFullMatchApi,
+      externalBulkThrottleState,
       simulationOperationId,
       onSimulationProgress: async (progress) => {
-        if (progress?.phase !== 'progress') {
+        if (progress?.phase !== 'progress' && progress?.phase !== 'cooldown') {
           return;
         }
 
         await maybeEmitSimulationProgress(onSimulationProgress, {
           scope: 'HALF_SEASON',
-          phase: 'progress',
+          phase: progress.phase,
           operationId: simulationOperationId,
           seasonId: targetSeasonId,
           roundNo: progress.roundNo,
           leagueTier: progress.leagueTier,
           matchId: progress.matchId,
           completed: Math.min(totalMatches, totalSimulated + Number(progress.completed || 0)),
-          total: totalMatches
+          total: totalMatches,
+          waitMs: progress.waitMs,
+          nextChunk: progress.nextChunk
         });
       }
     });
@@ -3724,6 +3838,142 @@ export async function simulateHalfSeason(options = {}) {
   };
 }
 
+export async function simulateInternationalNextDay(options = {}) {
+  const {
+    broadcast = () => {},
+    useExternalBallApi = false,
+    useExternalFullMatchApi = env.streetCricketFullMatchApiEnabled,
+    strictExternalFullMatchApi = true,
+    externalBulkThrottleState = null,
+    simulationOperationId = null,
+    onSimulationProgress = null,
+    worldId = null,
+    seasonId = null,
+    autoCreateNextSeason = true
+  } = options;
+
+  const activeSeason = seasonId
+    ? (await pool.query('SELECT * FROM seasons WHERE id = $1', [seasonId])).rows[0] || null
+    : await getActiveSeason(pool, worldId);
+
+  if (!activeSeason) {
+    return { totalSimulated: 0, seasonId: null, currentDate: null, nextDate: null, operationId: simulationOperationId };
+  }
+
+  if (String(activeSeason.competition_mode || '').toUpperCase() !== 'INTERNATIONAL') {
+    const error = new Error('Simulate Next Day is only available in international mode.');
+    error.status = 400;
+    throw error;
+  }
+
+  await ensureInternationalCycleSchedule(Number(activeSeason.id), pool);
+
+  const currentDate = toDateKey(activeSeason.calendar_date || activeSeason.cycle_start_date || activeSeason.start_date || new Date());
+  const matches = await pool.query(
+    `SELECT id
+     FROM matches
+     WHERE season_id = $1
+       AND DATE(COALESCE(scheduled_at, CURRENT_DATE)) = $2::date
+       AND status <> 'COMPLETED'
+     ORDER BY COALESCE(scheduled_at, NOW()) ASC, id ASC`,
+    [activeSeason.id, currentDate]
+  );
+
+  const totalMatches = Number(matches.rows.length || 0);
+  await maybeEmitSimulationProgress(onSimulationProgress, {
+    scope: 'DAY',
+    phase: 'start',
+    operationId: simulationOperationId,
+    seasonId: Number(activeSeason.id),
+    currentDate,
+    completed: 0,
+    total: totalMatches
+  });
+
+  let simulated = 0;
+  const throttleState = getExternalBulkThrottleState(externalBulkThrottleState);
+  for (const match of matches.rows) {
+    await maybeApplyExternalBulkCooldown({
+      useExternalFullMatchApi,
+      throttleState,
+      onSimulationProgress,
+      progressPayload: {
+        scope: 'DAY',
+        operationId: simulationOperationId,
+        seasonId: Number(activeSeason.id),
+        currentDate,
+        completed: simulated,
+        total: totalMatches,
+        nextMatch: Number(match.id)
+      }
+    });
+
+    await simulateMatchForBatch(match.id, {
+      broadcast,
+      autoCreateNextSeason: false,
+      useExternalBallApi,
+      useExternalFullMatchApi,
+      strictExternalFullMatchApi,
+      simulationOperationId
+    });
+
+    simulated += 1;
+    await maybeEmitSimulationProgress(onSimulationProgress, {
+      scope: 'DAY',
+      phase: 'progress',
+      operationId: simulationOperationId,
+      seasonId: Number(activeSeason.id),
+      currentDate,
+      matchId: Number(match.id),
+      completed: simulated,
+      total: totalMatches
+    });
+
+    if (useExternalFullMatchApi) {
+      throttleState.processedSinceCooldown = Number(throttleState.processedSinceCooldown || 0) + 1;
+    }
+  }
+
+  const seasonState = await maybeProgressInternationalCompetition(Number(activeSeason.id), pool);
+  const nextDate = toDateKey(addUtcDays(currentDate, 1));
+  await pool.query(
+    `UPDATE seasons
+     SET calendar_date = $2::date,
+         current_cycle_year = GREATEST(1, LEAST(cycle_length_years, EXTRACT(YEAR FROM AGE($2::date, COALESCE(cycle_start_date, start_date, $2::date)))::int + 1))
+     WHERE id = $1
+       AND status <> 'COMPLETED'`,
+    [activeSeason.id, nextDate]
+  );
+
+  if (seasonState.state === 'SEASON_COMPLETED') {
+    await finalizeManagerSeasonLifecycle(Number(activeSeason.id), pool);
+    if (autoCreateNextSeason) {
+      await createNextSeasonFromCompleted(Number(activeSeason.id), pool);
+    }
+  }
+
+  await maybeEmitSimulationProgress(onSimulationProgress, {
+    scope: 'DAY',
+    phase: 'complete',
+    operationId: simulationOperationId,
+    seasonId: Number(activeSeason.id),
+    currentDate,
+    nextDate,
+    completed: simulated,
+    total: totalMatches
+  });
+
+  return {
+    totalSimulated: simulated,
+    totalMatches,
+    seasonId: Number(activeSeason.id),
+    currentDate,
+    nextDate,
+    seasonState: seasonState.state,
+    operationId: simulationOperationId
+  };
+}
+
 export async function simulateSeasonToEnd(options = {}) {
   const {
     broadcast = () => {},
@@ -3740,6 +3990,57 @@ export async function simulateSeasonToEnd(options = {}) {
     return { totalSimulated: 0, seasonId: null, completedSeasonId: null, nextSeasonId: null };
   }
 
+  if (String(activeSeason.competition_mode || '').toUpperCase() === 'INTERNATIONAL') {
+    let totalSimulated = 0;
+    const targetSeasonId = Number(activeSeason.id);
+    let latestSeason = activeSeason;
+    let guardDays = 0;
+    const externalBulkThrottleState = getExternalBulkThrottleState();
+
+    while (String(latestSeason.status || '').toUpperCase() !== 'COMPLETED') {
+      guardDays += 1;
+      if (guardDays > 2200) {
+        const error = new Error('International cycle simulation exceeded safe day limit.');
+        error.status = 500;
+        throw error;
+      }
+
+      const result = await simulateInternationalNextDay({
+        broadcast,
+        useExternalBallApi,
+        useExternalFullMatchApi,
+        strictExternalFullMatchApi,
+        externalBulkThrottleState,
+        simulationOperationId,
+        worldId,
+        seasonId: targetSeasonId,
+        autoCreateNextSeason: false,
+        onSimulationProgress
+      });
+      totalSimulated += Number(result.totalSimulated || 0);
+      latestSeason = (await pool.query('SELECT * FROM seasons WHERE id = $1', [targetSeasonId])).rows[0] || latestSeason;
+
+      if (!result.totalMatches && String(latestSeason.status || '').toUpperCase() !== 'COMPLETED') {
+        await pool.query(
+          `UPDATE seasons
+           SET calendar_date = $2::date
+           WHERE id = $1`,
+          [targetSeasonId, toDateKey(addUtcDays(latestSeason.calendar_date || latestSeason.start_date || new Date(), 1))]
+        );
+        latestSeason = (await pool.query('SELECT * FROM seasons WHERE id = $1', [targetSeasonId])).rows[0] || latestSeason;
+      }
+    }
+
+    const nextSeason = await createNextSeasonFromCompleted(targetSeasonId, pool);
+    return {
+      totalSimulated,
+      seasonId: targetSeasonId,
+      completedSeasonId: targetSeasonId,
+      nextSeasonId: nextSeason?.id || null,
+      operationId: simulationOperationId
+    };
+  }
+
   const targetSeasonId = Number(activeSeason.id);
   const totalPendingMatches = Number(
     (
@@ -3747,7 +4048,7 @@ export async function simulateSeasonToEnd(options = {}) {
         `SELECT COUNT(*)::int AS count
          FROM matches
          WHERE season_id = $1
-           AND stage IN ('REGULAR', 'PLAYOFF', 'FINAL')
+           AND stage IN ('REGULAR', 'PLAYOFF', 'FINAL', 'SERIES')
            AND status <> 'COMPLETED'`,
         [targetSeasonId]
       )
@@ -3755,6 +4056,7 @@ export async function simulateSeasonToEnd(options = {}) {
   );
 
   let totalSimulated = 0;
+  const externalBulkThrottleState = getExternalBulkThrottleState();
 
   await maybeEmitSimulationProgress(onSimulationProgress, {
     scope: 'SEASON',
@@ -3774,22 +4076,25 @@ export async function simulateSeasonToEnd(options = {}) {
       useExternalBallApi,
       useExternalFullMatchApi,
       strictExternalFullMatchApi,
+      externalBulkThrottleState,
       simulationOperationId,
       onSimulationProgress: async (progress) => {
-        if (progress?.phase !== 'progress') {
+        if (progress?.phase !== 'progress' && progress?.phase !== 'cooldown') {
           return;
         }
 
         await maybeEmitSimulationProgress(onSimulationProgress, {
           scope: 'SEASON',
-          phase: 'progress',
+          phase: progress.phase,
           operationId: simulationOperationId,
           seasonId: targetSeasonId,
           roundNo: progress.roundNo,
           leagueTier: progress.leagueTier,
           matchId: progress.matchId,
           completed: Math.min(totalPendingMatches, totalSimulated + Number(progress.completed || 0)),
-          total: totalPendingMatches
+          total: totalPendingMatches,
+          waitMs: progress.waitMs,
+          nextChunk: progress.nextChunk
         });
       }
     });

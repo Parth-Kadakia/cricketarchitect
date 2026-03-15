@@ -31,6 +31,12 @@ const TABS = [
   { key: 'h2h', label: 'Head-to-Head' }
 ];
 
+const MODE_OPTIONS = [
+  { value: 'ALL', label: 'All Competitions' },
+  { value: 'CLUB', label: 'Club Statbook' },
+  { value: 'INTERNATIONAL', label: 'International Statbook' }
+];
+
 export default function StatbookPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
@@ -38,6 +44,7 @@ export default function StatbookPage() {
   const [error, setError] = useState('');
   const [tab, setTab] = useState('players');
   const [seasonId, setSeasonId] = useState('');
+  const [competitionMode, setCompetitionMode] = useState('ALL');
 
   const [overview, setOverview] = useState(null);
   const [playerRecords, setPlayerRecords] = useState(null);
@@ -53,16 +60,17 @@ export default function StatbookPage() {
 
   useEffect(() => { setPageTitle('Statbook'); }, []);
 
-  async function loadStatbook(activeSeasonId) {
+  async function loadStatbook(activeSeasonId, activeMode = competitionMode) {
     setLoading(true);
     setError('');
     try {
       const numericSeasonId = activeSeasonId ? Number(activeSeasonId) : null;
+      const apiMode = activeMode === 'ALL' ? null : activeMode;
       const [overviewData, playerData, teamData, archiveData] = await Promise.all([
-        api.statbook.overview(token, numericSeasonId),
-        api.statbook.playerRecords(token, numericSeasonId, 500),
-        api.statbook.teamRecords(token, numericSeasonId, 500),
-        api.statbook.matchArchive(token, { seasonId: numericSeasonId, limit: 50, offset: 0 })
+        api.statbook.overview(token, numericSeasonId, apiMode),
+        api.statbook.playerRecords(token, numericSeasonId, 500, apiMode),
+        api.statbook.teamRecords(token, numericSeasonId, 500, apiMode),
+        api.statbook.matchArchive(token, { seasonId: numericSeasonId, limit: 50, offset: 0, competitionMode: apiMode })
       ]);
 
       setOverview(overviewData);
@@ -77,8 +85,8 @@ export default function StatbookPage() {
   }
 
   useEffect(() => {
-    loadStatbook(seasonId);
-  }, [seasonId]);
+    loadStatbook(seasonId, competitionMode);
+  }, [seasonId, competitionMode]);
 
   const teams = overview?.teams || [];
   const seasons = overview?.seasons || [];
@@ -106,7 +114,14 @@ export default function StatbookPage() {
       }
       setHeadToHeadLoading(true);
       try {
-        const payload = await api.statbook.headToHead(token, Number(teamAId), Number(teamBId), seasonId ? Number(seasonId) : null, 20);
+      const payload = await api.statbook.headToHead(
+        token,
+        Number(teamAId),
+        Number(teamBId),
+        seasonId ? Number(seasonId) : null,
+        20,
+        competitionMode === 'ALL' ? null : competitionMode
+      );
         setHeadToHead(payload);
       } catch (h2hError) {
         setHeadToHead(null);
@@ -116,7 +131,7 @@ export default function StatbookPage() {
       }
     }
     loadHeadToHead();
-  }, [teamAId, teamBId, seasonId]);
+  }, [teamAId, teamBId, seasonId, competitionMode]);
 
   const mostRuns = playerRecords?.most_runs || [];
   const mostWickets = playerRecords?.most_wickets || [];
@@ -144,7 +159,8 @@ export default function StatbookPage() {
       const moreData = await api.statbook.matchArchive(token, {
         seasonId: numericSeasonId,
         limit: 50,
-        offset: currentCount
+        offset: currentCount,
+        competitionMode: competitionMode === 'ALL' ? null : competitionMode
       });
       setArchive((prev) => ({
         ...prev,
@@ -168,9 +184,9 @@ export default function StatbookPage() {
 
       // Fetch complete data fresh from API
       const [fullPlayer, fullTeam, fullArchive] = await Promise.all([
-        api.statbook.playerRecords(token, numericSeasonId, 500),
-        api.statbook.teamRecords(token, numericSeasonId, 500),
-        api.statbook.matchArchive(token, { seasonId: numericSeasonId, limit: 5000, offset: 0 })
+        api.statbook.playerRecords(token, numericSeasonId, 500, competitionMode === 'ALL' ? null : competitionMode),
+        api.statbook.teamRecords(token, numericSeasonId, 500, competitionMode === 'ALL' ? null : competitionMode),
+        api.statbook.matchArchive(token, { seasonId: numericSeasonId, limit: 5000, offset: 0, competitionMode: competitionMode === 'ALL' ? null : competitionMode })
       ]);
 
       const allMostRuns = fullPlayer?.most_runs || [];
@@ -185,6 +201,7 @@ export default function StatbookPage() {
       const seasonLabel = seasonId
         ? (seasons.find((s) => String(s.id) === String(seasonId))?.name || `Season ${seasonId}`)
         : 'All Time';
+      const modeLabel = MODE_OPTIONS.find((option) => option.value === competitionMode)?.label || 'All Competitions';
 
     const sheets = [];
 
@@ -268,9 +285,10 @@ export default function StatbookPage() {
     if (allArchive.length) {
       sheets.push({
         name: 'Match Archive',
-        headers: ['Season', 'Round', 'League', 'Home', 'Home Score', 'Away', 'Away Score', 'Result'],
+        headers: ['Season', 'Mode', 'Round', 'League', 'Home', 'Home Score', 'Away', 'Away Score', 'Result'],
         rows: allArchive.map((r) => [
-          r.season_name, r.round_no,
+          r.season_name, r.competition_mode,
+          r.round_no,
           r.league_tier ? `League ${r.league_tier}` : r.stage,
           `${r.home_team} (${r.home_country})`,
           `${r.home_score}/${r.home_wickets} (${oversFromBalls(r.home_balls)})`,
@@ -283,7 +301,7 @@ export default function StatbookPage() {
 
     if (!sheets.length) return;
     const safeName = seasonLabel.replace(/\s+/g, '-').toLowerCase();
-    downloadExcel(`statbook-${safeName}.xls`, sheets);
+    downloadExcel(`statbook-${safeName}-${modeLabel.replace(/\s+/g, '-').toLowerCase()}.xls`, sheets);
     } catch (exportErr) {
       setError(exportErr.message || 'Failed to export.');
     } finally {
@@ -298,6 +316,12 @@ export default function StatbookPage() {
       b: map.get(String(teamBId)) || null
     };
   }, [teams, teamAId, teamBId]);
+
+  useEffect(() => {
+    setSeasonId('');
+  }, [competitionMode]);
+
+  const activeModeLabel = MODE_OPTIONS.find((option) => option.value === competitionMode)?.label || 'All Competitions';
 
   if (loading) {
     return (
@@ -324,12 +348,22 @@ export default function StatbookPage() {
       <div className="sb-header">
         <div>
           <h2 className="sb-title">Deep Records & Statbook</h2>
-          <p className="sb-subtitle">Historical records, milestones, and match archive across seasons.</p>
+          <p className="sb-subtitle">{activeModeLabel} records, milestones, and match archive across seasons.</p>
         </div>
         <div className="sb-header-actions">
           <button type="button" className="sb-export-btn" onClick={exportStatbookExcel} disabled={exporting} title="Download all tables as Excel">
             {exporting ? '⏳ Exporting...' : '📥 Export Excel'}
           </button>
+        <div className="sb-season">
+          <label htmlFor="sb-mode-select">Mode</label>
+          <select id="sb-mode-select" value={competitionMode} onChange={(event) => setCompetitionMode(event.target.value)}>
+            {MODE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="sb-season">
           <label htmlFor="sb-season-select">Season</label>
           <select id="sb-season-select" value={seasonId} onChange={(event) => setSeasonId(event.target.value)}>
@@ -712,6 +746,7 @@ export default function StatbookPage() {
               <thead>
                 <tr>
                   <th>Season</th>
+                  <th>Mode</th>
                   <th>Round</th>
                   <th>League</th>
                   <th>Home</th>
@@ -724,6 +759,7 @@ export default function StatbookPage() {
                 {(archive?.matches || []).map((row) => (
                   <tr key={`archive-${row.id}`}>
                     <td>{row.season_name}</td>
+                    <td>{String(row.competition_mode || '').toUpperCase() || '-'}</td>
                     <td>{row.round_no}</td>
                     <td>{row.league_tier ? `League ${row.league_tier}` : row.stage}</td>
                     <td>

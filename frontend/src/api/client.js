@@ -39,6 +39,11 @@ async function request(path, options = {}) {
   return response.json();
 }
 
+function withQuery(path, params = []) {
+  const query = params.filter(Boolean).join('&');
+  return query ? `${path}?${query}` : path;
+}
+
 export const api = {
   auth: {
     register: (payload) =>
@@ -176,6 +181,29 @@ export const api = {
     rounds: (token, seasonId) => request(`/league/rounds${seasonId ? `?seasonId=${seasonId}` : ''}`, { headers: buildHeaders(token, false) }),
     fixtures: (token, seasonId, roundNo = null) =>
       request(`/league/fixtures${seasonId || roundNo ? `?${[seasonId ? `seasonId=${seasonId}` : null, roundNo ? `roundNo=${roundNo}` : null].filter(Boolean).join('&')}` : ''}`, { headers: buildHeaders(token, false) }),
+    calendar: (token, seasonId, { offsetDays = 0, spanDays = 14 } = {}) =>
+      request(withQuery('/league/calendar', [
+        seasonId ? `seasonId=${seasonId}` : null,
+        `offsetDays=${offsetDays}`,
+        `spanDays=${spanDays}`
+      ]), { headers: buildHeaders(token, false) }),
+    calendarAll: (token, seasonId, { offsetDays = 0, spanDays = 14 } = {}) =>
+      request(withQuery('/league/calendar/all', [
+        seasonId ? `seasonId=${seasonId}` : null,
+        `offsetDays=${offsetDays}`,
+        `spanDays=${spanDays}`
+      ]), { headers: buildHeaders(token, false) }),
+    scheduleSeries: (token, payload) =>
+      request('/league/calendar/series', {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload)
+      }),
+    simulateSeries: (token, seriesId) =>
+      request(`/league/calendar/series/${seriesId}/simulate`, {
+        method: 'POST',
+        headers: buildHeaders(token)
+      }),
     events: (token, matchId) => request(`/league/matches/${matchId}/events`, { headers: buildHeaders(token, false) }),
     scorecard: (token, matchId) => request(`/league/matches/${matchId}/scorecard`, { headers: buildHeaders(token, false) }),
     simulateLive: (token, matchId, ballDelayMs = 120, operationId = null) =>
@@ -197,6 +225,12 @@ export const api = {
       }),
     simulateNextRound: (token, payload = {}) =>
       request('/league/simulate-next-round', {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload || {})
+      }),
+    simulateNextDay: (token, payload = {}) =>
+      request('/league/simulate-next-day', {
         method: 'POST',
         headers: buildHeaders(token),
         body: JSON.stringify(payload || {})
@@ -229,26 +263,39 @@ export const api = {
       request(`/league/all-stats${seasonId ? `?seasonId=${seasonId}` : ''}`, { headers: buildHeaders(token, false) })
   },
   statbook: {
-    overview: (token, seasonId = null) =>
-      request(`/statbook/overview${seasonId ? `?seasonId=${seasonId}` : ''}`, { headers: buildHeaders(token, false) }),
-    playerRecords: (token, seasonId = null, limit = 500) =>
-      request(`/statbook/player-records?${[seasonId ? `seasonId=${seasonId}` : null, `limit=${limit}`].filter(Boolean).join('&')}`, { headers: buildHeaders(token, false) }),
-    teamRecords: (token, seasonId = null, limit = 500) =>
-      request(`/statbook/team-records?${[seasonId ? `seasonId=${seasonId}` : null, `limit=${limit}`].filter(Boolean).join('&')}`, { headers: buildHeaders(token, false) }),
-    headToHead: (token, teamAId, teamBId, seasonId = null, limit = 20) =>
-      request(`/statbook/head-to-head?${[
+    overview: (token, seasonId = null, competitionMode = null) =>
+      request(withQuery('/statbook/overview', [
+        seasonId ? `seasonId=${seasonId}` : null,
+        competitionMode ? `competitionMode=${encodeURIComponent(competitionMode)}` : null
+      ]), { headers: buildHeaders(token, false) }),
+    playerRecords: (token, seasonId = null, limit = 500, competitionMode = null) =>
+      request(withQuery('/statbook/player-records', [
+        seasonId ? `seasonId=${seasonId}` : null,
+        `limit=${limit}`,
+        competitionMode ? `competitionMode=${encodeURIComponent(competitionMode)}` : null
+      ]), { headers: buildHeaders(token, false) }),
+    teamRecords: (token, seasonId = null, limit = 500, competitionMode = null) =>
+      request(withQuery('/statbook/team-records', [
+        seasonId ? `seasonId=${seasonId}` : null,
+        `limit=${limit}`,
+        competitionMode ? `competitionMode=${encodeURIComponent(competitionMode)}` : null
+      ]), { headers: buildHeaders(token, false) }),
+    headToHead: (token, teamAId, teamBId, seasonId = null, limit = 20, competitionMode = null) =>
+      request(withQuery('/statbook/head-to-head', [
         `teamAId=${teamAId}`,
         `teamBId=${teamBId}`,
         seasonId ? `seasonId=${seasonId}` : null,
-        `limit=${limit}`
-      ].filter(Boolean).join('&')}`, { headers: buildHeaders(token, false) }),
-    matchArchive: (token, { seasonId = null, teamId = null, limit = 30, offset = 0 } = {}) =>
-      request(`/statbook/match-archive?${[
+        `limit=${limit}`,
+        competitionMode ? `competitionMode=${encodeURIComponent(competitionMode)}` : null
+      ]), { headers: buildHeaders(token, false) }),
+    matchArchive: (token, { seasonId = null, teamId = null, limit = 30, offset = 0, competitionMode = null } = {}) =>
+      request(withQuery('/statbook/match-archive', [
         seasonId ? `seasonId=${seasonId}` : null,
         teamId ? `teamId=${teamId}` : null,
+        competitionMode ? `competitionMode=${encodeURIComponent(competitionMode)}` : null,
         `limit=${limit}`,
         `offset=${offset}`
-      ].filter(Boolean).join('&')}`, { headers: buildHeaders(token, false) }),
+      ]), { headers: buildHeaders(token, false) }),
     matchDetail: (token, matchId) => request(`/statbook/match-archive/${matchId}`, { headers: buildHeaders(token, false) })
   },
   marketplace: {

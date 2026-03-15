@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import CountryLabel, { normalizePlaceLabel } from '../components/CountryLabel';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { useToast } from '../context/ToastContext';
@@ -57,6 +58,7 @@ export default function DashboardPage() {
   const [addingCity, setAddingCity] = useState(false);
   const [addCityNote, setAddCityNote] = useState('');
   const [loading, setLoading] = useState(true);
+  const [simulatingNextDay, setSimulatingNextDay] = useState(false);
   const [simulatingRound, setSimulatingRound] = useState(false);
   const [simulatingMyLeagueRound, setSimulatingMyLeagueRound] = useState(false);
   const [simulatingHalfSeason, setSimulatingHalfSeason] = useState(false);
@@ -305,6 +307,9 @@ export default function DashboardPage() {
   const simulateNextRound = makeSim('Simulating Next Round', api.league.simulateNextRound, setSimulatingRound, (r) => ({
     completed: Number(r.simulated || 0), total: Number(r.totalMatches || r.simulated || 0), roundNo: r.roundNo, leagueTier: r.leagueTier
   }));
+  const simulateNextDay = makeSim('Simulating Next Day', api.league.simulateNextDay, setSimulatingNextDay, (r) => ({
+    completed: Number(r.totalSimulated || 0), total: Number(r.totalMatches || r.totalSimulated || 0)
+  }));
   const simulateMyLeagueRound = makeSim('Simulating My League Round', api.league.simulateMyLeagueRound, setSimulatingMyLeagueRound, (r) => ({
     completed: Number(r.simulated || 0), total: Number(r.totalMatches || r.simulated || 0), roundNo: r.roundNo, leagueTier: r.leagueTier
   }));
@@ -358,7 +363,7 @@ export default function DashboardPage() {
     return total ? Math.max(0, Math.min(100, Math.round((done / total) * 100))) : 0;
   }, [simulationProgress]);
 
-  const isBusy = simulatingRound || simulatingSeason || simulatingHalfSeason || simulatingMyLeagueRound;
+  const isBusy = simulatingNextDay || simulatingRound || simulatingSeason || simulatingHalfSeason || simulatingMyLeagueRound;
 
   /* ── Reset game ── */
   async function resetGame() {
@@ -445,12 +450,25 @@ export default function DashboardPage() {
               <span><strong>Career Mode:</strong> {managerCareer?.manager?.careerMode || 'CLUB'}</span>
             </div>
             <div className="db-sim-buttons db-sim-buttons--top">
-              <button type="button" className="sq-btn sq-btn--primary" disabled={isBusy} onClick={simulateNextRound}>
-                {simulatingRound ? '⏳ Simulating...' : '▶ Simulate Next Round'}
-              </button>
-              <button type="button" className="sq-btn" disabled={isBusy} onClick={simulateHalfSeason}>
-                {simulatingHalfSeason ? '⏳ Half Season...' : '⏩ Simulate Half Season'}
-              </button>
+              {unemployedCareerMode === 'INTERNATIONAL' ? (
+                <>
+                  <button type="button" className="sq-btn sq-btn--primary" disabled={isBusy} onClick={simulateNextDay}>
+                    {simulatingNextDay ? '⏳ Simulating Day...' : '▶ Simulate Next Day'}
+                  </button>
+                  <button type="button" className="sq-btn" disabled={isBusy} onClick={simulateFullSeason}>
+                    {simulatingSeason ? '⏳ Full Cycle...' : '⏩ Simulate Full Cycle'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="sq-btn sq-btn--primary" disabled={isBusy} onClick={simulateNextRound}>
+                    {simulatingRound ? '⏳ Simulating...' : '▶ Simulate Next Round'}
+                  </button>
+                  <button type="button" className="sq-btn" disabled={isBusy} onClick={simulateHalfSeason}>
+                    {simulatingHalfSeason ? '⏳ Half Season...' : '⏩ Simulate Half Season'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -536,6 +554,7 @@ export default function DashboardPage() {
     }
 
     const isInternationalCareer = careerMode === 'INTERNATIONAL';
+    const unemployedCareerMode = String(managerCareer?.manager?.careerMode || careerMode || 'CLUB').toUpperCase();
     const pickerStep = selectedCountry ? 2 : 1;
     const internationalTeamCount = internationalCountries.length || 100;
     return (
@@ -575,11 +594,11 @@ export default function DashboardPage() {
           <h2 className="fp-hero-title">{isInternationalCareer ? 'Select Your National Team' : 'Claim Your City'}</h2>
           <p className="fp-hero-sub">
             {isInternationalCareer
-              ? 'Choose one country and build your international side from equal strength.'
+              ? 'Choose one country and take charge of a fully scheduled four-year international FTP cycle.'
               : 'Choose a city, build a franchise, and rise through the global cricket pyramid.'}
             <br />
             {isInternationalCareer
-              ? <>{internationalTeamCount} national teams, 10 divisions, top-2 promotion and bottom-2 relegation.</>
+              ? <>{internationalTeamCount} national teams, global rankings, bilateral T20 series, and a World Cup every four years.</>
               : <>Every club begins at <strong className="fp-price-tag">$100.00</strong>.</>}
           </p>
           <div className="fp-hero-stats">
@@ -639,7 +658,7 @@ export default function DashboardPage() {
                   disabled={!item.available}
                   title={item.available ? `Claim ${item.country}` : `${item.country} is already assigned`}
                 >
-                  <span className="fp-country-name">{item.country}</span>
+                  <CountryLabel country={item.country} className="fp-country-name" />
                   <span className={`fp-country-badge ${item.available ? '' : 'is-claimed'}`}>{item.available ? 'Available' : 'Taken'}</span>
                 </button>
               ))}
@@ -696,7 +715,7 @@ export default function DashboardPage() {
                       className={`fp-country-row ${selectedCountry === item.country ? 'fp-country-row--active' : ''}`}
                       onClick={() => { setSelectedCountry(item.country); setCitySearch(''); }}
                     >
-                      <span className="fp-country-name">{item.country}</span>
+                      <CountryLabel country={item.country} className="fp-country-name" />
                       <span className="fp-country-badge">{item.count}</span>
                     </button>
                   ))}
@@ -711,7 +730,7 @@ export default function DashboardPage() {
                     <h3 className="fp-card-title">Select City</h3>
                     <span className="fp-card-sub">
                       {selectedCountry
-                        ? <>{countryCities.length} {countryCities.length === 1 ? 'city' : 'cities'} available in <strong>{selectedCountry}</strong></>
+                        ? <>{countryCities.length} {countryCities.length === 1 ? 'city' : 'cities'} available in <strong><CountryLabel country={selectedCountry} /></strong></>
                         : 'Select a country first to see available cities.'}
                     </span>
                   </div>
@@ -738,7 +757,7 @@ export default function DashboardPage() {
                 ) : filteredCities.length === 0 ? (
                   <div className="fp-empty">
                     <div className="fp-empty-icon">🔎</div>
-                    <span>No matching cities in {selectedCountry}.</span>
+                    <span>No matching cities in <CountryLabel country={selectedCountry} />.</span>
                   </div>
                 ) : (
                   <div className="fp-city-grid">
@@ -807,7 +826,7 @@ export default function DashboardPage() {
                   <h3 className="fp-confirm-title">Confirm Selection</h3>
                   <p className="fp-confirm-text">
                     {pendingClaim.type === 'INTERNATIONAL' ? (
-                      <>You are about to start an <strong>International Career</strong> managing <strong>{pendingClaim.country}</strong>.</>
+                      <>You are about to start an <strong>International Career</strong> managing <strong><CountryLabel country={pendingClaim.country} /></strong>.</>
                     ) : (
                       <>You are about to start a <strong>Club T20 Career</strong> in <strong>{pendingClaim.cityName}, {selectedCountry}</strong>.</>
                     )}
@@ -839,6 +858,9 @@ export default function DashboardPage() {
   const teamsPerLeague = Number(ss?.season?.teams_per_league || 0);
   const boardConfidence = Number(managerCareer?.board?.confidence || 0);
   const boardObjectives = Array.isArray(managerCareer?.board?.objectives) ? managerCareer.board.objectives : [];
+  const hasDistinctInternationalBase = fd?.city_name
+    && fd?.country
+    && normalizePlaceLabel(fd.city_name) !== normalizePlaceLabel(fd.country);
 
   return (
     <div className="db-page">
@@ -867,10 +889,74 @@ export default function DashboardPage() {
       )}
 
       {/* ── Header ── */}
-      <div className="db-header">
-        <div>
-          <h2 className="db-title">{fd?.franchise_name || 'Dashboard'}</h2>
-          <span className="db-subtitle">{fd?.city_name}, {fd?.country} &middot; League {fd?.current_league_tier || 1}</span>
+      <div className="db-command">
+        <div className="db-command-copy">
+          <span className="db-command-kicker">{isInternationalMode ? 'International Command' : 'Club Command'}</span>
+          <div className="db-header">
+            <div>
+              <h2 className="db-title">{fd?.franchise_name || 'Dashboard'}</h2>
+              <span className="db-subtitle">
+                {isInternationalMode
+                  ? hasDistinctInternationalBase
+                    ? <>{fd?.city_name} · <CountryLabel country={fd?.country} /></>
+                    : <CountryLabel country={fd?.country || fd?.city_name} />
+                  : <>{fd?.city_name}, {fd?.country}</>
+                }
+                {' '}&middot; {isInternationalMode ? 'International Career' : `League ${fd?.current_league_tier || 1}`}
+              </span>
+            </div>
+          </div>
+          <div className="db-command-tags">
+            <span>{fd?.wins || 0}W-{fd?.losses || 0}L</span>
+            <span>{isInternationalMode ? `World Rank ${fd?.league_position || '—'}` : `League Position ${fd?.league_position || '—'}/${teamsPerLeague || '?'}`}</span>
+            <span>{squadSummary?.main_squad_count || 0} main squad</span>
+            <span>{squadSummary?.youth_count || 0} youth</span>
+          </div>
+        </div>
+        <div className="db-command-controls">
+          <div className="db-card-head">
+            <div>
+              <h3 className="db-section-title">Season Controls</h3>
+              <p className="db-card-note">
+                {isInternationalMode
+                  ? 'Advance the global calendar and auto-resolve scheduled international fixtures.'
+                  : 'Push the domestic season forward without leaving the dashboard.'}
+              </p>
+            </div>
+          </div>
+          <div className="db-sim-buttons">
+            {isInternationalMode ? (
+              <button type="button" className="sq-btn sq-btn--primary" disabled={isBusy} onClick={simulateNextDay}>
+                {simulatingNextDay ? '⏳ Simulating Day...' : '▶ Next Day'}
+              </button>
+            ) : (
+              <>
+                <button type="button" className="sq-btn sq-btn--primary" disabled={isBusy} onClick={simulateNextRound}>
+                  {simulatingRound ? '⏳ Simulating...' : '▶ Next Round'}
+                </button>
+                <button type="button" className="sq-btn" disabled={isBusy} onClick={simulateMyLeagueRound}>
+                  {simulatingMyLeagueRound ? '⏳ My League...' : '🏟️ My League Round'}
+                </button>
+                <button type="button" className="sq-btn" disabled={isBusy} onClick={simulateHalfSeason}>
+                  {simulatingHalfSeason ? '⏳ Half Season...' : '⏩ Half Season'}
+                </button>
+              </>
+            )}
+            <button type="button" className="sq-btn" disabled={isBusy} onClick={simulateFullSeason}>
+              {simulatingSeason ? (isInternationalMode ? '⏳ Full Cycle...' : '⏳ Full Season...') : (isInternationalMode ? '🔄 Full Cycle' : '🔄 Full Season')}
+            </button>
+          </div>
+
+          {simulationProgress && (
+            <div className="db-sim-progress">
+              <div className="db-sim-progress-head">
+                <strong>{simulationProgress.label}</strong>
+                <span>{simulationProgress.total ? `${simulationProgress.completed}/${simulationProgress.total} (${simPct}%)` : simulationProgress.phase === 'complete' ? 'Done ✓' : 'Preparing...'}</span>
+              </div>
+              <div className="db-sim-track"><div className="db-sim-fill" style={{ width: `${simPct}%` }} /></div>
+              <span className="db-sim-note">External ball API rate limits can make large batches take a few minutes.</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -887,9 +973,9 @@ export default function DashboardPage() {
           <span className="db-hero-hint">🏆 {fd?.championships || 0} titles</span>
         </div>
         <div className="db-hero-card">
-          <span className="db-hero-label">League Position</span>
+          <span className="db-hero-label">{isInternationalMode ? 'World Rank' : 'League Position'}</span>
           <span className="db-hero-value">{fd?.league_position || '—'}<span className="db-hero-dim">/ {teamsPerLeague || '?'}</span></span>
-          <span className="db-hero-hint">Tier {fd?.current_league_tier || 1}</span>
+          <span className="db-hero-hint">{isInternationalMode ? 'Global standings' : `Tier ${fd?.current_league_tier || 1}`}</span>
         </div>
         <div className="db-hero-card">
           <span className="db-hero-label">Squad OVR</span>
@@ -913,107 +999,129 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="db-card">
-        <div className="db-season-meta" style={{ marginBottom: 10 }}>
-          <h3 className="db-section-title" style={{ margin: 0 }}>Manager Career</h3>
-          <button
-            type="button"
-            className="sq-btn sq-btn--danger"
-            disabled={managerActionBusy}
-            onClick={retireCareer}
-          >
-            Retire Manager
-          </button>
-        </div>
-        <div className="db-season-meta" style={{ marginBottom: 10 }}>
-          <span><strong>Points:</strong> {managerCareer?.manager?.points || 0}</span>
-          <span><strong>Status:</strong> {managerCareer?.manager?.status || 'ACTIVE'}</span>
-          <span><strong>Career Record:</strong> {managerCareer?.manager?.winsManaged || 0}W-{managerCareer?.manager?.lossesManaged || 0}L</span>
-          <span><strong>Titles:</strong> {managerCareer?.manager?.titles || 0}</span>
-        </div>
-        <div className="db-sim-progress" style={{ marginBottom: 8 }}>
-          <div className="db-sim-progress-head">
-            <strong>Board Confidence</strong>
-            <span>{boardConfidence.toFixed(0)} / 100</span>
+      {/* ── Overview row ── */}
+      <div className="db-overview-grid">
+        <div className="db-card">
+          <div className="db-card-head">
+            <div>
+              <h3 className="db-section-title">Manager Career</h3>
+              <p className="db-card-note">Board confidence, reputation, and the objectives keeping your job secure.</p>
+            </div>
+            <button
+              type="button"
+              className="sq-btn sq-btn--danger"
+              disabled={managerActionBusy}
+              onClick={retireCareer}
+            >
+              Retire Manager
+            </button>
           </div>
-          <div className="db-sim-track">
-            <div className="db-sim-fill" style={{ width: `${Math.max(0, Math.min(100, Math.round(boardConfidence)))}%` }} />
+          <div className="db-kpi-grid">
+            <div className="db-kpi">
+              <span>Points</span>
+              <strong>{managerCareer?.manager?.points || 0}</strong>
+            </div>
+            <div className="db-kpi">
+              <span>Status</span>
+              <strong>{managerCareer?.manager?.status || 'ACTIVE'}</strong>
+            </div>
+            <div className="db-kpi">
+              <span>Career Record</span>
+              <strong>{managerCareer?.manager?.winsManaged || 0}W-{managerCareer?.manager?.lossesManaged || 0}L</strong>
+            </div>
+            <div className="db-kpi">
+              <span>Titles</span>
+              <strong>{managerCareer?.manager?.titles || 0}</strong>
+            </div>
           </div>
-        </div>
-        {boardObjectives.length > 0 ? (
-          <div className="db-results-list">
-            {boardObjectives.map((objective) => (
-              <div key={objective.id || objective.objective_code} className="db-result-item">
-                <span className={`db-result-badge ${
-                  objective.status === 'COMPLETED'
-                    ? 'db-result-badge--win'
-                    : objective.status === 'FAILED'
-                      ? 'db-result-badge--loss'
-                      : 'db-result-badge--draw'
-                }`}
-                >
-                  {objective.status === 'COMPLETED' ? '✓' : objective.status === 'FAILED' ? '✕' : '…'}
-                </span>
-                <div className="db-result-body">
-                  <span className="db-result-summary">{String(objective.objective_code || '').replace(/_/g, ' ')}</span>
-                  <span className="db-result-time">
-                    Target {Number(objective.target_value || 0).toFixed(1)} • Progress {Number(objective.progress_value || 0).toFixed(1)}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="sq-empty">Board objectives will appear after your current season context is initialized.</div>
-        )}
-      </div>
-
-      {/* ── Simulation controls ── */}
-      <div className="db-sim-section">
-        <h3 className="db-section-title">Season Controls</h3>
-        <div className="db-sim-buttons">
-          <button type="button" className="sq-btn sq-btn--primary" disabled={isBusy} onClick={simulateNextRound}>
-            {simulatingRound ? '⏳ Simulating...' : '▶ Next Round'}
-          </button>
-          <button type="button" className="sq-btn" disabled={isBusy} onClick={simulateMyLeagueRound}>
-            {simulatingMyLeagueRound ? '⏳ My League...' : '🏟️ My League Round'}
-          </button>
-          <button type="button" className="sq-btn" disabled={isBusy} onClick={simulateHalfSeason}>
-            {simulatingHalfSeason ? '⏳ Half Season...' : '⏩ Half Season'}
-          </button>
-          <button type="button" className="sq-btn" disabled={isBusy} onClick={simulateFullSeason}>
-            {simulatingSeason ? '⏳ Full Season...' : '🔄 Full Season'}
-          </button>
-        </div>
-
-        {simulationProgress && (
           <div className="db-sim-progress">
             <div className="db-sim-progress-head">
-              <strong>{simulationProgress.label}</strong>
-              <span>{simulationProgress.total ? `${simulationProgress.completed}/${simulationProgress.total} (${simPct}%)` : simulationProgress.phase === 'complete' ? 'Done ✓' : 'Preparing...'}</span>
+              <strong>Board Confidence</strong>
+              <span>{boardConfidence.toFixed(0)} / 100</span>
             </div>
-            <div className="db-sim-track"><div className="db-sim-fill" style={{ width: `${simPct}%` }} /></div>
-            <span className="db-sim-note">External ball API rate limits can make large batches take a few minutes.</span>
+            <div className="db-sim-track">
+              <div className="db-sim-fill" style={{ width: `${Math.max(0, Math.min(100, Math.round(boardConfidence)))}%` }} />
+            </div>
           </div>
-        )}
-      </div>
+          {boardObjectives.length > 0 ? (
+            <div className="db-objective-list">
+              {boardObjectives.map((objective) => (
+                <div key={objective.id || objective.objective_code} className="db-objective-item">
+                  <span className={`db-objective-status ${
+                    objective.status === 'COMPLETED'
+                      ? 'db-result-badge--win'
+                      : objective.status === 'FAILED'
+                        ? 'db-result-badge--loss'
+                        : 'db-result-badge--draw'
+                  }`}
+                  >
+                    {objective.status === 'COMPLETED' ? 'Completed' : objective.status === 'FAILED' ? 'Failed' : 'In Progress'}
+                  </span>
+                  <div className="db-objective-copy">
+                    <strong>{String(objective.objective_code || '').replace(/_/g, ' ')}</strong>
+                    <span>Target {Number(objective.target_value || 0).toFixed(1)} • Progress {Number(objective.progress_value || 0).toFixed(1)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="sq-empty">Board objectives will appear after your current season context is initialized.</div>
+          )}
+        </div>
 
-      {/* ── Season + Recent Results row ── */}
-      <div className="db-two-col">
         {/* Season overview */}
         <div className="db-card">
-          <h3 className="db-section-title">Season Overview</h3>
+          <div className="db-card-head">
+            <div>
+              <h3 className="db-section-title">Season Overview</h3>
+              <p className="db-card-note">{isInternationalMode ? 'Track the current FTP cycle, date, and tournament path.' : 'See how far the domestic season has progressed.'}</p>
+            </div>
+          </div>
           {ss ? (
             <>
               <div className="db-season-meta">
                 <span><strong>{ss.season.name}</strong></span>
-                <span>{ss.season.league_count || 4} {isInternationalMode ? 'divisions' : 'leagues'}</span>
+                <span>
+                  {isInternationalMode
+                    ? `Cycle Year ${ss.season.current_cycle_year || 1} of ${ss.season.cycle_length_years || 4} • ${ss.season.current_phase || 'FTP'}`
+                    : `${ss.season.league_count || 4} leagues`}
+                </span>
               </div>
               <div className="db-season-progress">
                 <div className="db-season-bar"><div className="db-season-bar-fill" style={{ width: `${fixturesPct}%` }} /></div>
                 <span className="db-season-pct">{fixturesDone}/{fixturesTotal} matches ({fixturesPct}%)</span>
               </div>
-              {(ss.rounds || []).length > 0 && (
+              {isInternationalMode ? (
+                <div className="db-results-list">
+                  <div className="db-result-item">
+                    <span className="db-result-badge db-result-badge--draw">📅</span>
+                    <div className="db-result-body">
+                      <span className="db-result-summary">Current date</span>
+                      <span className="db-result-time">{ss.season.calendar_date || '—'}</span>
+                    </div>
+                  </div>
+                  <div className="db-result-item">
+                    <span className="db-result-badge db-result-badge--draw">🤝</span>
+                    <div className="db-result-body">
+                      <span className="db-result-summary">FTP series</span>
+                      <span className="db-result-time">
+                        {Number(ss.seriesOverview?.completed_series || 0)} / {Number(ss.seriesOverview?.total_series || 0)} completed
+                      </span>
+                    </div>
+                  </div>
+                  <div className="db-result-item">
+                    <span className="db-result-badge db-result-badge--draw">🏆</span>
+                    <div className="db-result-body">
+                      <span className="db-result-summary">World Cup</span>
+                      <span className="db-result-time">
+                        {(ss.worldCupOverview || []).length
+                          ? (ss.worldCupOverview || []).map((entry) => `${String(entry.stage || '').replace('WORLD_CUP_', '')}: ${entry.completed_matches}/${entry.total_matches}`).join(' • ')
+                          : 'Qualification in progress'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : (ss.rounds || []).length > 0 && (
                 <div className="db-round-list">
                   {ss.rounds.slice(0, 10).map((rnd) => {
                     const t = Number(rnd.total_matches || 0);
@@ -1035,7 +1143,12 @@ export default function DashboardPage() {
 
         {/* Recent results */}
         <div className="db-card">
-          <h3 className="db-section-title">Recent Results</h3>
+          <div className="db-card-head">
+            <div>
+              <h3 className="db-section-title">Recent Results</h3>
+              <p className="db-card-note">The latest outcomes shaping morale, form, and board sentiment.</p>
+            </div>
+          </div>
           {recentResults.length === 0 ? (
             <div className="sq-empty">No matches played yet.</div>
           ) : (

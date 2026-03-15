@@ -24,6 +24,19 @@ function parseLimit(value, defaultValue = 20, max = 100) {
   return Math.min(max, Math.floor(parsed));
 }
 
+function parseCompetitionMode(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!normalized) {
+    return null;
+  }
+  return ['CLUB', 'INTERNATIONAL'].includes(normalized) ? normalized : 'INVALID';
+}
+
+function seasonScopeSql(seasonRef, worldIdParamRef, competitionMode) {
+  const modeClause = competitionMode ? ` AND competition_mode = '${competitionMode}'` : '';
+  return `${seasonRef} IN (SELECT id FROM seasons WHERE world_id = ${worldIdParamRef}${modeClause})`;
+}
+
 function oversFromBalls(balls) {
   const safeBalls = Number(balls || 0);
   return `${Math.floor(safeBalls / 6)}.${safeBalls % 6}`;
@@ -34,20 +47,32 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
+    const competitionMode = parseCompetitionMode(req.query.competitionMode);
     const worldId = req.user?.active_world_id || null;
 
     if (!worldId) return res.json({ seasonId: null, seasons: [], teams: [], totals: {}, records: {}, milestones: {} });
+    if (competitionMode === 'INVALID') {
+      return res.status(400).json({ message: 'competitionMode must be CLUB or INTERNATIONAL.' });
+    }
 
     if (seasonId) {
-      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      const check = await pool.query(
+        `SELECT id
+         FROM seasons
+         WHERE id = $1
+           AND world_id = $2
+           ${competitionMode ? `AND competition_mode = '${competitionMode}'` : ''}`,
+        [seasonId, worldId]
+      );
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
 
     const [seasons, teams, totals, boundaries, highestTeamTotal, lowestTeamTotal, highestIndividual, bestBowling, milestones] = await Promise.all([
       pool.query(
-        `SELECT id, season_number, name, status
+        `SELECT id, season_number, name, status, competition_mode
          FROM seasons
          WHERE world_id = $1
+           ${competitionMode ? `AND competition_mode = '${competitionMode}'` : ''}
          ORDER BY season_number DESC`,
         [worldId]
       ),
@@ -57,13 +82,13 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+             AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
            UNION
            SELECT DISTINCT away_franchise_id
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+             AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
          )
          SELECT f.id AS franchise_id,
                 f.franchise_name,
@@ -81,7 +106,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+             AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
          )
          SELECT COUNT(*)::int AS completed_matches,
                 COALESCE(SUM(COALESCE(home_score, 0) + COALESCE(away_score, 0)), 0)::int AS total_runs,
@@ -100,7 +125,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+             AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
          )
          SELECT COALESCE(SUM(pms.fours), 0)::int AS fours,
                 COALESCE(SUM(pms.sixes), 0)::int AS sixes
@@ -114,7 +139,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+             AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -152,7 +177,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+             AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -203,7 +228,7 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+           AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
          ORDER BY pms.batting_runs DESC, pms.batting_balls ASC
          LIMIT 1`,
         [seasonId, worldId]
@@ -226,7 +251,8 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+           AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
+           AND p.role = 'BOWLER'
          ORDER BY pms.bowling_wickets DESC, pms.bowling_runs ASC, pms.bowling_balls ASC
          LIMIT 1`,
         [seasonId, worldId]
@@ -237,7 +263,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+             AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
          )
          SELECT
            COALESCE(SUM(CASE WHEN pms.batting_runs BETWEEN 50 AND 99 THEN 1 ELSE 0 END), 0)::int AS fifties,
@@ -255,6 +281,7 @@ router.get(
 
     return res.json({
       seasonId,
+      competitionMode,
       seasons: seasons.rows,
       teams: teams.rows,
       totals: {
@@ -290,12 +317,23 @@ router.get(
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
     const limit = parseLimit(req.query.limit, 25, 500);
+    const competitionMode = parseCompetitionMode(req.query.competitionMode);
     const worldId = req.user?.active_world_id || null;
 
     if (!worldId) return res.json({ seasonId: null, most_runs: [], most_wickets: [], best_batting_average: [], best_strike_rate: [], best_economy: [], most_fifties: [], most_hundreds: [], most_sixes: [], best_bowling_innings: [], fastest_fifty: null, fastest_hundred: null });
+    if (competitionMode === 'INVALID') {
+      return res.status(400).json({ message: 'competitionMode must be CLUB or INTERNATIONAL.' });
+    }
 
     if (seasonId) {
-      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      const check = await pool.query(
+        `SELECT id
+         FROM seasons
+         WHERE id = $1
+           AND world_id = $2
+           ${competitionMode ? `AND competition_mode = '${competitionMode}'` : ''}`,
+        [seasonId, worldId]
+      );
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
 
@@ -329,7 +367,7 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+           AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
          GROUP BY p.id, p.first_name, p.last_name, p.role, f.franchise_name, c.country`,
         [seasonId, worldId]
       ),
@@ -351,7 +389,8 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
+           AND ${seasonScopeSql('m.season_id', '$3', competitionMode)}
+           AND p.role = 'BOWLER'
            AND pms.bowling_balls > 0
          ORDER BY pms.bowling_wickets DESC, pms.bowling_runs ASC, pms.bowling_balls ASC
          LIMIT $2`,
@@ -374,7 +413,7 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+           AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
            AND pms.batting_runs >= 50
          ORDER BY pms.batting_balls ASC, pms.batting_runs DESC
          LIMIT 1`,
@@ -397,7 +436,7 @@ router.get(
          JOIN cities c ON c.id = f.city_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+           AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
            AND pms.batting_runs >= 100
          ORDER BY pms.batting_balls ASC, pms.batting_runs DESC
          LIMIT 1`,
@@ -430,11 +469,12 @@ router.get(
 
     return res.json({
       seasonId,
+      competitionMode,
       most_runs: topBy(rows, (a, b) => b.runs - a.runs || b.strike_rate - a.strike_rate),
-      most_wickets: topBy(rows.filter((row) => row.bowling_balls > 0), (a, b) => b.wickets - a.wickets || a.economy - b.economy),
+      most_wickets: topBy(rows.filter((row) => row.role === 'BOWLER' && row.bowling_balls > 0), (a, b) => b.wickets - a.wickets || a.economy - b.economy),
       best_batting_average: topBy(rows.filter((row) => row.runs >= 200), (a, b) => b.batting_average - a.batting_average || b.runs - a.runs),
       best_strike_rate: topBy(rows.filter((row) => row.runs >= 200), (a, b) => b.strike_rate - a.strike_rate || b.runs - a.runs),
-      best_economy: topBy(rows.filter((row) => row.bowling_balls >= 120), (a, b) => a.economy - b.economy || b.wickets - a.wickets),
+      best_economy: topBy(rows.filter((row) => row.role === 'BOWLER' && row.bowling_balls >= 120), (a, b) => a.economy - b.economy || b.wickets - a.wickets),
       most_fifties: topBy(rows.filter((row) => Number(row.fifties || 0) > 0), (a, b) => Number(b.fifties || 0) - Number(a.fifties || 0) || b.runs - a.runs),
       most_hundreds: topBy(rows.filter((row) => Number(row.hundreds || 0) > 0), (a, b) => Number(b.hundreds || 0) - Number(a.hundreds || 0) || b.runs - a.runs),
       most_sixes: topBy(rows.filter((row) => Number(row.sixes || 0) > 0), (a, b) => Number(b.sixes || 0) - Number(a.sixes || 0) || b.runs - a.runs),
@@ -451,12 +491,23 @@ router.get(
   asyncHandler(async (req, res) => {
     const seasonId = parseSeasonId(req.query.seasonId);
     const limit = parseLimit(req.query.limit, 25, 500);
+    const competitionMode = parseCompetitionMode(req.query.competitionMode);
     const worldId = req.user?.active_world_id || null;
 
     if (!worldId) return res.json({ seasonId: null, top_teams: [], highest_totals: [], lowest_totals: [], biggest_wins_by_runs: [], biggest_wins_by_wickets: [] });
+    if (competitionMode === 'INVALID') {
+      return res.status(400).json({ message: 'competitionMode must be CLUB or INTERNATIONAL.' });
+    }
 
     if (seasonId) {
-      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      const check = await pool.query(
+        `SELECT id
+         FROM seasons
+         WHERE id = $1
+           AND world_id = $2
+           ${competitionMode ? `AND competition_mode = '${competitionMode}'` : ''}`,
+        [seasonId, worldId]
+      );
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
 
@@ -475,7 +526,7 @@ router.get(
          JOIN franchises f ON f.id = st.franchise_id
          JOIN cities c ON c.id = f.city_id
          WHERE ($1::bigint IS NULL OR st.season_id = $1::bigint)
-           AND st.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
+           AND ${seasonScopeSql('st.season_id', '$3', competitionMode)}
          GROUP BY f.id, f.franchise_name, c.country
          ORDER BY SUM(st.won) DESC, SUM(st.points) DESC
          LIMIT $2`,
@@ -487,7 +538,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
+             AND ${seasonScopeSql('m.season_id', '$3', competitionMode)}
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -523,7 +574,7 @@ router.get(
            FROM matches m
            WHERE m.status = 'COMPLETED'
              AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-             AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
+             AND ${seasonScopeSql('m.season_id', '$3', competitionMode)}
          ),
          innings AS (
            SELECT fm.id AS match_id,
@@ -569,7 +620,7 @@ router.get(
          LEFT JOIN franchises wf ON wf.id = m.winner_franchise_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
+           AND ${seasonScopeSql('m.season_id', '$3', competitionMode)}
            AND lower(COALESCE(m.result_summary, '')) ~ 'by\\s+[0-9]+\\s+runs'
          ORDER BY margin_runs DESC
          LIMIT $2`,
@@ -591,7 +642,7 @@ router.get(
          LEFT JOIN franchises wf ON wf.id = m.winner_franchise_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)
+           AND ${seasonScopeSql('m.season_id', '$3', competitionMode)}
            AND lower(COALESCE(m.result_summary, '')) ~ 'by\\s+[0-9]+\\s+wickets'
          ORDER BY margin_wickets DESC
          LIMIT $2`,
@@ -601,6 +652,7 @@ router.get(
 
     return res.json({
       seasonId,
+      competitionMode,
       top_teams: teamPerformance.rows,
       highest_totals: highestTotals.rows,
       lowest_totals: lowestTotals.rows,
@@ -618,12 +670,23 @@ router.get(
     const teamAId = parseId(req.query.teamAId);
     const teamBId = parseId(req.query.teamBId);
     const limit = parseLimit(req.query.limit, 20, 50);
+    const competitionMode = parseCompetitionMode(req.query.competitionMode);
     const worldId = req.user?.active_world_id || null;
 
     if (!worldId) return res.json({ seasonId: null, teams: [], summary: null, matches: [] });
+    if (competitionMode === 'INVALID') {
+      return res.status(400).json({ message: 'competitionMode must be CLUB or INTERNATIONAL.' });
+    }
 
     if (seasonId) {
-      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      const check = await pool.query(
+        `SELECT id
+         FROM seasons
+         WHERE id = $1
+           AND world_id = $2
+           ${competitionMode ? `AND competition_mode = '${competitionMode}'` : ''}`,
+        [seasonId, worldId]
+      );
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
     if (teamAId) {
@@ -654,7 +717,7 @@ router.get(
          FROM matches m
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $4)
+           AND ${seasonScopeSql('m.season_id', '$4', competitionMode)}
            AND (
              (m.home_franchise_id = $2 AND m.away_franchise_id = $3)
              OR
@@ -682,7 +745,7 @@ router.get(
          JOIN franchises af ON af.id = m.away_franchise_id
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $5)
+           AND ${seasonScopeSql('m.season_id', '$5', competitionMode)}
            AND (
              (m.home_franchise_id = $2 AND m.away_franchise_id = $3)
              OR
@@ -696,6 +759,7 @@ router.get(
 
     return res.json({
       seasonId,
+      competitionMode,
       teams: teams.rows,
       summary: summary.rows[0] || null,
       matches: matches.rows
@@ -711,12 +775,23 @@ router.get(
     const teamId = parseId(req.query.teamId);
     const limit = parseLimit(req.query.limit, 30, 5000);
     const offset = Math.max(0, Number(req.query.offset || 0));
+    const competitionMode = parseCompetitionMode(req.query.competitionMode);
     const worldId = req.user?.active_world_id || null;
 
     if (!worldId) return res.json({ seasonId: null, teamId: null, total: 0, limit, offset, matches: [] });
+    if (competitionMode === 'INVALID') {
+      return res.status(400).json({ message: 'competitionMode must be CLUB or INTERNATIONAL.' });
+    }
 
     if (seasonId) {
-      const check = await pool.query('SELECT id FROM seasons WHERE id = $1 AND world_id = $2', [seasonId, worldId]);
+      const check = await pool.query(
+        `SELECT id
+         FROM seasons
+         WHERE id = $1
+           AND world_id = $2
+           ${competitionMode ? `AND competition_mode = '${competitionMode}'` : ''}`,
+        [seasonId, worldId]
+      );
       if (!check.rows.length) return res.status(403).json({ message: 'Season not found in your world.' });
     }
 
@@ -727,13 +802,14 @@ router.get(
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
            AND ($2::bigint IS NULL OR m.home_franchise_id = $2::bigint OR m.away_franchise_id = $2::bigint)
-           AND m.season_id IN (SELECT id FROM seasons WHERE world_id = $3)`,
+           AND ${seasonScopeSql('m.season_id', '$3', competitionMode)}`,
         [seasonId, teamId, worldId]
       ),
       pool.query(
         `SELECT m.id,
                 m.season_id,
                 s.name AS season_name,
+                s.competition_mode,
                 m.round_no,
                 m.stage,
                 m.league_tier,
@@ -767,6 +843,7 @@ router.get(
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
            AND ($2::bigint IS NULL OR m.home_franchise_id = $2::bigint OR m.away_franchise_id = $2::bigint)
            AND s.world_id = $5
+           ${competitionMode ? `AND s.competition_mode = '${competitionMode}'` : ''}
          ORDER BY m.id DESC
          LIMIT $3 OFFSET $4`,
         [seasonId, teamId, limit, offset, worldId]
@@ -776,6 +853,7 @@ router.get(
     return res.json({
       seasonId,
       teamId,
+      competitionMode,
       total: Number(count.rows[0]?.total || 0),
       limit,
       offset,

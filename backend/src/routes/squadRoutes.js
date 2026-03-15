@@ -10,6 +10,75 @@ import { CAREER_MODES, normalizeCareerMode } from '../constants/gameModes.js';
 const router = Router();
 const SALARY_CAP = 120;
 
+function aggregateSplitStats(rows = []) {
+  const totals = rows.reduce(
+    (acc, row) => {
+      acc.matches += Number(row.matches || 0);
+      acc.runs += Number(row.runs || 0);
+      acc.balls += Number(row.balls || 0);
+      acc.fours += Number(row.fours || 0);
+      acc.sixes += Number(row.sixes || 0);
+      acc.fifties += Number(row.fifties || 0);
+      acc.hundreds += Number(row.hundreds || 0);
+      acc.wickets += Number(row.wickets || 0);
+      acc.bowlingBalls += Number(row.bowling_balls || 0);
+      acc.runsConceded += Number(row.runs_conceded || 0);
+      acc.maidens += Number(row.maidens || 0);
+      acc.catches += Number(row.catches || 0);
+      acc.runOuts += Number(row.run_outs || 0);
+      acc.notOuts += Number(row.not_outs || 0);
+      acc.highestScore = Math.max(acc.highestScore, Number(row.highest_score || 0));
+      acc.bestWickets = Math.max(acc.bestWickets, Number(row.best_wickets || 0));
+      acc.ratingSum += Number(row.avg_rating || 0) * Number(row.matches || 0);
+      return acc;
+    },
+    {
+      matches: 0,
+      runs: 0,
+      balls: 0,
+      fours: 0,
+      sixes: 0,
+      fifties: 0,
+      hundreds: 0,
+      wickets: 0,
+      bowlingBalls: 0,
+      runsConceded: 0,
+      maidens: 0,
+      catches: 0,
+      runOuts: 0,
+      notOuts: 0,
+      highestScore: 0,
+      bestWickets: 0,
+      ratingSum: 0
+    }
+  );
+
+  const outs = Math.max(0, totals.matches - totals.notOuts);
+  return {
+    matches: totals.matches,
+    runs: totals.runs,
+    balls: totals.balls,
+    battingAverage: outs > 0 ? Number((totals.runs / outs).toFixed(2)) : (totals.runs > 0 ? totals.runs : 0),
+    strikeRate: totals.balls > 0 ? Number(((totals.runs * 100) / totals.balls).toFixed(2)) : 0,
+    fours: totals.fours,
+    sixes: totals.sixes,
+    fifties: totals.fifties,
+    hundreds: totals.hundreds,
+    wickets: totals.wickets,
+    bowlingBalls: totals.bowlingBalls,
+    runsConceded: totals.runsConceded,
+    bowlingAverage: totals.wickets > 0 ? Number((totals.runsConceded / totals.wickets).toFixed(2)) : 0,
+    economy: totals.bowlingBalls > 0 ? Number(((totals.runsConceded * 6) / totals.bowlingBalls).toFixed(2)) : 0,
+    maidens: totals.maidens,
+    catches: totals.catches,
+    runOuts: totals.runOuts,
+    highestScore: totals.highestScore,
+    bestWickets: totals.bestWickets,
+    avgRating: totals.matches > 0 ? Number((totals.ratingSum / totals.matches).toFixed(2)) : 0,
+    notOuts: totals.notOuts
+  };
+}
+
 router.get(
   '/',
   requireAuth,
@@ -19,7 +88,7 @@ router.get(
       return res.status(404).json({ message: 'No active franchise found.' });
     }
 
-    await ensureFranchiseLineup(franchise.id, pool, { mode: 'smart' });
+    await ensureFranchiseLineup(franchise.id, pool, { mode: 'preserve' });
 
     const players = await pool.query(
       `SELECT *, ROUND((batting + bowling + fielding + fitness + temperament) / 5.0, 1) AS overall
@@ -201,7 +270,8 @@ router.get(
     const worldId = req.user?.active_world_id || null;
     const playerResult = await pool.query(
       `SELECT p.*, ROUND((p.batting + p.bowling + p.fielding + p.fitness + p.temperament) / 5.0, 1) AS overall,
-              f.franchise_name
+              f.franchise_name,
+              f.competition_mode AS franchise_competition_mode
        FROM players p
        LEFT JOIN franchises f ON f.id = p.franchise_id
        WHERE p.id = $1
@@ -217,10 +287,13 @@ router.get(
 
     const recentMatches = await pool.query(
       `SELECT pms.*, m.season_id, m.round_no, m.stage, m.result_summary,
+              s.name AS season_name,
+              s.competition_mode,
               hf.franchise_name AS home_franchise_name,
               af.franchise_name AS away_franchise_name
        FROM player_match_stats pms
        JOIN matches m ON m.id = pms.match_id
+       JOIN seasons s ON s.id = m.season_id
        JOIN franchises hf ON hf.id = m.home_franchise_id
        JOIN franchises af ON af.id = m.away_franchise_id
        WHERE pms.player_id = $1
@@ -232,6 +305,8 @@ router.get(
     /* Per-season aggregated stats */
     const seasonStats = await pool.query(
       `SELECT m.season_id,
+              s.name AS season_name,
+              s.competition_mode,
               COUNT(*)::int                        AS matches,
               COALESCE(SUM(pms.batting_runs), 0)::int   AS runs,
               COALESCE(SUM(pms.batting_balls), 0)::int  AS balls,
@@ -251,8 +326,9 @@ router.get(
               SUM(CASE WHEN pms.not_out THEN 1 ELSE 0 END)::int AS not_outs
        FROM player_match_stats pms
        JOIN matches m ON m.id = pms.match_id
+       JOIN seasons s ON s.id = m.season_id
        WHERE pms.player_id = $1
-       GROUP BY m.season_id
+       GROUP BY m.season_id, s.name, s.competition_mode
        ORDER BY m.season_id`,
       [player.id]
     );
@@ -266,10 +342,20 @@ router.get(
       [player.id]
     );
 
+    const clubSeasonStats = seasonStats.rows.filter((row) => String(row.competition_mode || '').toUpperCase() === CAREER_MODES.CLUB);
+    const internationalSeasonStats = seasonStats.rows.filter((row) => String(row.competition_mode || '').toUpperCase() === CAREER_MODES.INTERNATIONAL);
+
     return res.json({
       player,
       recentMatches: recentMatches.rows,
       seasonStats: seasonStats.rows,
+      clubSeasonStats,
+      internationalSeasonStats,
+      careerMode: normalizeCareerMode(player.franchise_competition_mode || CAREER_MODES.CLUB),
+      competitionSplits: {
+        club: aggregateSplitStats(clubSeasonStats),
+        international: aggregateSplitStats(internationalSeasonStats)
+      },
       growthHistory: growthHistory.rows.reverse()
     });
   })
@@ -284,7 +370,7 @@ router.get(
       return res.status(404).json({ message: 'No active franchise found.' });
     }
 
-    await ensureFranchiseLineup(franchise.id, pool, { mode: 'smart' });
+    await ensureFranchiseLineup(franchise.id, pool, { mode: 'preserve' });
 
     const lineup = await pool.query(
       `SELECT id, first_name, last_name, role, batting, bowling, fielding, form, morale, lineup_slot
@@ -335,7 +421,7 @@ router.put(
     }
 
     const lineup = await setFranchiseLineup(franchise.id, playerIds.map((id) => Number(id)), pool, {
-      normalizeOrder: true
+      normalizeOrder: false
     });
 
     return res.json({ lineup });

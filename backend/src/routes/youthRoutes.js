@@ -2,18 +2,27 @@ import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { getFranchiseByOwner } from '../services/franchiseService.js';
+import { ensureFranchiseInfrastructure, getFranchiseByOwner } from '../services/franchiseService.js';
 import { applyPlayerGrowth, generateProspectsForFranchise, upgradeAcademyWithPoints } from '../services/youthService.js';
 import { getActiveSeason } from '../services/leagueService.js';
 import { calculateFranchiseValuation } from '../services/valuationService.js';
 
 const router = Router();
 
+async function getManagedFranchiseWithInfrastructure(req) {
+  const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
+  if (!franchise) {
+    return null;
+  }
+  await ensureFranchiseInfrastructure(franchise.id, pool);
+  return getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
+}
+
 router.get(
   '/academy',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
+    const franchise = await getManagedFranchiseWithInfrastructure(req);
 
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
@@ -37,7 +46,7 @@ router.get(
   '/regions',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
+    const franchise = await getManagedFranchiseWithInfrastructure(req);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
@@ -60,7 +69,7 @@ router.get(
   '/prospects',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
+    const franchise = await getManagedFranchiseWithInfrastructure(req);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
@@ -83,7 +92,7 @@ router.post(
   '/generate',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
+    const franchise = await getManagedFranchiseWithInfrastructure(req);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
@@ -105,7 +114,7 @@ router.post(
   '/grow',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
+    const franchise = await getManagedFranchiseWithInfrastructure(req);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }
@@ -125,7 +134,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { mode } = req.body;
 
-    const franchise = await getFranchiseByOwner(req.user.id, undefined, req.user.active_world_id || null);
+    const franchise = await getManagedFranchiseWithInfrastructure(req);
     if (!franchise) {
       return res.status(404).json({ message: 'No active franchise found.' });
     }

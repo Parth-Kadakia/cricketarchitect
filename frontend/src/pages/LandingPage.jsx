@@ -50,7 +50,7 @@ const FEATURES = [
   {
     icon: Icons.flag,
     title: 'International Career',
-    desc: 'Take charge of a national team. Compete across 10 divisions with 100+ countries. No transfers — rise through the ranks on results and youth alone.',
+    desc: 'Take charge of a national team. Manage a four-year Future Tours Programme with 100 countries, global rankings, bilateral T20 series, and a World Cup every cycle.',
     accent: 'var(--info)',
   },
   {
@@ -93,8 +93,8 @@ const FEATURES = [
 
 const STATS = [
   { value: '52', label: 'Club Teams' },
-  { value: '100+', label: 'National Teams' },
-  { value: '4+10', label: 'League Tiers' },
+  { value: '100', label: 'National Teams' },
+  { value: '4Y', label: 'FTP Cycle' },
   { value: '25', label: 'Data Tables' },
 ];
 
@@ -136,7 +136,7 @@ export default function LandingPage() {
 
           <p className="landing-hero-sub">
             Club franchise or international duty — pick your path and prove you belong.
-            Build squads, develop youth, survive board pressure, and climb the global pyramid.
+            Build squads, develop youth, survive board pressure, and navigate either the club pyramid or a four-year international FTP.
             Every match, every decision, every season counts.
           </p>
 
@@ -188,10 +188,12 @@ export default function LandingPage() {
             <h3>International Management</h3>
             <ul>
               <li>100+ nations from Afghanistan to Zimbabwe</li>
-              <li>10 divisions with promotion & relegation</li>
+              <li>4-year Future Tours Programme calendar</li>
+              <li>Every nation faces the full world once per cycle</li>
+              <li>Global rankings decide World Cup qualification</li>
+              <li>Top 32 reach the World Cup every four years</li>
               <li>No transfers — results and youth only</li>
               <li>Build squad strength through development</li>
-              <li>Rise through pure cricket merit</li>
             </ul>
           </div>
         </div>
@@ -321,7 +323,7 @@ export default function LandingPage() {
           <div className="landing-step">
             <div className="landing-step-num">3</div>
             <h3>Climb the Pyramid</h3>
-            <p>Simulate rounds, half-seasons, or full seasons. Win matches, earn promotion, and compete for the championship.</p>
+            <p>Simulate club rounds or advance the international calendar day by day. Win matches, grow your squad, and chase titles over the long arc of a career.</p>
           </div>
         </div>
       </section>

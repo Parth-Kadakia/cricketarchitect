@@ -588,11 +588,12 @@ async function createFranchiseRecord(
       youth_development_rating,
       prospect_points,
       growth_points,
+      current_league_tier,
       total_valuation
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7,
       100, 0, 0, 0, 0, 0,
-      20, 100, 1, 20, 0, 0, 100
+      20, 100, 1, 20, 0, 0, $8, 100
     )
     RETURNING *`,
     [
@@ -602,7 +603,8 @@ async function createFranchiseRecord(
       status,
       academyName || buildAcademyName(cityName),
       resolvedMode,
-      worldId
+      worldId,
+      resolvedMode === CAREER_MODES.INTERNATIONAL ? 1 : 4
     ]
   );
 
@@ -892,8 +894,8 @@ export async function claimFranchise({ userId, cityId, franchiseName, mode = CAR
 
     if (!worldId) {
       const newWorld = await client.query(
-        'INSERT INTO worlds (creator_user_id) VALUES ($1) RETURNING id',
-        [userId]
+        'INSERT INTO worlds (creator_user_id, competition_mode) VALUES ($1, $2) RETURNING id',
+        [userId, careerMode]
       );
       worldId = newWorld.rows[0].id;
       await client.query('UPDATE users SET active_world_id = $1 WHERE id = $2', [worldId, userId]);

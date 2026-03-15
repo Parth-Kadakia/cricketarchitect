@@ -92,12 +92,12 @@ export default function LoginPage() {
           <div className="auth-visual-overlay" />
           <div className="auth-visual-copy">
             <p className="auth-overline">{Icon.trophy} Cricket Architect</p>
-            <h2>Build your global franchise from the bottom.</h2>
-            <p>Single-player career mode. Choose your city, rise through four leagues, and compete for the world title.</p>
+            <h2>Build a cricket world that feels worth living in.</h2>
+            <p>Take control of a club or national side, shape the squad, and guide your manager career across seasons, series, and trophies.</p>
             <ul className="auth-features">
-              <li>4 competitive league tiers</li>
-              <li>Youth academy & scouting</li>
-              <li>Real-time match engine</li>
+              <li>Club and international career modes</li>
+              <li>Youth pathways, rankings, and statbook depth</li>
+              <li>Live match center with ball-by-ball context</li>
             </ul>
           </div>
         </section>

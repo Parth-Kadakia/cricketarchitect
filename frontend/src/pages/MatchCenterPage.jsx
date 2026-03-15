@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
+import CountryLabel from '../components/CountryLabel';
 import TeamNameButton from '../components/TeamNameButton';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
@@ -1595,7 +1596,7 @@ export default function MatchCenterPage() {
             <TeamNameButton franchiseId={homeId} name={homeName} country={homeCountry} className="mc-hero-team-name">
               {homeName}
             </TeamNameButton>
-            <span className="mc-hero-team-country">{homeCountry}</span>
+            <span className="mc-hero-team-country"><CountryLabel country={homeCountry} /></span>
             <span className="mc-hero-team-score">{homeScore}</span>
           </div>
 
@@ -1605,7 +1606,7 @@ export default function MatchCenterPage() {
             <TeamNameButton franchiseId={awayId} name={awayName} country={awayCountry} className="mc-hero-team-name">
               {awayName}
             </TeamNameButton>
-            <span className="mc-hero-team-country">{awayCountry}</span>
+            <span className="mc-hero-team-country"><CountryLabel country={awayCountry} /></span>
             <span className="mc-hero-team-score">{awayScore}</span>
           </div>
         </div>

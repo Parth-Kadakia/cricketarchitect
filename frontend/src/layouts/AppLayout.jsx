@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { TeamModalProvider } from '../context/TeamModalContext';
+import CountryLabel, { normalizePlaceLabel } from '../components/CountryLabel';
 
 /* ── Inline SVG icons (Lucide-style, 18×18) ─────────── */
 const Icon = ({ d, ...p }) => (
@@ -114,9 +115,30 @@ export default function AppLayout() {
   const location = useLocation();
   const navItems = getNavItems(franchise?.competition_mode || user?.career_mode || 'CLUB');
   const isInternational = String(franchise?.competition_mode || user?.career_mode || '').toUpperCase() === 'INTERNATIONAL';
+  const cityLabel = franchise?.city_name || '';
+  const countryLabel = franchise?.country || '';
+  const hasDistinctInternationalLocation = cityLabel
+    && countryLabel
+    && normalizePlaceLabel(cityLabel) !== normalizePlaceLabel(countryLabel);
   const topMetricValue = isInternational
     ? Number(franchise?.strength_rating ?? franchise?.total_valuation ?? 0)
     : Number(franchise?.total_valuation || 100);
+  const leagueLabel = isInternational
+    ? 'International Career'
+    : `League ${franchise?.league_tier || franchise?.current_league_tier || 1}`;
+  const locationLabel = franchise?.city_name
+    ? isInternational
+      ? hasDistinctInternationalLocation
+        ? (
+          <>
+            {cityLabel} · <CountryLabel country={countryLabel} />
+          </>
+        )
+        : <CountryLabel country={countryLabel || cityLabel} />
+      : `${franchise.city_name}, ${franchise.country}`
+    : 'Choose your mode, pick a team, and start from the bottom.';
+  const topBarTitle = franchise?.franchise_name || (isInternational ? 'Choose Your National Team' : 'Start Your Club Career');
+  const showTopBarIdentity = !franchise?.id;
 
   // Close sidebar on route change
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
@@ -134,12 +156,22 @@ export default function AppLayout() {
 
       <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
         <div className="brand-block">
-          <p className="brand-overline">Global T20</p>
-          <h1>Cricket Architect</h1>
-          <span className={`status-pill ${connected ? 'online' : 'offline'}`}>
-            <span className="status-dot" />
-            {connected ? 'Live' : 'Offline'}
-          </span>
+          <div className="brand-head">
+            <div className="brand-mark">
+              <Icons.trophies />
+            </div>
+            <div>
+              <p className="brand-overline">Cricket Architect</p>
+              <h1>{isInternational ? 'National Command Center' : 'Franchise Command Center'}</h1>
+              <p className="brand-sub">{user?.display_name || 'Manager Career'}</p>
+            </div>
+          </div>
+          <div className="brand-meta">
+            <span className={`status-pill ${connected ? 'online' : 'offline'}`}>
+              {connected ? 'Live Feed On' : 'Live Feed Off'}
+            </span>
+            <span className="brand-chip">{isInternational ? 'International' : 'Club'}</span>
+          </div>
         </div>
 
         <nav className="nav-links">
@@ -147,24 +179,29 @@ export default function AppLayout() {
             const IconComp = Icons[item.icon];
             return (
               <NavLink key={item.to} to={item.to} end={item.to === '/'} onClick={() => setSidebarOpen(false)}>
-                {IconComp && <IconComp />}
-                <span>{item.label}</span>
+                {IconComp && <span className="nav-item-icon"><IconComp /></span>}
+                <span className="nav-item-label">{item.label}</span>
               </NavLink>
             );
           })}
           {user?.role === 'admin' && (
             <NavLink to="/admin" onClick={() => setSidebarOpen(false)}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-              <span>Admin</span>
+              <span className="nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </span>
+              <span className="nav-item-label">Admin</span>
             </NavLink>
           )}
         </nav>
 
         <div className="sidebar-footer">
-          <p>{user?.display_name}</p>
+          <div className="sidebar-footer-copy">
+            <span className="sidebar-footer-eyebrow">Signed in as</span>
+            <p>{user?.display_name}</p>
+          </div>
           <button className="button ghost" type="button" onClick={logout}>
             <Icons.logout />
             <span>Log out</span>
@@ -173,29 +210,30 @@ export default function AppLayout() {
       </aside>
 
       <main className="main-content">
-        <header className="top-bar">
+        <header className={`top-bar ${showTopBarIdentity ? '' : 'top-bar--metrics-only'}`.trim()}>
           <button className="mobile-menu-btn top-bar-menu" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle menu">
             <Icons.menu />
           </button>
-          <div className="top-bar-info">
-            <h2>{franchise?.franchise_name || 'Start Your Career'}</h2>
-            <p>
-              {franchise?.city_name
-                ? `${franchise.city_name}, ${franchise.country} • League ${franchise?.league_tier || franchise?.current_league_tier || 1}`
-                : 'Choose your career mode and build from the bottom.'}
-            </p>
-          </div>
+          {showTopBarIdentity ? (
+            <div className="top-bar-info">
+              <div className="top-bar-heading-row">
+                <h2>{topBarTitle}</h2>
+                {franchise && <span className="top-bar-pill">{leagueLabel}</span>}
+              </div>
+              <p>{locationLabel}</p>
+            </div>
+          ) : <div className="top-bar-spacer" aria-hidden="true" />}
           <div className="top-metrics">
             <div className="top-metric-item">
-              <span>Prospect Pts</span>
+              <span>Prospects</span>
               <strong>{franchise?.prospect_points ?? 0}</strong>
             </div>
             <div className="top-metric-item">
-              <span>Growth Pts</span>
+              <span>Growth</span>
               <strong>{franchise?.growth_points ?? 0}</strong>
             </div>
             <div className="top-metric-item">
-              <span>{isInternational ? 'Strength' : 'Value'}</span>
+              <span>{isInternational ? 'Team Strength' : 'Franchise Value'}</span>
               <strong>{isInternational ? topMetricValue.toFixed(1) : `$${topMetricValue.toFixed(2)}`}</strong>
             </div>
           </div>

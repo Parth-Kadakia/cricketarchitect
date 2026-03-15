@@ -55,6 +55,21 @@ export default function TrophyRoomPage() {
     <div className="page-grid">
       {error ? <p className="error-text full-width">{error}</p> : null}
 
+      <section className="tr-hero full-width">
+        <div className="tr-hero-copy">
+          <span className="tr-hero-kicker">Legacy</span>
+          <h1 className="tr-hero-title">Trophy Room</h1>
+          <p className="tr-hero-subtitle">
+            Titles, long-term record, and retired players from your save.
+          </p>
+        </div>
+        <div className="tr-hero-chips">
+          <span>{franchise?.franchise_name || 'Current Team'}</span>
+          <span>{franchise?.championships || 0} titles</span>
+          <span>{franchise?.wins || 0} wins</span>
+        </div>
+      </section>
+
       <div className="stat-grid full-width">
         <StatCard label="Titles" value={franchise?.championships || 0} hint="League championships" />
         <StatCard label="Wins" value={franchise?.wins || 0} hint="All-time wins" />

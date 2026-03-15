@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import CountryLabel from './CountryLabel';
 import PlayerDetailModal from './PlayerDetailModal';
 
 const TABS = [
@@ -110,6 +111,7 @@ export default function TeamSquadModal({ open, franchiseId, seed, onClose }) {
 
   const franchise = teamData?.franchise || null;
   const squad = teamData?.squad || null;
+  const isInternational = String(franchise?.competition_mode || seed?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
 
   const currentRows = useMemo(() => {
     if (!squad) {
@@ -136,16 +138,50 @@ export default function TeamSquadModal({ open, franchiseId, seed, onClose }) {
 
   const title = franchise?.franchise_name || seed?.name || 'Team Squad';
   const subtitle = franchise?.city_name
-    ? `${franchise.city_name}, ${franchise.country}`
-    : [seed?.city, seed?.country].filter(Boolean).join(', ');
+    ? { city: franchise.city_name, country: franchise.country }
+    : { city: seed?.city, country: seed?.country };
+  const activeTabLabel = TABS.find((item) => item.key === tab)?.label || 'Squad';
+  const keyMetrics = [
+    {
+      label: isInternational ? 'World Rank' : 'League',
+      value: isInternational
+        ? (franchise?.league_position ? `#${franchise.league_position}` : 'Unranked')
+        : (franchise?.current_league_tier ? `League ${franchise.current_league_tier}` : '-')
+    },
+    { label: 'Record', value: `${franchise?.wins || 0}W-${franchise?.losses || 0}L` },
+    {
+      label: isInternational ? 'Strength' : 'Value',
+      value: isInternational
+        ? Number(franchise?.strength_rating ?? squad?.averageOverall ?? 0).toFixed(1)
+        : money(franchise?.total_valuation)
+    },
+    { label: 'Academy', value: `Lv ${franchise?.academy_level || 1}` },
+    { label: 'Squad OVR', value: Number(squad?.averageOverall || 0).toFixed(1) },
+    { label: activeTabLabel, value: currentRows.length }
+  ];
 
   return (
     <div className="team-modal-backdrop" role="presentation" onClick={onClose}>
       <section className="team-modal" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
         <header className="team-modal-header">
-          <div>
-            <h3>{title}</h3>
-            {subtitle && <p>{subtitle}</p>}
+          <div className="team-modal-hero-copy">
+            <span className="team-modal-kicker">{isInternational ? 'National Team Snapshot' : 'Club Snapshot'}</span>
+            <h3>{isInternational ? <CountryLabel country={title} /> : title}</h3>
+            {(subtitle?.city || subtitle?.country) && (
+              <p>
+                {subtitle?.city ? (
+                  <>
+                    {subtitle.city}{subtitle.country ? ', ' : ''}
+                  </>
+                ) : null}
+                {isInternational ? <CountryLabel country={subtitle?.country} /> : subtitle?.country}
+              </p>
+            )}
+            <div className="team-modal-hero-tags">
+              <span>{franchise?.owner_name || 'CPU'} manager control</span>
+              <span>{franchise?.championships || 0} titles</span>
+              <span>{currentRows.length} players in view</span>
+            </div>
           </div>
           <button type="button" className="team-modal-close" onClick={onClose}>
             ×
@@ -164,38 +200,20 @@ export default function TeamSquadModal({ open, franchiseId, seed, onClose }) {
         ) : (
           <>
             <div className="team-modal-metrics">
-              <div>
-                <span>League</span>
-                <strong>{franchise?.current_league_tier ? `League ${franchise.current_league_tier}` : '-'}</strong>
-              </div>
-              <div>
-                <span>Record</span>
-                <strong>{franchise?.wins || 0}W-{franchise?.losses || 0}L</strong>
-              </div>
-              <div>
-                <span>Points</span>
-                <strong>{franchise?.points ?? 0}</strong>
-              </div>
-              <div>
-                <span>Value</span>
-                <strong>{money(franchise?.total_valuation)}</strong>
-              </div>
-              <div>
-                <span>Academy</span>
-                <strong>Lv {franchise?.academy_level || 1}</strong>
-              </div>
-              <div>
-                <span>Squad OVR</span>
-                <strong>{Number(squad?.averageOverall || 0).toFixed(1)}</strong>
-              </div>
+              {keyMetrics.map((metric) => (
+                <div key={metric.label} className="team-modal-metric-card">
+                  <span>{metric.label}</span>
+                  <strong>{metric.value}</strong>
+                </div>
+              ))}
             </div>
 
             <div className="team-modal-submetrics">
-              <span>Owner: <strong>{franchise?.owner_name || 'CPU'}</strong></span>
-              <span>Batters: <strong>{squad?.roleCounts?.BATTER || 0}</strong></span>
-              <span>Bowlers: <strong>{squad?.roleCounts?.BOWLER || 0}</strong></span>
-              <span>All-Rounders: <strong>{squad?.roleCounts?.ALL_ROUNDER || 0}</strong></span>
-              <span>Keepers: <strong>{squad?.roleCounts?.WICKET_KEEPER || 0}</strong></span>
+              <span>Owner <strong>{franchise?.owner_name || 'CPU'}</strong></span>
+              <span>Batters <strong>{squad?.roleCounts?.BATTER || 0}</strong></span>
+              <span>Bowlers <strong>{squad?.roleCounts?.BOWLER || 0}</strong></span>
+              <span>All-Rounders <strong>{squad?.roleCounts?.ALL_ROUNDER || 0}</strong></span>
+              <span>Keepers <strong>{squad?.roleCounts?.WICKET_KEEPER || 0}</strong></span>
             </div>
 
             <nav className="team-modal-tabs">
@@ -228,62 +246,52 @@ export default function TeamSquadModal({ open, franchiseId, seed, onClose }) {
                 No players available in this group.
               </div>
             ) : (
-              <div className="team-modal-table-wrap">
-                <table className="team-modal-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Player</th>
-                      <th>Role</th>
-                      <th>Age</th>
-                      <th>OVR</th>
-                      <th>BAT</th>
-                      <th>BWL</th>
-                      <th>FLD</th>
-                      <th>FIT</th>
-                      <th>POT</th>
-                      <th>Form</th>
-                      <th>Morale</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {currentRows.map((player, index) => (
-                      <tr
-                        key={player.id}
-                        className="team-modal-row-clickable"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setSelectedPlayer(player)}
-                        onKeyDown={(e) => e.key === 'Enter' && setSelectedPlayer(player)}
-                      >
-                        <td>{player.lineup_slot || index + 1}</td>
-                        <td>
-                          <strong className="team-modal-player-link">{player.first_name} {player.last_name}</strong>
-                          <div className="team-modal-player-sub">{player.country_origin}</div>
-                          <div className="team-modal-player-sub">
-                            {(player.batsman_hand || '-')} • {(player.batsman_type || '-')} • {(player.bowler_style || '-')}
-                          </div>
-                        </td>
-                        <td>{roleLabel(player.role)}</td>
-                        <td>{player.age}</td>
-                        <td><strong>{Number(player.overall || 0).toFixed(1)}</strong></td>
-                        <td>{player.batting}</td>
-                        <td>{player.bowling}</td>
-                        <td>{player.fielding}</td>
-                        <td>{player.fitness}</td>
-                        <td>{player.potential}</td>
-                        <td>{Number(player.form || 0).toFixed(0)}</td>
-                        <td>{Number(player.morale || 0).toFixed(0)}</td>
-                        <td>
-                          {player.squad_status === 'LOANED' && player.on_loan_to_franchise_name
-                            ? `LOANED (${player.on_loan_to_franchise_name})`
-                            : player.squad_status}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="team-modal-card-grid">
+                {currentRows.map((player, index) => (
+                  <button
+                    key={player.id}
+                    type="button"
+                    className="team-modal-player-card"
+                    onClick={() => setSelectedPlayer(player)}
+                  >
+                    <div className="team-modal-player-top">
+                      <span className="team-modal-player-slot">
+                        {tab === 'xi' ? `XI #${player.lineup_slot || index + 1}` : `#${index + 1}`}
+                      </span>
+                      <TeamRolePill role={player.role} />
+                      <span className="team-modal-player-ovr">{Number(player.overall || 0).toFixed(1)}</span>
+                    </div>
+                    <h4 className="team-modal-player-name">{player.first_name} {player.last_name}</h4>
+                    <div className="team-modal-player-meta">
+                      <span>
+                        {isInternational
+                          ? <CountryLabel country={player.country_origin || subtitle?.country || 'Unknown Origin'} />
+                          : (player.country_origin || [subtitle?.city, subtitle?.country].filter(Boolean).join(', ') || 'Unknown Origin')}
+                      </span>
+                      <span>Age {player.age}</span>
+                      <span>{player.batsman_hand || '-'} hand</span>
+                    </div>
+                    <div className="team-modal-player-style">
+                      {(player.batsman_type || 'Balanced')} • {(player.bowler_style || 'No bowling style')}
+                    </div>
+                    <div className="team-modal-player-stats">
+                      <div><span>BAT</span><strong>{player.batting}</strong></div>
+                      <div><span>BWL</span><strong>{player.bowling}</strong></div>
+                      <div><span>FLD</span><strong>{player.fielding}</strong></div>
+                      <div><span>FIT</span><strong>{player.fitness}</strong></div>
+                    </div>
+                    <div className="team-modal-player-footer">
+                      <span>Form {Number(player.form || 0).toFixed(0)}</span>
+                      <span>Morale {Number(player.morale || 0).toFixed(0)}</span>
+                      <span>Pot {player.potential}</span>
+                    </div>
+                    <div className="team-modal-player-status">
+                      {player.squad_status === 'LOANED' && player.on_loan_to_franchise_name
+                        ? `Loaned to ${player.on_loan_to_franchise_name}`
+                        : roleLabel(player.squad_status)}
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
           </>

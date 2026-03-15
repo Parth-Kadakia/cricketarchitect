@@ -95,6 +95,7 @@ function pct(w, l) {
 }
 
 function num(v) { return Number(v || 0); }
+function money(v) { return `$${Number(v || 0).toFixed(2)}`; }
 
 const SORT_OPTIONS = [
   { key: 'created_at', label: 'Newest', dir: 'desc' },
@@ -198,16 +199,26 @@ export default function AdminConsolePage() {
   const ss = s.seasons || {};
   const sm = s.matches || {};
   const sp = s.players || {};
+  const careerModeEntries = (s.careerModes || []).map((entry) => ({
+    key: entry.career_mode,
+    label: entry.career_mode === 'INTERNATIONAL' ? 'International' : 'Club',
+    count: Number(entry.count || 0)
+  }));
 
   return (
     <div className="admin-console">
       {/* ── Header ── */}
-      <div className="admin-header">
-        <div className="admin-header-text">
+      <div className="admin-hero">
+        <div className="admin-hero-copy">
           <h1>Admin Console</h1>
-          <p className="admin-subtitle">System overview and user management</p>
+          <p className="admin-subtitle">Live system health, user governance, and world operations.</p>
+          <div className="admin-hero-pills">
+            <span className="admin-hero-pill">Users {num(su.total_users) || totalUsers}</span>
+            <span className="admin-hero-pill">World Matches {num(sm.total_matches)}</span>
+            <span className="admin-hero-pill">Franchises {num(sf.total_franchises) || withFranchise}</span>
+          </div>
         </div>
-        <div className="admin-header-actions">
+        <div className="admin-hero-actions">
           <button
             className="admin-action-btn admin-action-primary"
             disabled={!!actionBusy}
@@ -215,6 +226,14 @@ export default function AdminConsolePage() {
           >
             {Icons.bolt}
             {actionBusy === 'Bootstrap' ? 'Running…' : 'Bootstrap'}
+          </button>
+          <button
+            className="admin-action-btn admin-action-secondary"
+            disabled={!!actionBusy}
+            onClick={() => runAction('CPU Market Cycle', () => api.admin.cpuCycle(token))}
+          >
+            {Icons.cpu}
+            {actionBusy === 'CPU Market Cycle' ? 'Running…' : 'CPU Cycle'}
           </button>
         </div>
       </div>
@@ -275,148 +294,130 @@ export default function AdminConsolePage() {
           <div className="admin-stats-grid">
             <div className="admin-stats-section">
               <h4 className="admin-section-label">{Icons.player} Users &amp; Managers</h4>
-              <div className="admin-mini-grid">
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(su.total_users)}</span><span className="admin-mini-lbl">Total Users</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(su.active_managers)}</span><span className="admin-mini-lbl">Active</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(su.unemployed)}</span><span className="admin-mini-lbl">Unemployed</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(su.retired)}</span><span className="admin-mini-lbl">Retired</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(su.active_24h)}</span><span className="admin-mini-lbl">Online 24h</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(su.active_7d)}</span><span className="admin-mini-lbl">Online 7d</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(su.signups_24h)}</span><span className="admin-mini-lbl">New 24h</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(su.signups_7d)}</span><span className="admin-mini-lbl">New 7d</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(su.total_user_matches)}</span><span className="admin-mini-lbl">Matches Played</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{pct(su.total_user_wins, su.total_user_losses)}</span><span className="admin-mini-lbl">Win Rate</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(su.total_user_titles)}</span><span className="admin-mini-lbl">Titles Won</span></div>
-                <div className="admin-mini-stat">
-                  <span className="admin-mini-val">{(s.careerModes || []).map((c) => `${c.career_mode}: ${c.count}`).join(' / ') || '—'}</span>
-                  <span className="admin-mini-lbl">Career Modes</span>
-                </div>
+              <div className="admin-kpi-grid">
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(su.total_users)}</span><span className="admin-kpi-label">Total Users</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(su.active_managers)}</span><span className="admin-kpi-label">Active Managers</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{pct(su.total_user_wins, su.total_user_losses)}</span><span className="admin-kpi-label">Manager Win Rate</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(su.total_user_titles)}</span><span className="admin-kpi-label">Titles Won</span></div>
+              </div>
+              <div className="admin-metric-list">
+                <div className="admin-metric-row"><span>Unemployed</span><strong>{num(su.unemployed)}</strong></div>
+                <div className="admin-metric-row"><span>Retired</span><strong>{num(su.retired)}</strong></div>
+                <div className="admin-metric-row"><span>Online 24h</span><strong>{num(su.active_24h)}</strong></div>
+                <div className="admin-metric-row"><span>Online 7d</span><strong>{num(su.active_7d)}</strong></div>
+                <div className="admin-metric-row"><span>New 24h</span><strong>{num(su.signups_24h)}</strong></div>
+                <div className="admin-metric-row"><span>New 7d</span><strong>{num(su.signups_7d)}</strong></div>
+                <div className="admin-metric-row"><span>User Matches</span><strong>{num(su.total_user_matches)}</strong></div>
+              </div>
+              <div className="admin-chip-row">
+                {careerModeEntries.length ? careerModeEntries.map((mode) => (
+                  <span key={mode.key} className="admin-mode-chip">
+                    {mode.label}
+                    <strong>{mode.count}</strong>
+                  </span>
+                )) : <span className="admin-mode-chip">No career data</span>}
               </div>
             </div>
 
             <div className="admin-stats-section">
               <h4 className="admin-section-label">{Icons.franchise} Franchises</h4>
-              <div className="admin-mini-grid">
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sf.total_franchises)}</span><span className="admin-mini-lbl">Total</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sf.user_owned)}</span><span className="admin-mini-lbl">User-Owned</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sf.cpu_controlled)}</span><span className="admin-mini-lbl">CPU-Run</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sf.available)}</span><span className="admin-mini-lbl">Available</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val admin-val-green">${num(sf.avg_valuation)}</span><span className="admin-mini-lbl">Avg Value</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val admin-val-green">${num(sf.max_valuation)}</span><span className="admin-mini-lbl">Max Value</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sf.total_championships)}</span><span className="admin-mini-lbl">Championships</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{pct(sf.total_franchise_wins, sf.total_franchise_losses)}</span><span className="admin-mini-lbl">Overall Win%</span></div>
+              <div className="admin-kpi-grid">
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(sf.total_franchises)}</span><span className="admin-kpi-label">Total Clubs</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(sf.user_owned)}</span><span className="admin-kpi-label">User-Owned</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(sf.cpu_controlled)}</span><span className="admin-kpi-label">CPU-Run</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{pct(sf.total_franchise_wins, sf.total_franchise_losses)}</span><span className="admin-kpi-label">Overall Win%</span></div>
+              </div>
+              <div className="admin-metric-list">
+                <div className="admin-metric-row"><span>Available</span><strong>{num(sf.available)}</strong></div>
+                <div className="admin-metric-row"><span>Avg Value</span><strong>{money(sf.avg_valuation)}</strong></div>
+                <div className="admin-metric-row"><span>Max Value</span><strong>{money(sf.max_valuation)}</strong></div>
+                <div className="admin-metric-row"><span>Championships</span><strong>{num(sf.total_championships)}</strong></div>
               </div>
             </div>
 
             <div className="admin-stats-section">
               <h4 className="admin-section-label">{Icons.globe} Seasons &amp; Matches</h4>
-              <div className="admin-mini-grid">
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(ss.total_seasons)}</span><span className="admin-mini-lbl">Seasons</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(ss.active_seasons)}</span><span className="admin-mini-lbl">Active</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(ss.completed_seasons)}</span><span className="admin-mini-lbl">Completed</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sm.total_matches)}</span><span className="admin-mini-lbl">Matches</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sm.completed_matches)}</span><span className="admin-mini-lbl">Played</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sm.scheduled_matches)}</span><span className="admin-mini-lbl">Scheduled</span></div>
+              <div className="admin-kpi-grid">
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(ss.total_seasons)}</span><span className="admin-kpi-label">Seasons</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(ss.active_seasons)}</span><span className="admin-kpi-label">Active</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(sm.total_matches)}</span><span className="admin-kpi-label">Matches</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(sm.completed_matches)}</span><span className="admin-kpi-label">Played</span></div>
+              </div>
+              <div className="admin-metric-list">
+                <div className="admin-metric-row"><span>Completed Seasons</span><strong>{num(ss.completed_seasons)}</strong></div>
+                <div className="admin-metric-row"><span>Scheduled Matches</span><strong>{num(sm.scheduled_matches)}</strong></div>
+                <div className="admin-metric-row"><span>Live Matches</span><strong>{num(sm.live_matches)}</strong></div>
               </div>
             </div>
 
             <div className="admin-stats-section">
               <h4 className="admin-section-label">{Icons.player} Players</h4>
-              <div className="admin-mini-grid">
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sp.total_players)}</span><span className="admin-mini-lbl">Total</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sp.main_squad)}</span><span className="admin-mini-lbl">Main Squad</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sp.youth)}</span><span className="admin-mini-lbl">Youth</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{num(sp.retired_players)}</span><span className="admin-mini-lbl">Retired</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{sp.avg_age}</span><span className="admin-mini-lbl">Avg Age</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val admin-val-green">${sp.avg_market_value}</span><span className="admin-mini-lbl">Avg Value</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{sp.avg_batting}</span><span className="admin-mini-lbl">Avg Bat</span></div>
-                <div className="admin-mini-stat"><span className="admin-mini-val">{sp.avg_bowling}</span><span className="admin-mini-lbl">Avg Bowl</span></div>
+              <div className="admin-kpi-grid">
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(sp.total_players)}</span><span className="admin-kpi-label">Total Players</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(sp.main_squad)}</span><span className="admin-kpi-label">Main Squad</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(sp.youth)}</span><span className="admin-kpi-label">Youth</span></div>
+                <div className="admin-kpi-card"><span className="admin-kpi-value">{num(sp.retired_players)}</span><span className="admin-kpi-label">Retired</span></div>
+              </div>
+              <div className="admin-metric-list">
+                <div className="admin-metric-row"><span>Avg Age</span><strong>{Number(sp.avg_age || 0).toFixed(1)}</strong></div>
+                <div className="admin-metric-row"><span>Avg Value</span><strong>{money(sp.avg_market_value)}</strong></div>
+                <div className="admin-metric-row"><span>Avg Batting</span><strong>{Number(sp.avg_batting || 0).toFixed(1)}</strong></div>
+                <div className="admin-metric-row"><span>Avg Bowling</span><strong>{Number(sp.avg_bowling || 0).toFixed(1)}</strong></div>
               </div>
             </div>
           </div>
 
           {/* ── Top franchises ── */}
-          {(s.topFranchises || []).length > 0 && (
-            <div className="admin-stats-section" style={{ marginTop: '1rem' }}>
-              <h4 className="admin-section-label">{Icons.trophy} Top Franchises by Value</h4>
-              <div className="admin-table-wrapper">
-                <table className="admin-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Franchise</th>
-                      <th>Location</th>
-                      <th>Owner</th>
-                      <th>Tier</th>
-                      <th>Record</th>
-                      <th>Titles</th>
-                      <th>Value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {s.topFranchises.map((f, i) => (
-                      <tr key={i}>
-                        <td className="admin-rank">{i + 1}</td>
-                        <td><strong>{f.franchise_name}</strong></td>
-                        <td>{f.city_name}, {f.country}</td>
-                        <td>{f.owner_name || <span className="text-muted">CPU</span>}</td>
-                        <td><span className="admin-tier-badge">T{f.current_league_tier}</span></td>
-                        <td>
-                          <div className="admin-record-cell">
-                            <span className="admin-record-wins">{f.wins}W</span>
-                            <span className="admin-record-sep">·</span>
-                            <span className="admin-record-losses">{f.losses}L</span>
-                          </div>
-                        </td>
-                        <td>{f.championships}</td>
-                        <td><span className="admin-value-cell">${Number(f.total_valuation).toFixed(0)}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          <div className="admin-overview-panels">
+            {(s.topFranchises || []).length > 0 && (
+              <section className="admin-overview-panel">
+                <div className="admin-overview-panel-head">
+                  <h4 className="admin-section-label">{Icons.trophy} Top Franchises by Value</h4>
+                  <span className="admin-panel-meta">{s.topFranchises.length} entries</span>
+                </div>
+                <div className="admin-ranking-list">
+                  {s.topFranchises.map((f, i) => (
+                    <div key={i} className="admin-ranking-row">
+                      <div className="admin-ranking-pos">{i + 1}</div>
+                      <div className="admin-ranking-main">
+                        <strong>{f.franchise_name}</strong>
+                        <span>{f.city_name}, {f.country}</span>
+                      </div>
+                      <div className="admin-ranking-side">
+                        <span>{f.owner_name || 'CPU'}</span>
+                        <strong>{money(f.total_valuation)}</strong>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* ── Recent signups ── */}
-          {(s.recentSignups || []).length > 0 && (
-            <div className="admin-stats-section" style={{ marginTop: '1rem' }}>
-              <h4 className="admin-section-label">{Icons.users} Recent Signups</h4>
-              <div className="admin-table-wrapper">
-                <table className="admin-table">
-                  <thead>
-                    <tr>
-                      <th>User</th>
-                      <th>Email</th>
-                      <th>Career</th>
-                      <th>Status</th>
-                      <th>Joined</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {s.recentSignups.map((u) => (
-                      <tr key={u.id}>
-                        <td><strong>{u.display_name}</strong></td>
-                        <td><span className="admin-user-email">{u.email}</span></td>
-                        <td>
-                          <span className={`admin-badge ${u.career_mode === 'INTERNATIONAL' ? 'badge-intl' : 'badge-club'}`}>
-                            {u.career_mode === 'INTERNATIONAL' ? 'Intl' : 'Club'}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={`admin-status-badge ${u.manager_status === 'ACTIVE' ? 'status-active' : u.manager_status === 'RETIRED' ? 'status-retired' : 'status-unemployed'}`}>
-                            <span className="admin-status-dot" />
-                            {u.manager_status}
-                          </span>
-                        </td>
-                        <td>{fmtDate(u.created_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+            {(s.recentSignups || []).length > 0 && (
+              <section className="admin-overview-panel">
+                <div className="admin-overview-panel-head">
+                  <h4 className="admin-section-label">{Icons.users} Recent Signups</h4>
+                  <span className="admin-panel-meta">{s.recentSignups.length} recent</span>
+                </div>
+                <div className="admin-signup-list">
+                  {s.recentSignups.map((u) => (
+                    <div key={u.id} className="admin-signup-row">
+                      <div className="admin-signup-main">
+                        <strong>{u.display_name}</strong>
+                        <span>{u.email}</span>
+                      </div>
+                      <div className="admin-signup-side">
+                        <span className={`admin-badge ${u.career_mode === 'INTERNATIONAL' ? 'badge-intl' : 'badge-club'}`}>
+                          {u.career_mode === 'INTERNATIONAL' ? 'International' : 'Club'}
+                        </span>
+                        <span>{fmtDate(u.created_at)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
         </div>
       )}
 
@@ -479,179 +480,156 @@ export default function AdminConsolePage() {
           {error && <p className="admin-error">{error}</p>}
 
           {!loading && !error && (
-            <div className="admin-table-wrapper">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th className="admin-th-user">User</th>
-                    <th>Career</th>
-                    <th>Franchise</th>
-                    <th>League</th>
-                    <th>Squad</th>
-                    <th>Record</th>
-                    <th>Win%</th>
-                    <th>Titles</th>
-                    <th>Value</th>
-                    <th>Status</th>
-                    <th>Last Active</th>
-                    <th>Joined</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((u) => {
-                    const isExpanded = expandedRow === u.id;
-                    return (
-                      <>
-                        <tr
-                          key={u.id}
-                          className={isExpanded ? 'admin-row-expanded' : ''}
+            filtered.length > 0 ? (
+              <div className="admin-user-grid">
+                {filtered.map((u) => {
+                  const isExpanded = expandedRow === u.id;
+                  return (
+                    <article key={u.id} className={`admin-user-card ${isExpanded ? 'admin-user-card--expanded' : ''}`}>
+                      <button
+                        type="button"
+                        className="admin-user-card-head"
+                        onClick={() => setExpandedRow(isExpanded ? null : u.id)}
+                      >
+                        <div className="admin-user-cell">
+                          <div className="admin-avatar">
+                            {(u.display_name || '?').charAt(0).toUpperCase()}
+                          </div>
+                          <div className="admin-user-info">
+                            <span className="admin-user-name">{u.display_name}</span>
+                            <span className="admin-user-email">{u.email}</span>
+                          </div>
+                        </div>
+                        <div className="admin-user-card-head-right">
+                          <span className={`admin-badge ${u.career_mode === 'INTERNATIONAL' ? 'badge-intl' : 'badge-club'}`}>
+                            {u.career_mode === 'INTERNATIONAL' ? 'International' : 'Club'}
+                          </span>
+                          <span className={`admin-status-badge ${u.manager_status === 'ACTIVE' ? 'status-active' : u.manager_status === 'RETIRED' ? 'status-retired' : 'status-unemployed'}`}>
+                            <span className="admin-status-dot" />
+                            {u.manager_status}
+                          </span>
+                        </div>
+                      </button>
+
+                      <div className="admin-user-card-body">
+                        <div className="admin-user-card-summary">
+                          <div className="admin-user-summary-block">
+                            <span className="admin-user-summary-label">Team</span>
+                            <strong>{u.franchise_name || 'Unemployed'}</strong>
+                            <span>{u.franchise_name ? `${u.city_name || '—'}${u.country ? `, ${u.country}` : ''}` : 'No active team'}</span>
+                          </div>
+                          <div className="admin-user-summary-block">
+                            <span className="admin-user-summary-label">Activity</span>
+                            <strong>{timeAgo(u.last_active_at)}</strong>
+                            <span>Joined {fmtDate(u.created_at)}</span>
+                          </div>
+                          <div className="admin-user-summary-block">
+                            <span className="admin-user-summary-label">Career</span>
+                            <strong>{u.manager_points || 0} pts</strong>
+                            <span>{u.manager_titles || 0} titles • {u.manager_firings || 0} firings</span>
+                          </div>
+                        </div>
+
+                        <div className="admin-user-card-stats">
+                          <div className="admin-user-stat">
+                            <span className="admin-user-stat-value">{u.manager_matches_managed || 0}</span>
+                            <span className="admin-user-stat-label">Managed</span>
+                          </div>
+                          <div className="admin-user-stat">
+                            <span className="admin-user-stat-value">{u.manager_wins_managed || 0}W</span>
+                            <span className="admin-user-stat-label">Wins</span>
+                          </div>
+                          <div className="admin-user-stat">
+                            <span className="admin-user-stat-value">{u.manager_losses_managed || 0}L</span>
+                            <span className="admin-user-stat-label">Losses</span>
+                          </div>
+                          <div className="admin-user-stat">
+                            <span className="admin-user-stat-value">{pct(u.manager_wins_managed, u.manager_losses_managed)}</span>
+                            <span className="admin-user-stat-label">Win Rate</span>
+                          </div>
+                          <div className="admin-user-stat">
+                            <span className="admin-user-stat-value">{u.current_league_tier ? `T${u.current_league_tier}` : '—'}</span>
+                            <span className="admin-user-stat-label">Tier</span>
+                          </div>
+                          <div className="admin-user-stat">
+                            <span className="admin-user-stat-value">{u.squad_size || 0}</span>
+                            <span className="admin-user-stat-label">Squad</span>
+                          </div>
+                          <div className="admin-user-stat">
+                            <span className="admin-user-stat-value">{u.total_valuation ? `$${Number(u.total_valuation).toFixed(0)}` : '—'}</span>
+                            <span className="admin-user-stat-label">Value</span>
+                          </div>
+                          <div className="admin-user-stat">
+                            <span className="admin-user-stat-value">{u.main_xi || 0}</span>
+                            <span className="admin-user-stat-label">XI</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="admin-user-expand"
                           onClick={() => setExpandedRow(isExpanded ? null : u.id)}
                         >
-                          <td>
-                            <div className="admin-user-cell">
-                              <div className="admin-avatar">
-                                {(u.display_name || '?').charAt(0).toUpperCase()}
-                              </div>
-                              <div className="admin-user-info">
-                                <span className="admin-user-name">{u.display_name}</span>
-                                <span className="admin-user-email">{u.email}</span>
-                              </div>
-                            </div>
-                          </td>
-                          <td>
-                            <span className={`admin-badge ${u.career_mode === 'INTERNATIONAL' ? 'badge-intl' : 'badge-club'}`}>
-                              {u.career_mode === 'INTERNATIONAL' ? 'Intl' : 'Club'}
-                            </span>
-                          </td>
-                          <td>
-                            {u.franchise_name ? (
-                              <div className="admin-franchise-cell">
-                                <span className="admin-franchise-name">{u.franchise_name}</span>
-                                <span className="admin-user-email">{u.city_name}{u.country ? `, ${u.country}` : ''}</span>
-                              </div>
-                            ) : (
-                              <span className="text-muted">—</span>
-                            )}
-                          </td>
-                          <td>
-                            {u.current_league_tier ? (
-                              <span className="admin-tier-badge">T{u.current_league_tier}</span>
-                            ) : (
-                              <span className="text-muted">—</span>
-                            )}
-                          </td>
-                          <td>
-                            {u.squad_size > 0 ? (
-                              <span className="admin-squad-cell">{u.squad_size} <span className="text-muted">({u.main_xi} XI)</span></span>
-                            ) : (
-                              <span className="text-muted">—</span>
-                            )}
-                          </td>
-                          <td>
-                            {u.manager_matches_managed > 0 ? (
-                              <div className="admin-record-cell">
-                                <span className="admin-record-wins">{u.manager_wins_managed}W</span>
-                                <span className="admin-record-sep">·</span>
-                                <span className="admin-record-losses">{u.manager_losses_managed}L</span>
-                              </div>
-                            ) : (
-                              <span className="text-muted">—</span>
-                            )}
-                          </td>
-                          <td>
-                            <span className="admin-pct-cell">{pct(u.manager_wins_managed, u.manager_losses_managed)}</span>
-                          </td>
-                          <td>
-                            <span className={Number(u.championships || u.manager_titles || 0) > 0 ? 'admin-titles-highlight' : ''}>
-                              {u.championships || u.manager_titles || 0}
-                            </span>
-                          </td>
-                          <td>
-                            {u.total_valuation ? (
-                              <span className="admin-value-cell">${Number(u.total_valuation).toFixed(0)}</span>
-                            ) : (
-                              <span className="text-muted">—</span>
-                            )}
-                          </td>
-                          <td>
-                            <span className={`admin-status-badge ${u.manager_status === 'ACTIVE' ? 'status-active' : u.manager_status === 'RETIRED' ? 'status-retired' : 'status-unemployed'}`}>
-                              <span className="admin-status-dot" />
-                              {u.manager_status}
-                            </span>
-                          </td>
-                          <td>
-                            <span className="admin-time-cell" title={u.last_active_at}>
-                              {timeAgo(u.last_active_at)}
-                            </span>
-                          </td>
-                          <td>
-                            <span className="admin-date-cell">{fmtDate(u.created_at)}</span>
-                          </td>
-                        </tr>
+                          {isExpanded ? 'Hide Details' : 'Open Details'}
+                        </button>
+
                         {isExpanded && (
-                          <tr key={`${u.id}-detail`} className="admin-detail-row">
-                            <td colSpan="12">
-                              <div className="admin-detail-grid">
-                                <div className="admin-detail-col">
-                                  <h5>Manager Profile</h5>
-                                  <div className="admin-detail-items">
-                                    <span>Points: <strong>{u.manager_points}</strong></span>
-                                    <span>Firings: <strong>{u.manager_firings}</strong></span>
-                                    <span>Titles: <strong>{u.manager_titles}</strong></span>
-                                    <span>Matches: <strong>{u.manager_matches_managed}</strong></span>
-                                    <span>Wins: <strong>{u.manager_wins_managed}</strong></span>
-                                    <span>Losses: <strong>{u.manager_losses_managed}</strong></span>
-                                    <span>Win Rate: <strong>{pct(u.manager_wins_managed, u.manager_losses_managed)}</strong></span>
-                                  </div>
-                                </div>
-                                {u.franchise_id && (
-                                  <div className="admin-detail-col">
-                                    <h5>Franchise Details</h5>
-                                    <div className="admin-detail-items">
-                                      <span>Name: <strong>{u.franchise_name}</strong></span>
-                                      <span>City: <strong>{u.city_name}, {u.country}</strong></span>
-                                      <span>Tier: <strong>{u.current_league_tier}</strong></span>
-                                      <span>Record: <strong>{u.f_wins}W · {u.f_losses}L</strong></span>
-                                      <span>Value: <strong>${Number(u.total_valuation || 0).toFixed(2)}</strong></span>
-                                      <span>Balance: <strong>${Number(u.financial_balance || 0).toFixed(2)}</strong></span>
-                                      <span>Fan Rating: <strong>{Number(u.fan_rating || 0).toFixed(1)}</strong></span>
-                                      <span>Academy Lvl: <strong>{u.academy_level}</strong></span>
-                                      <span>Prospect Pts: <strong>{u.prospect_points}</strong></span>
-                                      <span>Growth Pts: <strong>{u.growth_points}</strong></span>
-                                    </div>
-                                  </div>
-                                )}
-                                {u.franchise_id && (
-                                  <div className="admin-detail-col">
-                                    <h5>Squad</h5>
-                                    <div className="admin-detail-items">
-                                      <span>Total Players: <strong>{u.squad_size}</strong></span>
-                                      <span>Main Squad: <strong>{u.main_xi}</strong></span>
-                                      <span>Youth: <strong>{u.youth_count}</strong></span>
-                                      <span>Avg OVR: <strong>{u.avg_ovr}</strong></span>
-                                    </div>
-                                  </div>
-                                )}
+                          <div className="admin-user-detail-panels">
+                            <section className="admin-user-detail-panel">
+                              <h5>Manager Profile</h5>
+                              <div className="admin-detail-items">
+                                <span>Points: <strong>{u.manager_points}</strong></span>
+                                <span>Firings: <strong>{u.manager_firings}</strong></span>
+                                <span>Titles: <strong>{u.manager_titles}</strong></span>
+                                <span>Matches: <strong>{u.manager_matches_managed}</strong></span>
+                                <span>Wins: <strong>{u.manager_wins_managed}</strong></span>
+                                <span>Losses: <strong>{u.manager_losses_managed}</strong></span>
+                                <span>Win Rate: <strong>{pct(u.manager_wins_managed, u.manager_losses_managed)}</strong></span>
                               </div>
-                            </td>
-                          </tr>
+                            </section>
+
+                            {u.franchise_id && (
+                              <section className="admin-user-detail-panel">
+                                <h5>Franchise</h5>
+                                <div className="admin-detail-items">
+                                  <span>Name: <strong>{u.franchise_name}</strong></span>
+                                  <span>City: <strong>{u.city_name}, {u.country}</strong></span>
+                                  <span>Tier: <strong>{u.current_league_tier}</strong></span>
+                                  <span>Record: <strong>{u.f_wins}W · {u.f_losses}L</strong></span>
+                                  <span>Value: <strong>${Number(u.total_valuation || 0).toFixed(2)}</strong></span>
+                                  <span>Balance: <strong>${Number(u.financial_balance || 0).toFixed(2)}</strong></span>
+                                  <span>Fan Rating: <strong>{Number(u.fan_rating || 0).toFixed(1)}</strong></span>
+                                  <span>Academy Lvl: <strong>{u.academy_level}</strong></span>
+                                  <span>Prospect Pts: <strong>{u.prospect_points}</strong></span>
+                                  <span>Growth Pts: <strong>{u.growth_points}</strong></span>
+                                </div>
+                              </section>
+                            )}
+
+                            {u.franchise_id && (
+                              <section className="admin-user-detail-panel">
+                                <h5>Squad</h5>
+                                <div className="admin-detail-items">
+                                  <span>Total Players: <strong>{u.squad_size}</strong></span>
+                                  <span>Main Squad: <strong>{u.main_xi}</strong></span>
+                                  <span>Youth: <strong>{u.youth_count}</strong></span>
+                                  <span>Avg OVR: <strong>{u.avg_ovr}</strong></span>
+                                </div>
+                              </section>
+                            )}
+                          </div>
                         )}
-                      </>
-                    );
-                  })}
-                  {filtered.length === 0 && (
-                    <tr>
-                      <td colSpan="12" className="admin-empty-row">
-                        <div className="admin-empty-state">
-                          {Icons.users}
-                          <p>{search ? 'No users match your search.' : 'No users yet.'}</p>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="admin-empty-state admin-empty-state--panel">
+                {Icons.users}
+                <p>{search ? 'No users match your search.' : 'No users yet.'}</p>
+              </div>
+            )
           )}
         </div>
       )}

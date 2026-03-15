@@ -19,6 +19,7 @@ DROP TABLE IF EXISTS match_over_stats CASCADE;
 DROP TABLE IF EXISTS match_innings_stats CASCADE;
 DROP TABLE IF EXISTS match_events CASCADE;
 DROP TABLE IF EXISTS matches CASCADE;
+DROP TABLE IF EXISTS international_series CASCADE;
 DROP TABLE IF EXISTS season_teams CASCADE;
 DROP TABLE IF EXISTS seasons CASCADE;
 DROP TABLE IF EXISTS players CASCADE;
@@ -53,7 +54,7 @@ CREATE TABLE users (
   manager_matches_managed INTEGER NOT NULL DEFAULT 0,
   manager_wins_managed INTEGER NOT NULL DEFAULT 0,
   manager_losses_managed INTEGER NOT NULL DEFAULT 0,
-  active_world_id BIGINT REFERENCES worlds(id) ON DELETE SET NULL,
+  active_world_id BIGINT,
   last_active_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -65,6 +66,10 @@ CREATE TABLE worlds (
   competition_mode TEXT NOT NULL DEFAULT 'CLUB' CHECK (competition_mode IN ('CLUB', 'INTERNATIONAL')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE users
+ADD CONSTRAINT users_active_world_id_fkey
+FOREIGN KEY (active_world_id) REFERENCES worlds(id) ON DELETE SET NULL;
 
 CREATE INDEX worlds_creator_idx ON worlds(creator_user_id);
 
@@ -161,6 +166,14 @@ CREATE TABLE seasons (
   team_count INTEGER NOT NULL,
   league_count INTEGER NOT NULL DEFAULT 4,
   teams_per_league INTEGER NOT NULL DEFAULT 13,
+  cycle_length_years INTEGER NOT NULL DEFAULT 1,
+  current_cycle_year INTEGER NOT NULL DEFAULT 1,
+  current_phase TEXT NOT NULL DEFAULT 'REGULAR',
+  calendar_date DATE,
+  cycle_start_date DATE,
+  cycle_end_date DATE,
+  ftp_generated_at TIMESTAMPTZ,
+  world_cup_generated_at TIMESTAMPTZ,
   status TEXT NOT NULL DEFAULT 'PLANNED' CHECK (status IN ('PLANNED', 'ACTIVE', 'COMPLETED')),
   start_date DATE,
   end_date DATE,
@@ -341,12 +354,41 @@ CREATE INDEX players_franchise_idx ON players(franchise_id);
 CREATE INDEX players_status_idx ON players(squad_status);
 CREATE UNIQUE INDEX players_franchise_lineup_slot_uidx ON players(franchise_id, lineup_slot) WHERE lineup_slot IS NOT NULL;
 
+CREATE TABLE international_series (
+  id BIGSERIAL PRIMARY KEY,
+  season_id BIGINT NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+  manager_franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+  opponent_franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+  home_franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+  away_franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
+  created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  window_no INTEGER NOT NULL CHECK (window_no BETWEEN 1 AND 200),
+  venue TEXT NOT NULL CHECK (venue IN ('HOME', 'AWAY')),
+  anchor_round_no INTEGER NOT NULL CHECK (anchor_round_no BETWEEN 1 AND 200),
+  title TEXT,
+  pair_key TEXT NOT NULL,
+  series_type TEXT NOT NULL DEFAULT 'BILATERAL' CHECK (series_type IN ('BILATERAL', 'WORLD_CUP')),
+  cycle_year INTEGER NOT NULL DEFAULT 1 CHECK (cycle_year BETWEEN 1 AND 4),
+  start_date DATE,
+  end_date DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (season_id, pair_key)
+);
+
+CREATE INDEX international_series_season_idx ON international_series(season_id, manager_franchise_id);
+CREATE INDEX international_series_opponent_idx ON international_series(opponent_franchise_id, season_id);
+CREATE INDEX international_series_date_idx ON international_series(season_id, start_date, end_date);
+
 CREATE TABLE matches (
   id BIGSERIAL PRIMARY KEY,
   season_id BIGINT NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
   home_franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
   away_franchise_id BIGINT NOT NULL REFERENCES franchises(id) ON DELETE CASCADE,
-  stage TEXT NOT NULL DEFAULT 'REGULAR' CHECK (stage IN ('REGULAR', 'PLAYOFF', 'FINAL')),
+  series_id BIGINT REFERENCES international_series(id) ON DELETE SET NULL,
+  series_match_no INTEGER CHECK (series_match_no BETWEEN 1 AND 5),
+  stage TEXT NOT NULL DEFAULT 'REGULAR' CHECK (stage IN ('REGULAR', 'PLAYOFF', 'FINAL', 'SERIES', 'WORLD_CUP_GROUP', 'WORLD_CUP_QF', 'WORLD_CUP_SF', 'WORLD_CUP_FINAL')),
+  group_name TEXT,
   league_tier INTEGER CHECK (league_tier BETWEEN 1 AND 20),
   round_no INTEGER NOT NULL,
   matchday_label TEXT,
@@ -370,6 +412,7 @@ CREATE TABLE matches (
 
 CREATE INDEX matches_season_idx ON matches(season_id, round_no);
 CREATE INDEX matches_status_idx ON matches(status);
+CREATE INDEX matches_series_idx ON matches(series_id, series_match_no);
 
 CREATE TABLE match_innings_stats (
   id BIGSERIAL PRIMARY KEY,
