@@ -67,7 +67,32 @@ export function opId(prefix = 'sim') {
 
 /**
  * Set the browser tab title with "| Cricket Architect" suffix.
+ * Also updates meta description and canonical URL for SEO.
  */
-export function setPageTitle(title) {
+const PAGE_META = {
+  'Dashboard': 'Manage your T20 franchise — view standings, simulate rounds, and track your club from the Cricket Architect dashboard.',
+  'Squad Management': 'Build your squad, set your starting XI, manage player roles and tactics in Cricket Architect.',
+  'Stats': 'View batting and bowling leaderboards with 30+ stat columns across all seasons in Cricket Architect.',
+  'Managers': 'Browse all managers, XP levels, career history, and reputation in Cricket Architect.',
+  'Statbook': 'Deep-dive into match archives, head-to-head records, and season histories. Export to Excel.',
+  'Youth Academy': 'Scout prospects, invest in growth cycles, upgrade your academy, and promote talent in Cricket Architect.',
+  'League Table': 'Live league standings, promotion and relegation zones across the 4-tier Cricket Architect pyramid.',
+  'Fixtures & Results': 'View upcoming fixtures, past results, and full round-by-round schedules in Cricket Architect.',
+  'Match Center': 'Live ball-by-ball T20 simulation with scorecards, commentary, and AI match analysis.',
+  'Transfer Market': 'Buy, sell, and loan players on the Cricket Architect auction market with salary cap management.',
+  'Franchise Marketplace': 'Browse and buy T20 franchises from 1,200+ cities worldwide in Cricket Architect.',
+  'Financials': 'Track club revenue, expenses, valuation, and financial projections in Cricket Architect.',
+  'Trophy Room': 'View your trophy cabinet, championship history, and career achievements.',
+  'Admin Console': 'Admin tools for managing your Cricket Architect league and game settings.',
+  'Sign In': 'Sign in or create a free account to play Cricket Architect — the deepest cricket management game.',
+};
+
+export function setPageTitle(title, description) {
   document.title = title ? `${title} | Cricket Architect` : 'Cricket Architect — Global T20 Franchise Manager';
+
+  const desc = description || PAGE_META[title] || 'Cricket Architect — free browser-based T20 cricket management game with ball-by-ball simulation, youth academies, transfers, and board pressure.';
+  let metaDesc = document.querySelector('meta[name="description"]');
+  if (metaDesc) {
+    metaDesc.setAttribute('content', desc);
+  }
 }

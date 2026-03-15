@@ -1,0 +1,8 @@
+# Cricket Architect — https://www.cricketarchitect.com
+User-agent: *
+Allow: /welcome
+Allow: /login
+Disallow: /admin
+Disallow: /api/
+
+Sitemap: https://www.cricketarchitect.com/sitemap.xml

@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0c1117"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="35%" r="50%">
+      <stop offset="0%" stop-color="rgba(52,211,153,0.12)"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- Decorative cricket field circle -->
+  <circle cx="600" cy="315" r="260" fill="none" stroke="rgba(52,211,153,0.08)" stroke-width="1.5"/>
+  <circle cx="600" cy="315" r="320" fill="none" stroke="rgba(52,211,153,0.04)" stroke-width="1"/>
+
+  <!-- Pitch rectangle -->
+  <rect x="570" y="195" width="60" height="240" rx="3" fill="none" stroke="rgba(52,211,153,0.06)" stroke-width="1"/>
+
+  <!-- Cricket bat icon -->
+  <g transform="translate(555, 130) scale(1.8)" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m14 18 2 2"/>
+    <path d="M3.47 9.77a.5.5 0 0 1 .04-.68l7.58-7.58a.5.5 0 0 1 .68-.04l6.34 5.07a.5.5 0 0 1 .04.73L11.18 14a.5.5 0 0 1-.64.06z"/>
+    <path d="m11 14-1 5-3 3"/>
+  </g>
+
+  <!-- Title -->
+  <text x="600" y="300" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="62" font-weight="900" letter-spacing="-2" fill="#eaf0f9">
+    Cricket Architect
+  </text>
+
+  <!-- Subtitle -->
+  <text x="600" y="352" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="22" font-weight="600" fill="#8d97ac">
+    Build a T20 Dynasty — Club or Country
+  </text>
+
+  <!-- Gradient underline -->
+  <rect x="400" y="375" width="400" height="3" rx="1.5" fill="url(#accent)" opacity="0.6"/>
+
+  <!-- Feature pills -->
+  <g font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="14" font-weight="600">
+    <rect x="240" y="420" width="140" height="34" rx="17" fill="rgba(52,211,153,0.1)" stroke="rgba(52,211,153,0.2)" stroke-width="1"/>
+    <text x="310" y="442" text-anchor="middle" fill="#34d399">52 Club Teams</text>
+
+    <rect x="410" y="420" width="160" height="34" rx="17" fill="rgba(56,189,248,0.1)" stroke="rgba(56,189,248,0.2)" stroke-width="1"/>
+    <text x="490" y="442" text-anchor="middle" fill="#38bdf8">100+ Nations</text>
+
+    <rect x="600" y="420" width="170" height="34" rx="17" fill="rgba(52,211,153,0.1)" stroke="rgba(52,211,153,0.2)" stroke-width="1"/>
+    <text x="685" y="442" text-anchor="middle" fill="#34d399">Ball-by-Ball</text>
+
+    <rect x="800" y="420" width="160" height="34" rx="17" fill="rgba(56,189,248,0.1)" stroke="rgba(56,189,248,0.2)" stroke-width="1"/>
+    <text x="880" y="442" text-anchor="middle" fill="#38bdf8">Free to Play</text>
+  </g>
+
+  <!-- Domain -->
+  <text x="600" y="560" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="16" font-weight="700" fill="#5c6680">
+    cricketarchitect.com
+  </text>
+
+  <!-- Bottom accent line -->
+  <rect x="0" y="624" width="1200" height="6" fill="url(#accent)" opacity="0.3"/>
+</svg>
