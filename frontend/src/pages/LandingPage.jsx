@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { setPageTitle } from '../utils/format';
@@ -101,6 +101,7 @@ const STATS = [
 export default function LandingPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => { setPageTitle('Cricket Architect — Build Your Dynasty'); }, []);
 
@@ -110,14 +111,18 @@ export default function LandingPage() {
 
   return (
     <div className="landing">
-      {/* ── HERO ────────────────────────────────────────── */}
-      <section className="landing-hero">
-        <div className="landing-hero-bg" />
-
-        <nav className="landing-nav">
+      {/* ── NAVBAR ──────────────────────────────────────── */}
+      <nav className="landing-nav">
+        <div className="landing-nav-inner">
           <div className="landing-nav-brand">
             {Icons.bat}
             <span>Cricket Architect</span>
+          </div>
+          <div className={`landing-nav-links ${mobileMenuOpen ? 'open' : ''}`}>
+            <a href="#modes" onClick={() => setMobileMenuOpen(false)}>Career Paths</a>
+            <a href="#features" onClick={() => setMobileMenuOpen(false)}>Features</a>
+            <a href="#engine" onClick={() => setMobileMenuOpen(false)}>Match Engine</a>
+            <a href="#how" onClick={() => setMobileMenuOpen(false)}>How It Works</a>
           </div>
           <div className="landing-nav-actions">
             <button className="landing-btn-ghost" onClick={() => navigate('/login')}>
@@ -127,17 +132,35 @@ export default function LandingPage() {
               Start Free {Icons.chevronRight}
             </button>
           </div>
-        </nav>
+          <button className="landing-mobile-toggle" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} aria-label="Menu">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {mobileMenuOpen
+                ? <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>
+                : <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>
+              }
+            </svg>
+          </button>
+        </div>
+      </nav>
+
+      {/* ── HERO ────────────────────────────────────────── */}
+      <section className="landing-hero">
+        <div className="landing-hero-bg">
+          {/* Decorative cricket field arcs */}
+          <div className="landing-deco landing-deco--circle" />
+          <div className="landing-deco landing-deco--pitch" />
+          <div className="landing-deco landing-deco--glow" />
+        </div>
 
         <div className="landing-hero-content">
+          <span className="landing-hero-badge">🏏 Free-to-Play Browser Game</span>
           <h1 className="landing-hero-title">
-            The Cricket Management<br />Career You Deserve.
+            Build a Cricket Dynasty.<br />
+            <span className="landing-hero-accent">Club or Country.</span>
           </h1>
-
           <p className="landing-hero-sub">
-            Club franchise or international duty — pick your path and prove you belong.
-            Build squads, develop youth, survive board pressure, and navigate either the club pyramid or a four-year international FTP.
-            Every match, every decision, every season counts.
+            The deepest cricket management sim ever made. Pick a franchise from 1,200+ cities or manage one of 100 national teams.
+            Ball-by-ball match engine, youth development, transfers, board pressure — every decision shapes your legacy.
           </p>
 
           <div className="landing-hero-cta">
@@ -158,43 +181,65 @@ export default function LandingPage() {
             ))}
           </div>
         </div>
+      </section>
 
-        <div className="landing-hero-seam" />
+      {/* ── SOCIAL PROOF TICKER ─────────────────────────── */}
+      <section className="landing-ticker">
+        <div className="landing-ticker-inner">
+          <span>🏟️ 52-club league pyramid</span>
+          <span>🌍 100+ national teams</span>
+          <span>⚡ Ball-by-ball engine</span>
+          <span>📊 25+ data tables</span>
+          <span>🧑‍💼 Manager XP &amp; reputation</span>
+          <span>🏆 World Cup every 4 years</span>
+        </div>
       </section>
 
       {/* ── TWO CAREER PATHS ────────────────────────────── */}
-      <section className="landing-modes">
+      <section className="landing-modes" id="modes">
         <div className="landing-section-header">
           <p className="landing-overline">Two Career Paths</p>
           <h2>Club or Country. You Choose.</h2>
+          <p className="landing-section-sub">
+            Two completely different experiences with shared depth. One save, one career, years of decisions ahead.
+          </p>
         </div>
 
         <div className="landing-modes-grid">
-          <div className="landing-mode-card">
-            <div className="landing-mode-icon" style={{ color: 'var(--accent)' }}>{Icons.globe}</div>
+          <div className="landing-mode-card landing-mode-card--club">
+            <div className="landing-mode-badge">Most Popular</div>
+            <div className="landing-mode-icon">{Icons.globe}</div>
             <h3>Club T20 Franchise</h3>
+            <p className="landing-mode-tagline">Pick any city. Build from nothing. Dominate the pyramid.</p>
             <ul>
               <li>Pick any city from 1,200+ worldwide</li>
               <li>52-club league with 4 tiers</li>
-              <li>Full transfer market, loans & salary cap</li>
+              <li>Full transfer market, loans &amp; salary cap</li>
               <li>Promotion, relegation, league finals</li>
               <li>Club valuation with 6-component formula</li>
-              <li>Buy & sell franchises on the marketplace</li>
+              <li>Buy &amp; sell franchises on the marketplace</li>
             </ul>
+            <button className="landing-mode-cta" onClick={() => navigate('/login?mode=register')}>
+              Start Club Career {Icons.chevronRight}
+            </button>
           </div>
 
-          <div className="landing-mode-card">
-            <div className="landing-mode-icon" style={{ color: 'var(--info)' }}>{Icons.flag}</div>
+          <div className="landing-mode-card landing-mode-card--intl">
+            <div className="landing-mode-badge landing-mode-badge--intl">New</div>
+            <div className="landing-mode-icon">{Icons.flag}</div>
             <h3>International Management</h3>
+            <p className="landing-mode-tagline">Lead your nation through a four-year FTP cycle to the World Cup.</p>
             <ul>
               <li>100+ nations from Afghanistan to Zimbabwe</li>
               <li>4-year Future Tours Programme calendar</li>
               <li>Every nation faces the full world once per cycle</li>
               <li>Global rankings decide World Cup qualification</li>
               <li>Top 32 reach the World Cup every four years</li>
-              <li>No transfers — results and youth only</li>
-              <li>Build squad strength through development</li>
+              <li>No transfers — results and youth development only</li>
             </ul>
+            <button className="landing-mode-cta" onClick={() => navigate('/login?mode=register')}>
+              Start International Career {Icons.chevronRight}
+            </button>
           </div>
         </div>
       </section>
@@ -203,16 +248,16 @@ export default function LandingPage() {
       <section className="landing-features" id="features">
         <div className="landing-section-header">
           <p className="landing-overline">Built for Depth</p>
-          <h2>Everything a Manager Needs</h2>
+          <h2>Everything a Cricket Manager Needs</h2>
           <p className="landing-section-sub">
-            From board pressure to ball-by-ball drama — every system connects.
+            From board pressure to ball-by-ball drama — every system is connected. Nothing is cosmetic.
           </p>
         </div>
 
         <div className="landing-features-grid">
           {FEATURES.map((f) => (
             <div className="landing-feature-card" key={f.title}>
-              <div className="landing-feature-icon" style={{ color: f.accent, background: `color-mix(in srgb, ${f.accent} 12%, transparent)` }}>
+              <div className="landing-feature-icon" style={{ '--feature-accent': f.accent }}>
                 {f.icon}
               </div>
               <h3>{f.title}</h3>
@@ -222,11 +267,48 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── MANAGER CAREER DETAIL ──────────────────────── */}
+      {/* ── MATCH ENGINE SHOWCASE ──────────────────────── */}
+      <section className="landing-engine" id="engine">
+        <div className="landing-section-header">
+          <p className="landing-overline">The Heart of the Game</p>
+          <h2>Ball-by-Ball T20 Match Engine</h2>
+          <p className="landing-section-sub">
+            Not just a dice roll. A physics-aware simulation with 9 bowling styles, 5 batting types, matchups, fatigue, pitch, weather, and phase-aware logic.
+          </p>
+        </div>
+
+        <div className="landing-engine-grid">
+          <div className="landing-engine-card">
+            <span className="landing-engine-num">9</span>
+            <h4>Bowling Styles</h4>
+            <p>Express Pace, Swing, Seam, Cutters, Off/Leg Spin, Left-arm, Mystery — each with unique delivery profiles and phase effectiveness.</p>
+          </div>
+          <div className="landing-engine-card">
+            <span className="landing-engine-num">7</span>
+            <h4>Pitch Conditions</h4>
+            <p>Good, green, flat, dusty, dry, damp, bouncy — combined with weather, wind, time of day, and ground dimensions.</p>
+          </div>
+          <div className="landing-engine-card">
+            <span className="landing-engine-num">20</span>
+            <h4>Overs Simulated</h4>
+            <p>Every ball generates commentary, tracks momentum, models fatigue, and respects real T20 phases — powerplay, middle, death.</p>
+          </div>
+          <div className="landing-engine-card">
+            <span className="landing-engine-num">AI</span>
+            <h4>Smart CPU</h4>
+            <p>CPU teams manage squads, buy &amp; sell players, develop youth, upgrade academies, and hire/fire managers autonomously.</p>
+          </div>
+        </div>
+      </section>
+
+      {/* ── MANAGER CAREER ─────────────────────────────── */}
       <section className="landing-manager">
         <div className="landing-section-header">
           <p className="landing-overline">Your Reputation is Everything</p>
           <h2>Survive the Board. Build a Legacy.</h2>
+          <p className="landing-section-sub">
+            This isn&apos;t just a game of wins. Your board watches, evaluates, and will sack you if you fail.
+          </p>
         </div>
 
         <div className="landing-manager-grid">
@@ -248,62 +330,44 @@ export default function LandingPage() {
             <span className="landing-manager-num">XP</span>
             <div>
               <h4>Manager Progression</h4>
-              <p>Earn XP every match. Level up to 100. Build reputation. Attract better job offers when you need them.</p>
+              <p>Earn XP every match. Level up to 100. Build reputation across multiple clubs.</p>
             </div>
           </div>
           <div className="landing-manager-item">
             <span className="landing-manager-num">?</span>
             <div>
               <h4>Fired? Not Over.</h4>
-              <p>Enter the job market. Receive offers from clubs that need you. Apply to open positions. Get back in the game.</p>
+              <p>Enter the job market. Receive board offers. Apply to open teams. Get back in the game.</p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ── UNDER THE HOOD ──────────────────────────────── */}
-      <section className="landing-depth">
-        <div className="landing-section-header">
-          <p className="landing-overline">Under the Hood</p>
-          <h2>Depth You Can Feel</h2>
-        </div>
-
-        <div className="landing-manager-grid">
-          <div className="landing-manager-item">
-            <span className="landing-manager-num">9</span>
-            <div>
-              <h4>Bowling Styles</h4>
-              <p>Express Pace, Swing, Seam, Cutters, Off/Leg Spin, Left-arm, Mystery — each with unique delivery profiles.</p>
-            </div>
+      {/* ── DATA DEPTH ──────────────────────────────────── */}
+      <section className="landing-data">
+        <div className="landing-data-inner">
+          <div className="landing-data-text">
+            <p className="landing-overline">Stats &amp; Records</p>
+            <h2>25+ Database Tables. Infinite Stories.</h2>
+            <p>
+              Top 100 leaderboards with 16 batting and 14 bowling columns. Head-to-head records.
+              Full match archive with ball-by-ball data. Season histories, trophy cabinets, career timelines.
+              Export anything to Excel/CSV.
+            </p>
           </div>
-          <div className="landing-manager-item">
-            <span className="landing-manager-num">7</span>
-            <div>
-              <h4>Pitch Conditions</h4>
-              <p>Good, green, flat, dusty, dry, damp, bouncy — plus weather, wind, time of day, and ground size.</p>
-            </div>
-          </div>
-          <div className="landing-manager-item">
-            <span className="landing-manager-num">16</span>
-            <div>
-              <h4>Batting Leaderboard Columns</h4>
-              <p>Matches, innings, runs, balls, average, strike rate, highest score, fours, sixes, not outs, rating, and more.</p>
-            </div>
-          </div>
-          <div className="landing-manager-item">
-            <span className="landing-manager-num">AI</span>
-            <div>
-              <h4>Living CPU World</h4>
-              <p>CPU teams buy, sell, loan, generate prospects, upgrade academies, and hire/fire managers — all autonomously.</p>
-            </div>
+          <div className="landing-data-numbers">
+            <div className="landing-data-num"><strong>16</strong><span>Batting Columns</span></div>
+            <div className="landing-data-num"><strong>14</strong><span>Bowling Columns</span></div>
+            <div className="landing-data-num"><strong>25+</strong><span>Data Tables</span></div>
+            <div className="landing-data-num"><strong>∞</strong><span>Match Archive</span></div>
           </div>
         </div>
       </section>
 
       {/* ── HOW IT WORKS ────────────────────────────────── */}
-      <section className="landing-how">
+      <section className="landing-how" id="how">
         <div className="landing-section-header">
-          <p className="landing-overline">Get Started</p>
+          <p className="landing-overline">Get Started in 60 Seconds</p>
           <h2>Three Steps to Your First Match</h2>
         </div>
 
@@ -317,20 +381,21 @@ export default function LandingPage() {
           <div className="landing-step">
             <div className="landing-step-num">2</div>
             <h3>Build Your Squad</h3>
-            <p>Scout youth, set your starting XI with smart auto-lineup, manage transfers, and prepare for match day.</p>
+            <p>Scout youth, set your starting XI, manage transfers, and prepare for match day.</p>
           </div>
           <div className="landing-step-divider" />
           <div className="landing-step">
             <div className="landing-step-num">3</div>
-            <h3>Climb the Pyramid</h3>
-            <p>Simulate club rounds or advance the international calendar day by day. Win matches, grow your squad, and chase titles over the long arc of a career.</p>
+            <h3>Climb the Ladder</h3>
+            <p>Simulate rounds, win titles, survive the board, and build a multi-season dynasty.</p>
           </div>
         </div>
       </section>
 
-      {/* ── CTA BANNER ──────────────────────────────────── */}
+      {/* ── FINAL CTA ───────────────────────────────────── */}
       <section className="landing-cta-section">
         <div className="landing-cta-card">
+          <div className="landing-cta-icon">🏏</div>
           <h2>Ready to Manage?</h2>
           <p>Free to play. No downloads. No app store. Start your career in the browser right now.</p>
           <div className="landing-cta-actions">
@@ -351,7 +416,7 @@ export default function LandingPage() {
             {Icons.bat}
             <span>Cricket Architect</span>
           </div>
-          <p>Club &middot; International &middot; Single-player career mode</p>
+          <p>Club &middot; International &middot; Single-player cricket management</p>
         </div>
       </footer>
     </div>
