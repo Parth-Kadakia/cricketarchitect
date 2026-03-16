@@ -10558,6 +10558,422 @@ table.stats-table tr:hover td {
   text-align: center;
 }
 
+.mc-premium-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.mc-card--premium {
+  padding: 1rem;
+}
+
+.mc-card--span-2 {
+  grid-column: span 2;
+}
+
+.mc-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.mc-card-head .mc-section-title {
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  font-size: 1.02rem;
+  line-height: 1.1;
+  color: var(--text-primary);
+}
+
+.mc-section-subtitle {
+  margin: 0.3rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.mc-headline-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.42rem 0.72rem;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(111, 138, 87, 0.18);
+  background: rgba(111, 138, 87, 0.1);
+  color: var(--leaf);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mc-chart-stack {
+  display: grid;
+  gap: 1.1rem;
+}
+
+.mc-premium-chart {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.mc-premium-svg {
+  width: 100%;
+  min-height: 220px;
+  display: block;
+}
+
+.mc-grid-line {
+  stroke: rgba(140, 133, 120, 0.18);
+  stroke-width: 1;
+}
+
+.mc-grid-line--vertical {
+  stroke-dasharray: 3 5;
+}
+
+.mc-axis-label {
+  fill: var(--text-muted);
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.mc-line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mc-line--one,
+.mc-point--one {
+  stroke: var(--leaf);
+  fill: var(--leaf);
+}
+
+.mc-line--two,
+.mc-point--two {
+  stroke: var(--accent);
+  fill: var(--accent);
+}
+
+.mc-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+}
+
+.mc-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.mc-chart-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+}
+
+.mc-chart-swatch--one {
+  background: var(--leaf);
+}
+
+.mc-chart-swatch--two {
+  background: var(--accent);
+}
+
+.mc-manhattan {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18px, 1fr));
+  gap: 0.35rem;
+  align-items: end;
+}
+
+.mc-manhattan-col {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.mc-manhattan-bars {
+  min-height: 128px;
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  gap: 0.18rem;
+}
+
+.mc-manhattan-bar {
+  width: 9px;
+  min-height: 2px;
+  border-radius: 999px 999px 2px 2px;
+}
+
+.mc-manhattan-bar--one {
+  background: linear-gradient(180deg, rgba(111, 138, 87, 0.45), var(--leaf));
+}
+
+.mc-manhattan-bar--two {
+  background: linear-gradient(180deg, rgba(187, 125, 79, 0.4), var(--accent));
+}
+
+.mc-manhattan-label {
+  text-align: center;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.mc-surface-chart {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: center;
+}
+
+.mc-surface-svg {
+  width: min(100%, 280px);
+  display: block;
+}
+
+.mc-chart-caption {
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.mc-wheel-ring {
+  fill: rgba(111, 138, 87, 0.05);
+  stroke: rgba(111, 138, 87, 0.2);
+  stroke-width: 1;
+}
+
+.mc-wheel-ring--inner {
+  fill: none;
+}
+
+.mc-wheel-axis {
+  stroke: rgba(140, 133, 120, 0.25);
+  stroke-width: 1;
+  stroke-dasharray: 4 5;
+}
+
+.mc-shot-line {
+  stroke-width: 2;
+  opacity: 0.72;
+}
+
+.mc-shot-line--boundary,
+.mc-shot-dot--boundary {
+  stroke: var(--accent);
+  fill: var(--accent);
+}
+
+.mc-shot-line--run,
+.mc-shot-dot--run {
+  stroke: var(--leaf);
+  fill: var(--leaf);
+}
+
+.mc-pitch-body {
+  fill: rgba(193, 161, 108, 0.18);
+  stroke: rgba(152, 121, 77, 0.16);
+  stroke-width: 1.5;
+}
+
+.mc-pitch-strip {
+  fill: rgba(230, 214, 184, 0.55);
+  stroke: rgba(152, 121, 77, 0.16);
+  stroke-width: 1;
+}
+
+.mc-pitch-guide {
+  stroke: rgba(140, 133, 120, 0.28);
+  stroke-width: 1;
+  stroke-dasharray: 4 5;
+}
+
+.mc-pitch-dot {
+  stroke: rgba(255, 255, 255, 0.8);
+  stroke-width: 1.1;
+}
+
+.mc-pitch-dot--wicket {
+  fill: var(--danger);
+}
+
+.mc-pitch-dot--boundary {
+  fill: var(--accent);
+}
+
+.mc-pitch-dot--dot {
+  fill: var(--text-muted);
+}
+
+.mc-pitch-dot--run {
+  fill: var(--leaf);
+}
+
+.mc-partnership-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.mc-partnership-row {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.mc-partnership-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.mc-partnership-name {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.mc-partnership-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.mc-partnership-bar {
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(140, 133, 120, 0.12);
+  overflow: hidden;
+}
+
+.mc-partnership-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--leaf), rgba(96, 131, 91, 0.45));
+}
+
+.mc-spell-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.mc-spell-card {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(140, 133, 120, 0.16);
+}
+
+.mc-spell-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.mc-spell-top strong {
+  font-size: 0.86rem;
+  color: var(--text-primary);
+}
+
+.mc-spell-top span,
+.mc-spell-metrics span {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+}
+
+.mc-spell-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.mc-fow-card {
+  margin-bottom: 1rem;
+  padding: 1rem;
+}
+
+.mc-fow-strip {
+  position: relative;
+  min-height: 110px;
+  padding: 1.1rem 0.2rem 0;
+}
+
+.mc-fow-line {
+  position: absolute;
+  top: 36px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(111, 138, 87, 0.22), rgba(187, 125, 79, 0.25));
+}
+
+.mc-fow-node {
+  position: absolute;
+  top: 10px;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 0.45rem;
+}
+
+.mc-fow-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  box-shadow: 0 8px 20px rgba(204, 55, 55, 0.18);
+}
+
+.mc-fow-card .sq-empty {
+  margin: 0;
+}
+
+.mc-fow-card {
+  overflow: visible;
+}
+
+.mc-fow-node-card {
+  min-width: 110px;
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(140, 133, 120, 0.16);
+}
+
+.mc-fow-node-card strong {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+.mc-fow-node-card span,
+.mc-fow-node-card small {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
 /* ── Worm chart ────────────────────────────────────────── */
 .mc-worm-wrap {
   margin-bottom: 1rem;
@@ -10759,10 +11175,15 @@ table.stats-table tr:hover td {
 
   /* Two-col layouts → single col */
   .mc-two-col,
+  .mc-premium-grid,
   .db-two-col,
   .fn-two-col,
   .lg-stats-split {
     grid-template-columns: 1fr;
+  }
+
+  .mc-card--span-2 {
+    grid-column: auto;
   }
 
   .ya-prospect-layout {
@@ -10967,6 +11388,26 @@ table.stats-table tr:hover td {
   .mc-hero-teams {
     flex-direction: column;
     gap: 0.6rem;
+  }
+
+  .mc-premium-svg {
+    min-height: 190px;
+  }
+
+  .mc-card-head,
+  .mc-partnership-head,
+  .mc-spell-top,
+  .mc-spell-metrics {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .mc-fow-strip {
+    min-height: 164px;
+  }
+
+  .mc-fow-node-card {
+    min-width: 90px;
   }
 
   .mc-hero-team-score {
@@ -11481,6 +11922,37 @@ table.stats-table tr:hover td {
   .sq-overall-ring svg {
     width: 48px;
     height: 48px;
+  }
+
+  /* ── Match Center premium analytics ── */
+  .mc-premium-grid {
+    gap: 0.65rem;
+  }
+
+  .mc-card--premium,
+  .mc-fow-card {
+    padding: 0.85rem;
+  }
+
+  .mc-premium-svg {
+    min-height: 170px;
+  }
+
+  .mc-manhattan {
+    grid-template-columns: repeat(auto-fit, minmax(14px, 1fr));
+  }
+
+  .mc-manhattan-bar {
+    width: 7px;
+  }
+
+  .mc-fow-strip {
+    min-height: 220px;
+  }
+
+  .mc-fow-node-card {
+    min-width: 80px;
+    padding: 0.45rem 0.5rem;
   }
 
   /* ── Stats page ── */

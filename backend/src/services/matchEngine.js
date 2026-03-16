@@ -2962,7 +2962,15 @@ export async function getMatchScorecard(matchId, dbClient = pool) {
   }
 
   const stats = await dbClient.query(
-    `SELECT pms.*, p.first_name, p.last_name, p.role
+    `SELECT pms.*,
+            p.first_name,
+            p.last_name,
+            p.role,
+            p.batsman_hand,
+            p.batsman_type,
+            p.bowler_hand,
+            p.bowler_style,
+            p.bowler_mentality
      FROM player_match_stats pms
      JOIN players p ON p.id = pms.player_id
      WHERE pms.match_id = $1

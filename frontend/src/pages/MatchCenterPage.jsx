@@ -512,29 +512,571 @@ function buildInningsCommentary(events, playerLookup, targetsByInnings = {}) {
   return result;
 }
 
-function buildOverByOverSeries(events) {
-  const inningMap = new Map([
+function hashSeed(value) {
+  const input = String(value || '');
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash * 31 + input.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function seededBetween(seed, min, max) {
+  const normalized = (Math.sin(seed) + 1) / 2;
+  return min + normalized * (max - min);
+}
+
+function buildOverAnalytics(events) {
+  const inningsMap = new Map([
     [1, new Map()],
     [2, new Map()]
   ]);
 
-  for (const event of events || []) {
+  const sorted = [...(events || [])].sort((a, b) => {
+    if (Number(a.innings) !== Number(b.innings)) {
+      return Number(a.innings) - Number(b.innings);
+    }
+    if (Number(a.over_number) !== Number(b.over_number)) {
+      return Number(a.over_number) - Number(b.over_number);
+    }
+    if (Number(a.ball_number) !== Number(b.ball_number)) {
+      return Number(a.ball_number) - Number(b.ball_number);
+    }
+    return Number(a.id || 0) - Number(b.id || 0);
+  });
+
+  for (const event of sorted) {
     const innings = Number(event.innings || 0);
     const over = Number(event.over_number || 0);
-    const runs = Number(event.runs || 0) + Number(event.extras || 0);
-
-    if (!innings || !over || !inningMap.has(innings)) {
+    if (!innings || !over || !inningsMap.has(innings)) {
       continue;
     }
 
-    const overMap = inningMap.get(innings);
-    overMap.set(over, (overMap.get(over) || 0) + runs);
+    const overMap = inningsMap.get(innings);
+    const row = overMap.get(over) || { over, runs: 0, wickets: 0, balls: 0 };
+    row.runs += Number(event.runs || 0) + Number(event.extras || 0);
+    row.balls += 1;
+    if (Number(event.is_wicket)) {
+      row.wickets += 1;
+    }
+    overMap.set(over, row);
+  }
+
+  function finalize(innings) {
+    let cumulative = 0;
+    let wickets = 0;
+    return [...inningsMap.get(innings).values()]
+      .sort((a, b) => a.over - b.over)
+      .map((row) => {
+        cumulative += Number(row.runs || 0);
+        wickets += Number(row.wickets || 0);
+        return {
+          ...row,
+          cumulative,
+          cumulativeWickets: wickets
+        };
+      });
   }
 
   return {
-    innings1: [...inningMap.get(1).entries()].map(([label, value]) => ({ label, value })),
-    innings2: [...inningMap.get(2).entries()].map(([label, value]) => ({ label, value }))
+    innings1: finalize(1),
+    innings2: finalize(2)
   };
+}
+
+function normalizeBowlerStyleLabel(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return 'Seam';
+  }
+  return text
+    .replace(/\s*Bowler\s*/gi, ' ')
+    .replace(/\s*\(including Chinaman\)/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function inferShotSector(commentary, batsmanHand = 'Right', seed = 1) {
+  const text = String(commentary || '').toLowerCase();
+  const hand = String(batsmanHand || 'Right').toLowerCase() === 'left' ? 'left' : 'right';
+  const mirrored = hand === 'left';
+
+  const sectors = [
+    { label: 'third man', angle: 145, match: /(third man|upper cut|ramp)/ },
+    { label: 'point', angle: 112, match: /(point|cut|backward point|square cut)/ },
+    { label: 'cover', angle: 58, match: /(cover|extra cover|inside out|mid-off)/ },
+    { label: 'straight', angle: 0, match: /(straight|down the ground|long off|long on|mid on|mid off|drive)/ },
+    { label: 'midwicket', angle: -48, match: /(midwicket|mid wicket|cow corner|long on|flick|leg side)/ },
+    { label: 'square leg', angle: -92, match: /(square leg|pull|hook|deep square)/ },
+    { label: 'fine leg', angle: -138, match: /(fine leg|glance|tickle|scoop|swept fine)/ }
+  ];
+
+  const matched = sectors.find((sector) => sector.match.test(text)) || sectors[hashSeed(`${text}:${seed}`) % sectors.length];
+  let angle = matched.angle + seededBetween(seed * 0.37, -12, 12);
+  if (mirrored) {
+    angle *= -1;
+  }
+  return {
+    label: matched.label,
+    angle
+  };
+}
+
+function buildShotMap(events, innings, playerStatsLookup) {
+  const shots = [];
+  for (const event of events || []) {
+    if (Number(event.innings) !== Number(innings)) {
+      continue;
+    }
+    const totalRuns = Number(event.runs || 0) + Number(event.extras || 0);
+    if (!totalRuns || Number(event.extras || 0) >= totalRuns) {
+      continue;
+    }
+
+    const strikerId = Number(event.striker_player_id || 0);
+    const playerMeta = playerStatsLookup.get(strikerId) || {};
+    const seed = hashSeed(`${event.id || 0}:${strikerId}:${totalRuns}`);
+    const sector = inferShotSector(event.commentary, playerMeta.batsman_hand, seed);
+    const radiusBase = totalRuns >= 6 ? 94 : totalRuns >= 4 ? 84 : totalRuns === 3 ? 68 : totalRuns === 2 ? 52 : 34;
+    const radius = radiusBase + seededBetween(seed * 0.71, -6, 6);
+    const angleRadians = (sector.angle * Math.PI) / 180;
+    const x = 110 + Math.sin(angleRadians) * radius;
+    const y = 110 - Math.cos(angleRadians) * radius;
+
+    shots.push({
+      id: event.id,
+      runs: totalRuns,
+      x,
+      y,
+      angle: sector.angle,
+      label: sector.label,
+      commentary: stripCommentaryPrefix(event.commentary)
+    });
+  }
+
+  return shots;
+}
+
+function inferPitchZone(commentary, bowlerStyle, seed) {
+  const text = String(commentary || '').toLowerCase();
+  const style = String(bowlerStyle || '').toLowerCase();
+
+  let x = seededBetween(seed * 0.11, 28, 72);
+  let y = seededBetween(seed * 0.23, 18, 82);
+
+  if (/outside off|wide outside off|left alone/.test(text)) x = seededBetween(seed * 0.31, 20, 35);
+  if (/leg stump|middle and leg|pads|flick|leg side/.test(text)) x = seededBetween(seed * 0.41, 65, 82);
+  if (/middle stump|straight|lbw/.test(text)) x = seededBetween(seed * 0.51, 45, 58);
+
+  if (/yorker|very full|full toss|driven/.test(text)) y = seededBetween(seed * 0.61, 70, 90);
+  else if (/short|bouncer|pull|hook/.test(text)) y = seededBetween(seed * 0.71, 8, 26);
+  else if (/good length|back of a length|tight line/.test(text)) y = seededBetween(seed * 0.81, 38, 58);
+
+  if (style.includes('spin')) {
+    x += seededBetween(seed * 0.91, -8, 8);
+    y = Math.min(88, Math.max(14, y + seededBetween(seed * 1.07, -10, 10)));
+  }
+
+  return {
+    x: Math.max(14, Math.min(86, x)),
+    y: Math.max(10, Math.min(90, y))
+  };
+}
+
+function buildPitchMap(events, innings, playerStatsLookup) {
+  return (events || [])
+    .filter((event) => Number(event.innings) === Number(innings))
+    .map((event) => {
+      const bowlerId = Number(event.bowler_player_id || 0);
+      const bowlerMeta = playerStatsLookup.get(bowlerId) || {};
+      const seed = hashSeed(`${event.id || 0}:${bowlerId}:${event.over_number}.${event.ball_number}`);
+      const zone = inferPitchZone(event.commentary, bowlerMeta.bowler_style, seed);
+      const totalRuns = Number(event.runs || 0) + Number(event.extras || 0);
+      return {
+        id: event.id,
+        x: zone.x,
+        y: zone.y,
+        result: Number(event.is_wicket) ? 'wicket' : Number(event.is_boundary) ? 'boundary' : totalRuns === 0 ? 'dot' : 'run',
+        bowlerStyle: normalizeBowlerStyleLabel(bowlerMeta.bowler_style),
+        commentary: stripCommentaryPrefix(event.commentary),
+        overBall: `${event.over_number}.${event.ball_number}`
+      };
+    });
+}
+
+function buildFallbackFallOfWickets(events, innings, playerLookup) {
+  const rows = [];
+  let cumulativeRuns = 0;
+  let wicketNo = 0;
+
+  for (const event of (events || []).filter((row) => Number(row.innings) === Number(innings))) {
+    cumulativeRuns += Number(event.runs || 0) + Number(event.extras || 0);
+    const scoreFromCommentary = extractScoreFromCommentary(event.commentary);
+    if (scoreFromCommentary) {
+      cumulativeRuns = Number(scoreFromCommentary.runs || cumulativeRuns);
+    }
+    if (!Number(event.is_wicket)) {
+      continue;
+    }
+    wicketNo += 1;
+    const strikerId = Number(event.striker_player_id || 0);
+    rows.push({
+      wicket_no: wicketNo,
+      score_at_fall: cumulativeRuns,
+      over_label: `${event.over_number}.${event.ball_number}`,
+      batter_name: playerLookup.get(strikerId) || 'Unknown Batter',
+      dismissal_text: toDismissalText(event.commentary, playerLookup.get(strikerId) || '')
+    });
+  }
+
+  return rows;
+}
+
+function buildFallbackPartnerships(events, innings, playerLookup) {
+  const rows = [];
+  const inningsEvents = (events || [])
+    .filter((row) => Number(row.innings) === Number(innings))
+    .sort((a, b) => {
+      if (Number(a.over_number) !== Number(b.over_number)) {
+        return Number(a.over_number) - Number(b.over_number);
+      }
+      if (Number(a.ball_number) !== Number(b.ball_number)) {
+        return Number(a.ball_number) - Number(b.ball_number);
+      }
+      return Number(a.id || 0) - Number(b.id || 0);
+    });
+
+  let partnershipNo = 1;
+  let current = null;
+
+  for (const event of inningsEvents) {
+    const strikerId = Number(event.striker_player_id || 0) || null;
+    const nonStrikerId = Number(event.non_striker_player_id || 0) || null;
+    if (!current) {
+      current = {
+        partnership_no: partnershipNo,
+        runs: 0,
+        balls: 0,
+        batter_one_player_id: strikerId,
+        batter_one_name: strikerId ? playerLookup.get(strikerId) || 'Unknown Batter' : null,
+        batter_two_player_id: nonStrikerId,
+        batter_two_name: nonStrikerId ? playerLookup.get(nonStrikerId) || 'Unknown Batter' : null
+      };
+    }
+
+    current.runs += Number(event.runs || 0) + Number(event.extras || 0);
+    current.balls += 1;
+
+    if (Number(event.is_wicket)) {
+      rows.push(current);
+      partnershipNo += 1;
+      current = null;
+    }
+  }
+
+  if (current && Number(current.balls || 0) > 0) {
+    rows.push(current);
+  }
+
+  return rows;
+}
+
+function buildBowlingSpells(events, innings, bowlingFranchiseId, playerLookup, playerStatsLookup) {
+  const bowlers = new Map();
+
+  for (const event of events || []) {
+    if (Number(event.innings) !== Number(innings)) {
+      continue;
+    }
+    if (Number(event.bowling_franchise_id) !== Number(bowlingFranchiseId)) {
+      continue;
+    }
+
+    const bowlerId = Number(event.bowler_player_id || 0);
+    if (!bowlerId) {
+      continue;
+    }
+
+    const bowler = bowlers.get(bowlerId) || {
+      bowlerId,
+      name: playerLookup.get(bowlerId) || 'Unknown Bowler',
+      style: normalizeBowlerStyleLabel(playerStatsLookup.get(bowlerId)?.bowler_style),
+      overMap: new Map()
+    };
+
+    const overNo = Number(event.over_number || 0);
+    const overLine = bowler.overMap.get(overNo) || { over: overNo, balls: 0, runs: 0, wickets: 0 };
+    overLine.balls += 1;
+    overLine.runs += Number(event.runs || 0) + Number(event.extras || 0);
+    if (Number(event.is_wicket) && !String(event.commentary || '').toLowerCase().includes('run out')) {
+      overLine.wickets += 1;
+    }
+    bowler.overMap.set(overNo, overLine);
+    bowlers.set(bowlerId, bowler);
+  }
+
+  const spells = [];
+
+  for (const bowler of bowlers.values()) {
+    const overs = [...bowler.overMap.values()].sort((a, b) => a.over - b.over);
+    let currentSpell = null;
+
+    for (const overLine of overs) {
+      if (!currentSpell || overLine.over !== currentSpell.endOver + 1) {
+        if (currentSpell) {
+          spells.push(currentSpell);
+        }
+        currentSpell = {
+          bowlerId: bowler.bowlerId,
+          bowlerName: bowler.name,
+          style: bowler.style,
+          startOver: overLine.over,
+          endOver: overLine.over,
+          overs: 1,
+          balls: overLine.balls,
+          runs: overLine.runs,
+          wickets: overLine.wickets
+        };
+      } else {
+        currentSpell.endOver = overLine.over;
+        currentSpell.overs += 1;
+        currentSpell.balls += overLine.balls;
+        currentSpell.runs += overLine.runs;
+        currentSpell.wickets += overLine.wickets;
+      }
+    }
+
+    if (currentSpell) {
+      spells.push(currentSpell);
+    }
+  }
+
+  return spells.sort((a, b) => {
+    if (a.startOver !== b.startOver) {
+      return a.startOver - b.startOver;
+    }
+    return Number(b.wickets || 0) - Number(a.wickets || 0);
+  });
+}
+
+function buildLinePath(data, width, height, maxOver, maxRuns) {
+  if (!data.length) {
+    return '';
+  }
+  const innerWidth = width - 56;
+  const innerHeight = height - 38;
+  return data
+    .map((point, index) => {
+      const x = 28 + (((Number(point.over) || index + 1) - 1) / Math.max(1, maxOver - 1 || 1)) * innerWidth;
+      const y = height - 22 - (Number(point.cumulative || 0) / Math.max(1, maxRuns)) * innerHeight;
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(' ');
+}
+
+function PremiumWormChart({ innings1 = [], innings2 = [] }) {
+  if (!innings1.length && !innings2.length) {
+    return <div className="sq-empty">No over progression available yet.</div>;
+  }
+
+  const width = 540;
+  const height = 230;
+  const maxOver = Math.max(1, ...innings1.map((row) => Number(row.over || 0)), ...innings2.map((row) => Number(row.over || 0)));
+  const maxRuns = Math.max(20, ...innings1.map((row) => Number(row.cumulative || 0)), ...innings2.map((row) => Number(row.cumulative || 0)));
+  const gridValues = [0, 0.25, 0.5, 0.75, 1].map((step) => Math.round(maxRuns * step));
+
+  return (
+    <div className="mc-premium-chart">
+      <svg className="mc-premium-svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        {gridValues.map((value) => {
+          const y = height - 22 - (value / Math.max(1, maxRuns)) * (height - 38);
+          return (
+            <g key={value}>
+              <line x1="28" x2={width - 28} y1={y} y2={y} className="mc-grid-line" />
+              <text x="22" y={y + 4} className="mc-axis-label" textAnchor="end">{value}</text>
+            </g>
+          );
+        })}
+        {[...Array(maxOver)].map((_, index) => {
+          const x = 28 + (index / Math.max(1, maxOver - 1 || 1)) * (width - 56);
+          return <line key={`ov-${index + 1}`} x1={x} x2={x} y1="16" y2={height - 22} className="mc-grid-line mc-grid-line--vertical" />;
+        })}
+
+        {innings1.length > 0 && <path d={buildLinePath(innings1, width, height, maxOver, maxRuns)} className="mc-line mc-line--one" />}
+        {innings2.length > 0 && <path d={buildLinePath(innings2, width, height, maxOver, maxRuns)} className="mc-line mc-line--two" />}
+
+        {innings1.map((point) => {
+          const x = 28 + ((Number(point.over) - 1) / Math.max(1, maxOver - 1 || 1)) * (width - 56);
+          const y = height - 22 - (Number(point.cumulative || 0) / Math.max(1, maxRuns)) * (height - 38);
+          return <circle key={`i1-${point.over}`} cx={x} cy={y} r="3.6" className="mc-point mc-point--one" />;
+        })}
+        {innings2.map((point) => {
+          const x = 28 + ((Number(point.over) - 1) / Math.max(1, maxOver - 1 || 1)) * (width - 56);
+          const y = height - 22 - (Number(point.cumulative || 0) / Math.max(1, maxRuns)) * (height - 38);
+          return <circle key={`i2-${point.over}`} cx={x} cy={y} r="3.6" className="mc-point mc-point--two" />;
+        })}
+
+        {[...Array(maxOver)].map((_, index) => {
+          const x = 28 + (index / Math.max(1, maxOver - 1 || 1)) * (width - 56);
+          return <text key={`label-${index + 1}`} x={x} y={height - 8} className="mc-axis-label" textAnchor="middle">{index + 1}</text>;
+        })}
+      </svg>
+      <div className="mc-chart-legend">
+        <span className="mc-chart-legend-item"><span className="mc-chart-swatch mc-chart-swatch--one" />Innings 1 cumulative</span>
+        <span className="mc-chart-legend-item"><span className="mc-chart-swatch mc-chart-swatch--two" />Innings 2 cumulative</span>
+      </div>
+    </div>
+  );
+}
+
+function ManhattanChart({ innings1 = [], innings2 = [] }) {
+  if (!innings1.length && !innings2.length) {
+    return <div className="sq-empty">No over-by-over runs available yet.</div>;
+  }
+
+  const maxOver = Math.max(1, ...innings1.map((row) => Number(row.over || 0)), ...innings2.map((row) => Number(row.over || 0)));
+  const maxRuns = Math.max(6, ...innings1.map((row) => Number(row.runs || 0)), ...innings2.map((row) => Number(row.runs || 0)));
+  const byOverOne = new Map(innings1.map((row) => [Number(row.over), Number(row.runs || 0)]));
+  const byOverTwo = new Map(innings2.map((row) => [Number(row.over), Number(row.runs || 0)]));
+
+  return (
+    <div className="mc-manhattan">
+      {[...Array(maxOver)].map((_, index) => {
+        const over = index + 1;
+        const one = byOverOne.get(over) || 0;
+        const two = byOverTwo.get(over) || 0;
+        return (
+          <div key={`man-${over}`} className="mc-manhattan-col">
+            <div className="mc-manhattan-bars">
+              <span className="mc-manhattan-bar mc-manhattan-bar--one" style={{ height: `${(one / maxRuns) * 100}%` }} title={`Innings 1: ${one}`} />
+              <span className="mc-manhattan-bar mc-manhattan-bar--two" style={{ height: `${(two / maxRuns) * 100}%` }} title={`Innings 2: ${two}`} />
+            </div>
+            <span className="mc-manhattan-label">{over}</span>
+          </div>
+        );
+      })}
+      <div className="mc-chart-legend">
+        <span className="mc-chart-legend-item"><span className="mc-chart-swatch mc-chart-swatch--one" />Innings 1 runs per over</span>
+        <span className="mc-chart-legend-item"><span className="mc-chart-swatch mc-chart-swatch--two" />Innings 2 runs per over</span>
+      </div>
+    </div>
+  );
+}
+
+function WagonWheelGraphic({ shots = [] }) {
+  if (!shots.length) {
+    return <div className="sq-empty">No scoring shots mapped yet.</div>;
+  }
+
+  return (
+    <div className="mc-surface-chart">
+      <svg className="mc-surface-svg" viewBox="0 0 220 220" preserveAspectRatio="xMidYMid meet">
+        <circle cx="110" cy="110" r="98" className="mc-wheel-ring" />
+        <circle cx="110" cy="110" r="70" className="mc-wheel-ring mc-wheel-ring--inner" />
+        <circle cx="110" cy="110" r="42" className="mc-wheel-ring mc-wheel-ring--inner" />
+        <line x1="110" y1="18" x2="110" y2="202" className="mc-wheel-axis" />
+        <line x1="18" y1="110" x2="202" y2="110" className="mc-wheel-axis" />
+        {shots.map((shot) => (
+          <g key={shot.id}>
+            <line
+              x1="110"
+              y1="110"
+              x2={shot.x}
+              y2={shot.y}
+              className={`mc-shot-line mc-shot-line--${shot.runs >= 4 ? 'boundary' : 'run'}`}
+            />
+            <circle
+              cx={shot.x}
+              cy={shot.y}
+              r={shot.runs >= 6 ? 4.5 : shot.runs >= 4 ? 4 : 3}
+              className={`mc-shot-dot mc-shot-dot--${shot.runs >= 4 ? 'boundary' : 'run'}`}
+            />
+          </g>
+        ))}
+      </svg>
+      <div className="mc-chart-caption">Scoring wagon wheel from simulated shot outcomes.</div>
+    </div>
+  );
+}
+
+function PitchMapGraphic({ deliveries = [] }) {
+  if (!deliveries.length) {
+    return <div className="sq-empty">No delivery map available yet.</div>;
+  }
+
+  return (
+    <div className="mc-surface-chart">
+      <svg className="mc-surface-svg" viewBox="0 0 220 260" preserveAspectRatio="xMidYMid meet">
+        <rect x="54" y="20" width="112" height="220" rx="18" className="mc-pitch-body" />
+        <rect x="84" y="30" width="52" height="200" rx="10" className="mc-pitch-strip" />
+        <line x1="84" y1="86" x2="136" y2="86" className="mc-pitch-guide" />
+        <line x1="84" y1="132" x2="136" y2="132" className="mc-pitch-guide" />
+        <line x1="84" y1="178" x2="136" y2="178" className="mc-pitch-guide" />
+        {deliveries.map((delivery) => (
+          <circle
+            key={delivery.id}
+            cx={54 + ((delivery.x / 100) * 112)}
+            cy={20 + ((delivery.y / 100) * 220)}
+            r="4.1"
+            className={`mc-pitch-dot mc-pitch-dot--${delivery.result}`}
+          />
+        ))}
+      </svg>
+      <div className="mc-chart-caption">Pitch map from simulated line and length zones.</div>
+    </div>
+  );
+}
+
+function PartnershipsGraph({ rows = [] }) {
+  if (!rows.length) {
+    return <div className="sq-empty">No partnership data yet.</div>;
+  }
+
+  const maxRuns = Math.max(1, ...rows.map((row) => Number(row.runs || 0)));
+  return (
+    <div className="mc-partnership-list">
+      {rows.map((row) => {
+        const label = [row.batter_one_name, row.batter_two_name].filter(Boolean).join(' + ') || `Partnership ${row.partnership_no}`;
+        return (
+          <div key={`part-${row.partnership_no}`} className="mc-partnership-row">
+            <div className="mc-partnership-head">
+              <span className="mc-partnership-name">{label}</span>
+              <span className="mc-partnership-meta">{row.runs} runs • {row.balls} balls</span>
+            </div>
+            <div className="mc-partnership-bar">
+              <span className="mc-partnership-fill" style={{ width: `${(Number(row.runs || 0) / maxRuns) * 100}%` }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FallOfWicketsStrip({ wickets = [], totalRuns = 0 }) {
+  if (!wickets.length) {
+    return <div className="sq-empty">No wickets fell in this innings.</div>;
+  }
+
+  const denominator = Math.max(1, totalRuns, ...wickets.map((row) => Number(row.score_at_fall || 0)));
+  return (
+    <div className="mc-fow-strip">
+      <div className="mc-fow-line" />
+      {wickets.map((row) => {
+        const left = `${(Number(row.score_at_fall || 0) / denominator) * 100}%`;
+        return (
+          <div key={`fow-${row.wicket_no}-${row.score_at_fall}`} className="mc-fow-node" style={{ left }}>
+            <span className="mc-fow-badge">{row.wicket_no}</span>
+            <div className="mc-fow-node-card">
+              <strong>{row.score_at_fall}/{row.wicket_no}</strong>
+              <span>{row.batter_name || 'Batter'}</span>
+              <small>{row.over_label || ''}</small>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function MatchCenterPage() {
@@ -866,11 +1408,19 @@ export default function MatchCenterPage() {
     return map;
   }, [scorecard, eventRows]);
 
-  const series = useMemo(() => buildOverByOverSeries(eventRows), [eventRows]);
+  const playerStatsLookup = useMemo(() => {
+    const map = new Map();
+    for (const row of scorecard?.stats || []) {
+      map.set(Number(row.player_id), row);
+    }
+    return map;
+  }, [scorecard]);
+
+  const overAnalytics = useMemo(() => buildOverAnalytics(eventRows), [eventRows]);
   const innings1Runs = useMemo(() => {
-    const values = series.innings1;
-    return values.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
-  }, [series.innings1]);
+    const values = overAnalytics.innings1;
+    return Number(values[values.length - 1]?.cumulative || 0);
+  }, [overAnalytics.innings1]);
 
   const inningsCommentary = useMemo(
     () => buildInningsCommentary(eventRows, playerLookup, { 2: innings1Runs }),
@@ -955,6 +1505,16 @@ export default function MatchCenterPage() {
     };
   }, [scorecard, eventRows]);
 
+  const activeShotMap = useMemo(
+    () => buildShotMap(eventRows, activeInnings, playerStatsLookup),
+    [eventRows, activeInnings, playerStatsLookup]
+  );
+
+  const activePitchMap = useMemo(
+    () => buildPitchMap(eventRows, activeInnings, playerStatsLookup),
+    [eventRows, activeInnings, playerStatsLookup]
+  );
+
   const inningsRows = useMemo(() => {
     const stats = scorecard?.stats || [];
     const one = inningsMeta[1];
@@ -986,6 +1546,22 @@ export default function MatchCenterPage() {
       2: buildFallbackBowlingRows(eventRows, 2, inningsMeta[2]?.bowlingId, playerLookup)
     }),
     [eventRows, inningsMeta, playerLookup]
+  );
+
+  const fallbackFallOfWicketsByInnings = useMemo(
+    () => ({
+      1: buildFallbackFallOfWickets(eventRows, 1, playerLookup),
+      2: buildFallbackFallOfWickets(eventRows, 2, playerLookup)
+    }),
+    [eventRows, playerLookup]
+  );
+
+  const fallbackPartnershipsByInnings = useMemo(
+    () => ({
+      1: buildFallbackPartnerships(eventRows, 1, playerLookup),
+      2: buildFallbackPartnerships(eventRows, 2, playerLookup)
+    }),
+    [eventRows, playerLookup]
   );
 
   /* ── share / export helpers ── */
@@ -1510,6 +2086,17 @@ export default function MatchCenterPage() {
   const activeBowlingRows =
     (activeRows.bowling || []).some((row) => Number(row.bowling_balls || 0) > 0) ? activeRows.bowling : fallbackBowlingRowsByInnings[activeInnings] || [];
   const activeCommentary = inningsCommentary[activeInnings] || [];
+  const activeOverAnalytics = activeInnings === 1 ? overAnalytics.innings1 : overAnalytics.innings2;
+  const activeTotalRuns = Number(activeOverAnalytics[activeOverAnalytics.length - 1]?.cumulative || 0);
+  const activePartnershipRows = (() => {
+    const rows = (scorecard?.partnerships || []).filter((row) => Number(row.innings) === Number(activeInnings));
+    return rows.length ? rows : fallbackPartnershipsByInnings[activeInnings] || [];
+  })();
+  const activeFallOfWickets = (() => {
+    const rows = (scorecard?.fall_of_wickets || []).filter((row) => Number(row.innings) === Number(activeInnings));
+    return rows.length ? rows : fallbackFallOfWicketsByInnings[activeInnings] || [];
+  })();
+  const activeBowlingSpells = buildBowlingSpells(eventRows, activeInnings, activeMeta?.bowlingId, playerLookup, playerStatsLookup);
 
   const matchStatus = String(scorecard?.match?.status || '').toUpperCase();
   const matchCompleted = matchStatus === 'COMPLETED';
@@ -1544,31 +2131,6 @@ export default function MatchCenterPage() {
       };
     }
   }
-
-  /* worm chart */
-  const WormChart = () => {
-    if (!series.innings1.length && !series.innings2.length) return null;
-    const allVals = [...series.innings1, ...series.innings2].map((d) => d.value);
-    const maxVal = Math.max(1, ...allVals);
-    const maxOv = Math.max(1, ...series.innings1.map((d) => d.label), ...series.innings2.map((d) => d.label));
-    const W = 500, H = 120, PX = 30, PY = 16;
-    const toX = (ov) => PX + ((ov - 1) / Math.max(1, maxOv - 1)) * (W - PX * 2);
-    const toY = (v) => H - PY - (v / maxVal) * (H - PY * 2);
-    const makeLine = (data) => data.map((d) => `${toX(d.label).toFixed(1)},${toY(d.value).toFixed(1)}`).join(' ');
-    const gridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(maxVal * f));
-    return (
-      <svg className="mc-worm" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
-        {gridLines.map((v) => (
-          <g key={v}>
-            <line x1={PX} x2={W - PX} y1={toY(v)} y2={toY(v)} stroke="var(--border)" strokeWidth="0.5" />
-            <text x={PX - 4} y={toY(v) + 3} textAnchor="end" fontSize="7" fill="var(--muted)">{v}</text>
-          </g>
-        ))}
-        {series.innings1.length > 0 && <polyline points={makeLine(series.innings1)} fill="none" stroke="var(--leaf)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />}
-        {series.innings2.length > 0 && <polyline points={makeLine(series.innings2)} fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />}
-      </svg>
-    );
-  };
 
   return (
     <div className="mc-page sq-fade-in">
@@ -1824,19 +2386,93 @@ export default function MatchCenterPage() {
         </div>
       </div>
 
-      {/* ═══════════ WORM CHART ═══════════ */}
-      {(series.innings1.length > 0 || series.innings2.length > 0) && (
-        <div className="mc-card">
-          <h3 className="mc-section-title">Runs Per Over — Worm</h3>
-          <div className="mc-worm-wrap">
-            <WormChart />
-            <div className="mc-worm-legend">
-              <span className="mc-worm-legend-item"><span className="mc-legend-dot" style={{ background: 'var(--leaf)' }} />Innings 1</span>
-              <span className="mc-worm-legend-item"><span className="mc-legend-dot" style={{ background: 'var(--accent)' }} />Innings 2</span>
+      <div className="mc-premium-grid">
+        <div className="mc-card mc-card--premium mc-card--span-2">
+          <div className="mc-card-head">
+            <div>
+              <h3 className="mc-section-title">Match Momentum</h3>
+              <p className="mc-section-subtitle">Cumulative worm and over-by-over Manhattan comparison across both innings.</p>
             </div>
           </div>
+          <div className="mc-chart-stack">
+            <PremiumWormChart innings1={overAnalytics.innings1} innings2={overAnalytics.innings2} />
+            <ManhattanChart innings1={overAnalytics.innings1} innings2={overAnalytics.innings2} />
+          </div>
         </div>
-      )}
+
+        <div className="mc-card mc-card--premium">
+          <div className="mc-card-head">
+            <div>
+              <h3 className="mc-section-title">Wagon Wheel</h3>
+              <p className="mc-section-subtitle">{activeMeta?.battingName?.replace(/\s*\(.*\)/, '') || 'Batting side'} scoring zones</p>
+            </div>
+          </div>
+          <WagonWheelGraphic shots={activeShotMap} />
+        </div>
+
+        <div className="mc-card mc-card--premium">
+          <div className="mc-card-head">
+            <div>
+              <h3 className="mc-section-title">Pitch Map</h3>
+              <p className="mc-section-subtitle">{activeMeta?.bowlingName?.replace(/\s*\(.*\)/, '') || 'Bowling side'} delivery zones</p>
+            </div>
+          </div>
+          <PitchMapGraphic deliveries={activePitchMap} />
+        </div>
+
+        <div className="mc-card mc-card--premium">
+          <div className="mc-card-head">
+            <div>
+              <h3 className="mc-section-title">Partnerships</h3>
+              <p className="mc-section-subtitle">Built innings phases and stand values for innings {activeInnings}.</p>
+            </div>
+          </div>
+          <PartnershipsGraph rows={activePartnershipRows} />
+        </div>
+
+        <div className="mc-card mc-card--premium">
+          <div className="mc-card-head">
+            <div>
+              <h3 className="mc-section-title">Bowling Spells</h3>
+              <p className="mc-section-subtitle">Contiguous spells by the fielding side in innings {activeInnings}.</p>
+            </div>
+          </div>
+          {activeBowlingSpells.length ? (
+            <div className="mc-spell-list">
+              {activeBowlingSpells.map((spell) => {
+                const overs = `${Math.floor(Number(spell.balls || 0) / 6)}.${Number(spell.balls || 0) % 6}`;
+                const econ = Number(spell.balls || 0) ? ((Number(spell.runs || 0) / Number(spell.balls || 0)) * 6).toFixed(2) : '0.00';
+                return (
+                  <div key={`${spell.bowlerId}-${spell.startOver}-${spell.endOver}`} className="mc-spell-card">
+                    <div className="mc-spell-top">
+                      <strong>{spell.bowlerName}</strong>
+                      <span>{spell.style}</span>
+                    </div>
+                    <div className="mc-spell-metrics">
+                      <span>Overs {spell.startOver}{spell.endOver !== spell.startOver ? `-${spell.endOver}` : ''}</span>
+                      <span>{overs} • {spell.runs}/{spell.wickets}</span>
+                      <span>Econ {econ}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="sq-empty">No bowling spells logged yet.</div>
+          )}
+        </div>
+      </div>
+
+      <div className="mc-card mc-card--premium mc-fow-card">
+        <div className="mc-card-head">
+          <div>
+            <h3 className="mc-section-title">Fall of Wickets</h3>
+            <p className="mc-section-subtitle">Dismissal checkpoints across innings {activeInnings}.</p>
+          </div>
+          <span className="mc-headline-chip">{activeTotalRuns || 0} total</span>
+        </div>
+        <FallOfWicketsStrip wickets={activeFallOfWickets} totalRuns={activeTotalRuns} />
+      </div>
 
       {/* ═══════════ COMMENTARY ═══════════ */}
       <div className="mc-card mc-commentary-card">
