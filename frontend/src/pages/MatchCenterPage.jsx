@@ -1576,6 +1576,19 @@ export default function MatchCenterPage() {
     const hasBowlData = (rows.bowling || []).some((r) => Number(r.bowling_balls || 0) > 0);
     return hasBowlData ? rows.bowling : (fallbackBowlingRowsByInnings[inn] || []);
   }
+  function getPartnershipRowsForInnings(inn) {
+    const fallbackRows = fallbackPartnershipsByInnings[inn] || [];
+    const rows = (scorecard?.partnerships || []).filter((r) => Number(r.innings) === Number(inn));
+    if (!rows.length) return fallbackRows;
+    return rows.map((row, i) => {
+      const fb = fallbackRows.find((c) => Number(c.partnership_no) === Number(row.partnership_no)) || fallbackRows[i] || {};
+      return { ...fb, ...row, batter_one_name: row.batter_one_name || fb.batter_one_name || null, batter_two_name: row.batter_two_name || fb.batter_two_name || null, batter_one_runs: row.batter_one_runs || fb.batter_one_runs || 0, batter_two_runs: row.batter_two_runs || fb.batter_two_runs || 0 };
+    });
+  }
+  function getFallOfWicketsForInnings(inn) {
+    const rows = (scorecard?.fall_of_wickets || []).filter((r) => Number(r.innings) === Number(inn));
+    return rows.length ? rows : fallbackFallOfWicketsByInnings[inn] || [];
+  }
 
   function generateShareText(format) {
     const md = format === 'markdown';
@@ -1700,6 +1713,59 @@ export default function MatchCenterPage() {
         }
         ln.push('');
       }
+
+      // Partnerships
+      const partRows = getPartnershipRowsForInnings(inn);
+      if (partRows.length) {
+        if (bb) {
+          ln.push('[size=3][b]Partnerships[/b][/size]');
+          ln.push('[table]');
+          ln.push('[tr][th]#[/th][th]Batters[/th][th]Runs[/th][th]Balls[/th][th]Contributions[/th][/tr]');
+          for (const p of partRows) {
+            const label = [p.batter_one_name, p.batter_two_name].filter(Boolean).join(' & ') || `Partnership ${p.partnership_no}`;
+            const contrib = [p.batter_one_name ? `${p.batter_one_name} ${p.batter_one_runs || 0}` : null, p.batter_two_name ? `${p.batter_two_name} ${p.batter_two_runs || 0}` : null].filter(Boolean).join(' / ');
+            const runs = Number(p.runs || 0);
+            const isTop = runs > 0 && runs === Math.max(...partRows.map((x) => Number(x.runs || 0)));
+            const runsCell = isTop ? `[b][color=green]${runs}[/color][/b]` : String(runs);
+            ln.push(`[tr][td]${p.partnership_no}[/td][td]${label}[/td][td]${runsCell}[/td][td]${p.balls || 0}[/td][td][i]${contrib}[/i][/td][/tr]`);
+          }
+          ln.push('[/table]');
+        } else if (md) {
+          ln.push('#### Partnerships');
+          ln.push('| # | Batters | Runs | Balls | Contributions |');
+          ln.push('|--:|---------|-----:|------:|---------------|');
+          for (const p of partRows) {
+            const label = [p.batter_one_name, p.batter_two_name].filter(Boolean).join(' & ') || `Partnership ${p.partnership_no}`;
+            const contrib = [p.batter_one_name ? `${p.batter_one_name} ${p.batter_one_runs || 0}` : null, p.batter_two_name ? `${p.batter_two_name} ${p.batter_two_runs || 0}` : null].filter(Boolean).join(' / ');
+            ln.push(`| ${p.partnership_no} | ${label} | ${p.runs || 0} | ${p.balls || 0} | ${contrib} |`);
+          }
+        } else {
+          ln.push('Partnerships:');
+          for (const p of partRows) {
+            const label = [p.batter_one_name, p.batter_two_name].filter(Boolean).join(' & ') || `#${p.partnership_no}`;
+            const contrib = [p.batter_one_name ? `${p.batter_one_name} ${p.batter_one_runs || 0}` : null, p.batter_two_name ? `${p.batter_two_name} ${p.batter_two_runs || 0}` : null].filter(Boolean).join(' • ');
+            ln.push(`  ${pad(p.partnership_no, 3)}  ${pad(label, 30)} ${pad(p.runs || 0, 5, true)} runs  (${p.balls || 0} balls)  ${contrib}`);
+          }
+        }
+        ln.push('');
+      }
+
+      // Fall of Wickets
+      const fowRows = getFallOfWicketsForInnings(inn);
+      if (fowRows.length) {
+        if (bb) {
+          ln.push('[size=3][b]Fall of Wickets[/b][/size]');
+          const fowParts = fowRows.map((w) => `[b]${w.score_at_fall}/${w.wicket_no}[/b] (${w.batter_name || 'Batter'}, ${w.over_label || ''} ov)`);
+          ln.push(fowParts.join(' • '));
+        } else if (md) {
+          ln.push('**Fall of Wickets:** ' + fowRows.map((w) => `${w.score_at_fall}/${w.wicket_no} (${w.batter_name || 'Batter'}, ${w.over_label || ''} ov)`).join(' • '));
+        } else {
+          ln.push('Fall of Wickets:');
+          ln.push('  ' + fowRows.map((w) => `${w.score_at_fall}/${w.wicket_no} (${w.batter_name || 'Batter'}, ${w.over_label || ''} ov)`).join('  |  '));
+        }
+        ln.push('');
+      }
+
       if (!bb) ln.push(hr);
       ln.push('');
     }
@@ -1786,7 +1852,9 @@ export default function MatchCenterPage() {
       const meta = inningsMeta[inn];
       const bat = getBattingRowsForInnings(inn);
       const bowl = getBowlingRowsForInnings(inn).filter((r) => Number(r.bowling_balls || 0) > 0);
-      return { meta, bat, bowl };
+      const parts = getPartnershipRowsForInnings(inn);
+      const fow = getFallOfWicketsForInnings(inn);
+      return { meta, bat, bowl, parts, fow };
     });
 
     // Measure canvas height
@@ -1795,13 +1863,18 @@ export default function MatchCenterPage() {
     const HEADER_H = 140;
     const INN_HEADER = 42;
     const ROW_H = 26;
+    const PART_ROW_H = 32;
+    const PART_HEADER_H = 28;
+    const FOW_H = 52;
     const SECTION_GAP = 20;
     const COL_GAP = 16;
     const FOOTER_H = 36;
 
     let totalH = PAD + HEADER_H + SECTION_GAP;
-    for (const { bat, bowl } of innData) {
+    for (const { bat, bowl, parts, fow } of innData) {
       totalH += INN_HEADER + (bat.length + 1) * ROW_H + SECTION_GAP + (bowl.length + 1) * ROW_H + SECTION_GAP;
+      if (parts.length) totalH += PART_HEADER_H + parts.length * PART_ROW_H + SECTION_GAP;
+      if (fow.length) totalH += FOW_H + SECTION_GAP;
     }
     totalH += FOOTER_H + PAD;
 
@@ -1895,7 +1968,7 @@ export default function MatchCenterPage() {
     y += HEADER_H + SECTION_GAP;
 
     // ── PER INNINGS ──
-    for (const { meta, bat, bowl } of innData) {
+    for (const { meta, bat, bowl, parts, fow } of innData) {
       if (!meta) continue;
       const teamName = meta.battingName?.replace(/\s*\(.*\)/, '') || 'Team';
 
@@ -2054,6 +2127,99 @@ export default function MatchCenterPage() {
 
           y += ROW_H;
         }
+      }
+
+      // ── PARTNERSHIPS ──
+      if (parts.length) {
+        y += SECTION_GAP / 2;
+        ctx.textAlign = 'left';
+        ctx.font = FONT('700', 10);
+        ctx.fillStyle = COL.muted;
+        ctx.fillText('PARTNERSHIPS', PAD + 10, y + 18);
+        y += PART_HEADER_H;
+
+        const maxPartRuns = Math.max(1, ...parts.map((p) => Number(p.runs || 0)));
+        const barAreaX = PAD + 10;
+        const barAreaW = W - PAD * 2 - 20;
+
+        for (let i = 0; i < parts.length; i++) {
+          const p = parts[i];
+          const pRuns = Number(p.runs || 0);
+          const pBalls = Number(p.balls || 0);
+          const isTopPart = pRuns > 0 && pRuns === Math.max(...parts.map((x) => Number(x.runs || 0)));
+          const label = [p.batter_one_name, p.batter_two_name].filter(Boolean).join(' & ') || `#${p.partnership_no}`;
+          const barW = Math.max(4, (pRuns / maxPartRuns) * (barAreaW * 0.55));
+
+          // Row bg
+          if (isTopPart) {
+            ctx.fillStyle = 'rgba(62,127,69,0.05)';
+            ctx.fillRect(PAD, y, W - PAD * 2, PART_ROW_H);
+          }
+
+          // Partnership label
+          ctx.textAlign = 'left';
+          ctx.font = BODY('500', 10);
+          ctx.fillStyle = COL.ink;
+          const shortLabel = label.length > 28 ? label.slice(0, 26) + '…' : label;
+          ctx.fillText(shortLabel, barAreaX, y + 12);
+
+          // Runs/balls meta
+          ctx.font = FONT('600', 9);
+          ctx.fillStyle = isTopPart ? COL.leaf : COL.muted;
+          ctx.fillText(`${pRuns} (${pBalls}b)`, barAreaX, y + 26);
+
+          // Bar
+          const barX = barAreaX + barAreaW * 0.38;
+          rrect(barX, y + 6, barW, 16, 4);
+          ctx.fillStyle = isTopPart ? COL.leaf : 'rgba(62,127,69,0.25)';
+          ctx.fill();
+
+          // Runs on bar
+          if (barW > 30) {
+            ctx.textAlign = 'left';
+            ctx.font = FONT('700', 9);
+            ctx.fillStyle = '#fff';
+            ctx.fillText(String(pRuns), barX + 6, y + 18);
+          }
+
+          // Contribution text
+          const contrib = [p.batter_one_name ? `${p.batter_one_name} ${p.batter_one_runs || 0}` : null, p.batter_two_name ? `${p.batter_two_name} ${p.batter_two_runs || 0}` : null].filter(Boolean).join(' / ');
+          ctx.textAlign = 'right';
+          ctx.font = BODY('400', 9);
+          ctx.fillStyle = COL.muted;
+          const shortContrib = contrib.length > 34 ? contrib.slice(0, 32) + '…' : contrib;
+          ctx.fillText(shortContrib, W - PAD - 10, y + 18);
+
+          y += PART_ROW_H;
+        }
+      }
+
+      // ── FALL OF WICKETS ──
+      if (fow.length) {
+        y += SECTION_GAP / 2;
+        ctx.textAlign = 'left';
+        ctx.font = FONT('700', 10);
+        ctx.fillStyle = COL.muted;
+        ctx.fillText('FALL OF WICKETS', PAD + 10, y + 14);
+        y += 20;
+
+        const fowText = fow.map((w) => `${w.score_at_fall}/${w.wicket_no} (${w.batter_name || '?'}, ${w.over_label || '?'} ov)`).join('   •   ');
+        ctx.font = BODY('500', 10);
+        ctx.fillStyle = COL.danger;
+        ctx.textAlign = 'left';
+        // Wrap if too long
+        const fowMaxW = W - PAD * 2 - 20;
+        if (ctx.measureText(fowText).width <= fowMaxW) {
+          ctx.fillText(fowText, PAD + 10, y + 14);
+        } else {
+          // Split into two lines
+          const half = Math.ceil(fow.length / 2);
+          const line1 = fow.slice(0, half).map((w) => `${w.score_at_fall}/${w.wicket_no} (${w.batter_name || '?'}, ${w.over_label || '?'} ov)`).join('   •   ');
+          const line2 = fow.slice(half).map((w) => `${w.score_at_fall}/${w.wicket_no} (${w.batter_name || '?'}, ${w.over_label || '?'} ov)`).join('   •   ');
+          ctx.fillText(line1, PAD + 10, y + 8);
+          ctx.fillText(line2, PAD + 10, y + 24);
+        }
+        y += FOW_H - 20;
       }
 
       y += SECTION_GAP;
