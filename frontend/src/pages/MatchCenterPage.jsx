@@ -759,13 +759,47 @@ function buildFallbackPartnerships(events, innings, playerLookup) {
         balls: 0,
         batter_one_player_id: strikerId,
         batter_one_name: strikerId ? playerLookup.get(strikerId) || 'Unknown Batter' : null,
+        batter_one_runs: 0,
         batter_two_player_id: nonStrikerId,
-        batter_two_name: nonStrikerId ? playerLookup.get(nonStrikerId) || 'Unknown Batter' : null
+        batter_two_name: nonStrikerId ? playerLookup.get(nonStrikerId) || 'Unknown Batter' : null,
+        batter_two_runs: 0
       };
     }
 
-    current.runs += Number(event.runs || 0) + Number(event.extras || 0);
+    const ballRuns = Number(event.runs || 0);
+    const ballExtras = Number(event.extras || 0);
+    current.runs += ballRuns + ballExtras;
     current.balls += 1;
+
+    // Attribute bat runs to the correct batter (extras don't count as batter runs)
+    if (strikerId && ballRuns > 0) {
+      if (strikerId === current.batter_one_player_id) {
+        current.batter_one_runs += ballRuns;
+      } else if (strikerId === current.batter_two_player_id) {
+        current.batter_two_runs += ballRuns;
+      } else {
+        // Batter not yet recorded (can happen with strike rotation) — assign to existing slot or update
+        if (!current.batter_one_player_id) {
+          current.batter_one_player_id = strikerId;
+          current.batter_one_name = playerLookup.get(strikerId) || 'Unknown Batter';
+          current.batter_one_runs += ballRuns;
+        } else if (!current.batter_two_player_id) {
+          current.batter_two_player_id = strikerId;
+          current.batter_two_name = playerLookup.get(strikerId) || 'Unknown Batter';
+          current.batter_two_runs += ballRuns;
+        }
+      }
+    }
+
+    // Ensure both batter slots are filled if we learn the non-striker
+    if (nonStrikerId && !current.batter_two_player_id && nonStrikerId !== current.batter_one_player_id) {
+      current.batter_two_player_id = nonStrikerId;
+      current.batter_two_name = playerLookup.get(nonStrikerId) || 'Unknown Batter';
+    }
+    if (strikerId && !current.batter_one_player_id) {
+      current.batter_one_player_id = strikerId;
+      current.batter_one_name = playerLookup.get(strikerId) || 'Unknown Batter';
+    }
 
     if (Number(event.is_wicket)) {
       rows.push(current);
@@ -1717,34 +1751,44 @@ export default function MatchCenterPage() {
       // Partnerships
       const partRows = getPartnershipRowsForInnings(inn);
       if (partRows.length) {
+        const maxPartRuns = Math.max(1, ...partRows.map((x) => Number(x.runs || 0)));
         if (bb) {
           ln.push('[size=3][b]Partnerships[/b][/size]');
           ln.push('[table]');
-          ln.push('[tr][th]#[/th][th]Batters[/th][th]Runs[/th][th]Balls[/th][th]Contributions[/th][/tr]');
+          ln.push('[tr][th]#[/th][th]Batters[/th][th]Runs[/th][th]Balls[/th][th]Contributions[/th][th][/th][/tr]');
           for (const p of partRows) {
             const label = [p.batter_one_name, p.batter_two_name].filter(Boolean).join(' & ') || `Partnership ${p.partnership_no}`;
             const contrib = [p.batter_one_name ? `${p.batter_one_name} ${p.batter_one_runs || 0}` : null, p.batter_two_name ? `${p.batter_two_name} ${p.batter_two_runs || 0}` : null].filter(Boolean).join(' / ');
             const runs = Number(p.runs || 0);
-            const isTop = runs > 0 && runs === Math.max(...partRows.map((x) => Number(x.runs || 0)));
+            const isTop = runs > 0 && runs === maxPartRuns;
             const runsCell = isTop ? `[b][color=green]${runs}[/color][/b]` : String(runs);
-            ln.push(`[tr][td]${p.partnership_no}[/td][td]${label}[/td][td]${runsCell}[/td][td]${p.balls || 0}[/td][td][i]${contrib}[/i][/td][/tr]`);
+            const barLen = Math.max(1, Math.round((runs / maxPartRuns) * 20));
+            const bar = '█'.repeat(barLen);
+            const barCell = isTop ? `[color=green]${bar}[/color]` : `[color=#8C8578]${bar}[/color]`;
+            ln.push(`[tr][td]${p.partnership_no}[/td][td]${label}[/td][td]${runsCell}[/td][td]${p.balls || 0}[/td][td][i]${contrib}[/i][/td][td]${barCell}[/td][/tr]`);
           }
           ln.push('[/table]');
         } else if (md) {
           ln.push('#### Partnerships');
-          ln.push('| # | Batters | Runs | Balls | Contributions |');
-          ln.push('|--:|---------|-----:|------:|---------------|');
+          ln.push('| # | Batters | Runs | Balls | Contributions | |');
+          ln.push('|--:|---------|-----:|------:|---------------|---|');
           for (const p of partRows) {
             const label = [p.batter_one_name, p.batter_two_name].filter(Boolean).join(' & ') || `Partnership ${p.partnership_no}`;
             const contrib = [p.batter_one_name ? `${p.batter_one_name} ${p.batter_one_runs || 0}` : null, p.batter_two_name ? `${p.batter_two_name} ${p.batter_two_runs || 0}` : null].filter(Boolean).join(' / ');
-            ln.push(`| ${p.partnership_no} | ${label} | ${p.runs || 0} | ${p.balls || 0} | ${contrib} |`);
+            const runs = Number(p.runs || 0);
+            const barLen = Math.max(1, Math.round((runs / maxPartRuns) * 15));
+            const bar = '█'.repeat(barLen);
+            ln.push(`| ${p.partnership_no} | ${label} | ${p.runs || 0} | ${p.balls || 0} | ${contrib} | ${bar} |`);
           }
         } else {
           ln.push('Partnerships:');
           for (const p of partRows) {
             const label = [p.batter_one_name, p.batter_two_name].filter(Boolean).join(' & ') || `#${p.partnership_no}`;
             const contrib = [p.batter_one_name ? `${p.batter_one_name} ${p.batter_one_runs || 0}` : null, p.batter_two_name ? `${p.batter_two_name} ${p.batter_two_runs || 0}` : null].filter(Boolean).join(' • ');
-            ln.push(`  ${pad(p.partnership_no, 3)}  ${pad(label, 30)} ${pad(p.runs || 0, 5, true)} runs  (${p.balls || 0} balls)  ${contrib}`);
+            const runs = Number(p.runs || 0);
+            const barLen = Math.max(1, Math.round((runs / maxPartRuns) * 20));
+            const bar = '█'.repeat(barLen);
+            ln.push(`  ${pad(p.partnership_no, 3)}  ${pad(label, 30)} ${pad(p.runs || 0, 5, true)} runs  (${p.balls || 0} balls)  ${contrib}  ${bar}`);
           }
         }
         ln.push('');

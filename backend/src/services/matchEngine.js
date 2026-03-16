@@ -941,10 +941,14 @@ async function persistDeepStatsFromEvents({
             me.is_wicket,
             me.commentary,
             me.striker_player_id,
+            me.non_striker_player_id,
             p.first_name,
-            p.last_name
+            p.last_name,
+            p2.first_name AS ns_first_name,
+            p2.last_name AS ns_last_name
      FROM match_events me
      LEFT JOIN players p ON p.id = me.striker_player_id
+     LEFT JOIN players p2 ON p2.id = me.non_striker_player_id
      WHERE me.match_id = $1
      ORDER BY me.innings, me.over_number, me.ball_number, me.id`,
     [matchId]
@@ -1022,46 +1026,92 @@ async function persistDeepStatsFromEvents({
     [2, { runs: Number(secondInnings.runs || 0), balls: Number(secondInnings.balls || 0) }]
   ]);
 
-  for (const [inningsNo, totals] of inningsTotals.entries()) {
-    const wickets = [...(fowRowsByInnings.get(inningsNo) || [])].sort((a, b) => a.wicketNo - b.wicketNo);
-    let prevRuns = 0;
-    let prevBall = 0;
-    let partnershipNo = 1;
+  // Build per-batter partnership data from events
+  const partnershipAccum = new Map(); // key: inningsNo -> array of partnership objects
+  const partCurrent = new Map();
+  const partNo = new Map();
 
-    for (const wicket of wickets) {
-      const runs = Math.max(0, Number(wicket.scoreAtFall || 0) - prevRuns);
-      const balls = Math.max(0, Number(wicket.ballNumber || 0) - prevBall);
-      await dbClient.query(
-        `INSERT INTO match_partnerships (
-           match_id,
-           innings,
-           partnership_no,
-           runs,
-           balls,
-           batter_one_player_id,
-           batter_one_name,
-           batter_one_runs,
-           batter_two_player_id,
-           batter_two_name,
-           batter_two_runs
-         ) VALUES (
-           $1, $2, $3, $4, $5, NULL, NULL, 0, NULL, NULL, 0
-         )
-         ON CONFLICT (match_id, innings, partnership_no)
-         DO UPDATE SET
-           runs = EXCLUDED.runs,
-           balls = EXCLUDED.balls`,
-        [matchId, inningsNo, partnershipNo, runs, balls]
-      );
+  for (const event of detailedEvents.rows) {
+    const inningsNo = Number(event.innings || 0);
+    if (!partNo.has(inningsNo)) partNo.set(inningsNo, 1);
+    let cur = partCurrent.get(inningsNo);
+    const strikerId = event.striker_player_id ? Number(event.striker_player_id) : null;
+    const strikerName = `${event.first_name || ''} ${event.last_name || ''}`.trim() || null;
+    const nonStrikerId = event.non_striker_player_id ? Number(event.non_striker_player_id) : null;
+    const nonStrikerName = `${event.ns_first_name || ''} ${event.ns_last_name || ''}`.trim() || null;
 
-      partnershipNo += 1;
-      prevRuns = Number(wicket.scoreAtFall || 0);
-      prevBall = Number(wicket.ballNumber || 0);
+    if (!cur) {
+      cur = {
+        partnershipNo: partNo.get(inningsNo),
+        runs: 0,
+        balls: 0,
+        batterOne: strikerId,
+        batterOneName: strikerName,
+        batterOneRuns: 0,
+        batterTwo: nonStrikerId,
+        batterTwoName: nonStrikerName,
+        batterTwoRuns: 0
+      };
+      partCurrent.set(inningsNo, cur);
     }
 
-    if (partnershipNo <= 10 && Number(totals.runs || 0) > prevRuns) {
-      const runs = Math.max(0, Number(totals.runs || 0) - prevRuns);
-      const balls = Math.max(0, Number(totals.balls || 0) - prevBall);
+    const ballRuns = Number(event.runs || 0);
+    const ballExtras = Number(event.extras || 0);
+    cur.runs += ballRuns + ballExtras;
+    cur.balls += 1;
+
+    if (strikerId && ballRuns > 0) {
+      if (strikerId === cur.batterOne) {
+        cur.batterOneRuns += ballRuns;
+      } else if (strikerId === cur.batterTwo) {
+        cur.batterTwoRuns += ballRuns;
+      } else if (!cur.batterOne) {
+        cur.batterOne = strikerId;
+        cur.batterOneName = strikerName;
+        cur.batterOneRuns += ballRuns;
+      } else if (!cur.batterTwo) {
+        cur.batterTwo = strikerId;
+        cur.batterTwoName = strikerName;
+        cur.batterTwoRuns += ballRuns;
+      }
+    }
+    // Fill empty slots
+    if (strikerId && !cur.batterOne) {
+      cur.batterOne = strikerId;
+      cur.batterOneName = strikerName;
+    } else if (strikerId && !cur.batterTwo && strikerId !== cur.batterOne) {
+      cur.batterTwo = strikerId;
+      cur.batterTwoName = strikerName;
+    }
+    if (nonStrikerId && !cur.batterTwo && nonStrikerId !== cur.batterOne) {
+      cur.batterTwo = nonStrikerId;
+      cur.batterTwoName = nonStrikerName;
+    } else if (nonStrikerId && !cur.batterOne && nonStrikerId !== cur.batterTwo) {
+      cur.batterOne = nonStrikerId;
+      cur.batterOneName = nonStrikerName;
+    }
+
+    if (Number(event.is_wicket)) {
+      const list = partnershipAccum.get(inningsNo) || [];
+      list.push({ ...cur });
+      partnershipAccum.set(inningsNo, list);
+      partNo.set(inningsNo, partNo.get(inningsNo) + 1);
+      partCurrent.set(inningsNo, null);
+    }
+  }
+  // Push unfinished partnerships
+  for (const [inningsNo, cur] of partCurrent.entries()) {
+    if (cur && cur.balls > 0) {
+      const list = partnershipAccum.get(inningsNo) || [];
+      list.push({ ...cur });
+      partnershipAccum.set(inningsNo, list);
+    }
+  }
+
+  for (const [inningsNo, totals] of inningsTotals.entries()) {
+    const parts = partnershipAccum.get(inningsNo) || [];
+
+    for (const part of parts) {
       await dbClient.query(
         `INSERT INTO match_partnerships (
            match_id,
@@ -1076,13 +1126,31 @@ async function persistDeepStatsFromEvents({
            batter_two_name,
            batter_two_runs
          ) VALUES (
-           $1, $2, $3, $4, $5, NULL, NULL, 0, NULL, NULL, 0
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
          )
          ON CONFLICT (match_id, innings, partnership_no)
          DO UPDATE SET
            runs = EXCLUDED.runs,
-           balls = EXCLUDED.balls`,
-        [matchId, inningsNo, partnershipNo, runs, balls]
+           balls = EXCLUDED.balls,
+           batter_one_player_id = EXCLUDED.batter_one_player_id,
+           batter_one_name = EXCLUDED.batter_one_name,
+           batter_one_runs = EXCLUDED.batter_one_runs,
+           batter_two_player_id = EXCLUDED.batter_two_player_id,
+           batter_two_name = EXCLUDED.batter_two_name,
+           batter_two_runs = EXCLUDED.batter_two_runs`,
+        [
+          matchId,
+          inningsNo,
+          part.partnershipNo,
+          part.runs,
+          part.balls,
+          part.batterOne || null,
+          part.batterOneName || null,
+          part.batterOneRuns || 0,
+          part.batterTwo || null,
+          part.batterTwoName || null,
+          part.batterTwoRuns || 0
+        ]
       );
     }
   }
