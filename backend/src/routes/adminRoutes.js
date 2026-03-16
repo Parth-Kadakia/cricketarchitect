@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
+import { withTransaction } from '../config/db.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { releaseInactiveFranchises } from '../services/inactivityService.js';
 import { bootstrapGameWorld } from '../services/bootstrapService.js';
 import { getActiveSeason, getLeagueTable } from '../services/leagueService.js';
 import { runCpuMarketCycle } from '../services/cpuManagerService.js';
-import { transitionManagerToUnemployed } from '../services/managerCareerService.js';
 import { processSeasonRetirements } from '../services/retirementService.js';
 import { rebalanceSeasonPlayers } from '../services/rebalanceService.js';
 import { broadcast } from '../ws/realtime.js';
@@ -307,53 +307,37 @@ router.post(
     }
 
     const userId = req.user.id;
-
-    /* Find the user's current franchise (if any) */
     const worldId = req.user.active_world_id || null;
-    const franchiseRow = (await pool.query(
-      `SELECT id FROM franchises WHERE owner_user_id = $1 AND world_id = $2 LIMIT 1`,
-      [userId, worldId]
-    )).rows[0];
 
-    const franchiseId = franchiseRow?.id || null;
+    await withTransaction(async (client) => {
+      await client.query(`DELETE FROM manager_offers WHERE user_id = $1`, [userId]);
+      await client.query(`DELETE FROM board_profiles WHERE user_id = $1`, [userId]);
+      await client.query(`DELETE FROM manager_stints WHERE user_id = $1`, [userId]);
+      await client.query(`DELETE FROM franchise_sales WHERE seller_user_id = $1 OR buyer_user_id = $1`, [userId]);
+      await client.query(`DELETE FROM managers WHERE user_id = $1`, [userId]);
 
-    /* Release franchise ownership back to CPU (closes stints, board profiles, assigns CPU manager) */
-    if (franchiseId) {
-      await transitionManagerToUnemployed({
-        userId,
-        franchiseId,
-        endReason: 'RESET',
-        incrementFirings: false,
-        generateOffers: false,
-        releaseTeam: true,
-      });
-    }
+      if (worldId) {
+        await client.query(`DELETE FROM worlds WHERE id = $1`, [worldId]);
+      }
 
-    /* Clean up user-specific data */
-    await pool.query(`DELETE FROM manager_offers WHERE user_id = $1`, [userId]);
-    await pool.query(`DELETE FROM manager_stints WHERE user_id = $1`, [userId]);
-    await pool.query(`DELETE FROM board_profiles WHERE user_id = $1`, [userId]);
-    if (franchiseId) {
-      await pool.query(`DELETE FROM trophy_cabinet WHERE franchise_id = $1`, [franchiseId]);
-      await pool.query(`DELETE FROM franchise_sales WHERE seller_user_id = $1 OR buyer_user_id = $1`, [userId]);
-    }
-
-    /* Reset user stats to fresh state */
-    await pool.query(
-      `UPDATE users
-       SET manager_status = 'UNEMPLOYED',
-           manager_points = 0,
-           manager_unemployed_since = NOW(),
-           manager_retired_at = NULL,
-           manager_firings = 0,
-           manager_titles = 0,
-           manager_matches_managed = 0,
-           manager_wins_managed = 0,
-           manager_losses_managed = 0,
-           updated_at = NOW()
-       WHERE id = $1`,
-      [userId]
-    );
+      await client.query(
+        `UPDATE users
+         SET manager_status = 'UNEMPLOYED',
+             career_mode = 'CLUB',
+             manager_points = 0,
+             manager_unemployed_since = NOW(),
+             manager_retired_at = NULL,
+             manager_firings = 0,
+             manager_titles = 0,
+             manager_matches_managed = 0,
+             manager_wins_managed = 0,
+             manager_losses_managed = 0,
+             active_world_id = NULL,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [userId]
+      );
+    });
 
     return res.json({ message: 'Career reset successfully. Pick a city or country to start fresh.' });
   })

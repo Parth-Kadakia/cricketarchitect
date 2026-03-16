@@ -51,9 +51,11 @@ export default function LeagueTablePage() {
   const [expandedTiers, setExpandedTiers] = useState({});
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const shareRef = useRef(null);
+  const seasonIdRef = useRef(null);
   const isInternational = String(summary?.season?.competition_mode || '').toUpperCase() === 'INTERNATIONAL';
 
   useEffect(() => { setPageTitle('League Table'); }, []);
@@ -84,6 +86,35 @@ export default function LeagueTablePage() {
     return Math.round((summary.fixtures.completed_matches / total) * 100);
   }, [summary]);
 
+  useEffect(() => {
+    seasonIdRef.current = seasonId;
+  }, [seasonId]);
+
+  async function loadSeasonStats(targetSeasonId) {
+    if (!targetSeasonId) {
+      setSeasonStats({ batting: [], bowling: [] });
+      setStatsLoading(false);
+      return;
+    }
+    const requestedSeasonId = Number(targetSeasonId);
+    setStatsLoading(true);
+    try {
+      const statsResp = await api.league.seasonStats(token, requestedSeasonId);
+      if (requestedSeasonId === Number(seasonIdRef.current)) {
+        setSeasonStats(statsResp || { batting: [], bowling: [] });
+      }
+    } catch (e) {
+      if (requestedSeasonId === Number(seasonIdRef.current)) {
+        setSeasonStats({ batting: [], bowling: [] });
+        setError(e.message);
+      }
+    } finally {
+      if (requestedSeasonId === Number(seasonIdRef.current)) {
+        setStatsLoading(false);
+      }
+    }
+  }
+
   async function load(initial = false) {
     setError('');
     try {
@@ -92,19 +123,19 @@ export default function LeagueTablePage() {
       setSeasons(seasonRows);
       const currentSeasonId = seasonId || seasonRows[0]?.id;
       setSeasonId(currentSeasonId);
+      seasonIdRef.current = currentSeasonId;
       if (currentSeasonId) {
-        const [tableResp, summaryResp, fixturesResp, statsResp] = await Promise.all([
+        const [tableResp, summaryResp, fixturesResp] = await Promise.all([
           api.league.table(token, currentSeasonId),
           api.league.seasonSummary(token, currentSeasonId),
-          api.league.fixtures(token, currentSeasonId),
-          api.league.seasonStats(token, currentSeasonId)
+          api.league.fixtures(token, currentSeasonId)
         ]);
         setTable(tableResp.table || []);
         setSummary(summaryResp || null);
-        setSeasonStats(statsResp || { batting: [], bowling: [] });
         const fixtures = fixturesResp.fixtures || [];
         setPlayoffFixtures(fixtures.filter((f) => ['PLAYOFF', 'WORLD_CUP_QF', 'WORLD_CUP_SF'].includes(f.stage)));
         setFinalFixtures(fixtures.filter((f) => ['FINAL', 'WORLD_CUP_FINAL'].includes(f.stage)));
+        void loadSeasonStats(currentSeasonId);
       }
     } catch (e) { setError(e.message); }
     finally { if (initial) setLoading(false); }
@@ -118,19 +149,20 @@ export default function LeagueTablePage() {
 
   async function handleSeasonChange(nextId) {
     setSeasonId(nextId);
+    seasonIdRef.current = nextId;
+    setStatsLoading(true);
     try {
-      const [tableResp, summaryResp, fixturesResp, statsResp] = await Promise.all([
+      const [tableResp, summaryResp, fixturesResp] = await Promise.all([
         api.league.table(token, nextId),
         api.league.seasonSummary(token, nextId),
-        api.league.fixtures(token, nextId),
-        api.league.seasonStats(token, nextId)
+        api.league.fixtures(token, nextId)
       ]);
       setTable(tableResp.table || []);
       setSummary(summaryResp || null);
-      setSeasonStats(statsResp || { batting: [], bowling: [] });
       const fixtures = fixturesResp.fixtures || [];
       setPlayoffFixtures(fixtures.filter((f) => ['PLAYOFF', 'WORLD_CUP_QF', 'WORLD_CUP_SF'].includes(f.stage)));
       setFinalFixtures(fixtures.filter((f) => ['FINAL', 'WORLD_CUP_FINAL'].includes(f.stage)));
+      void loadSeasonStats(nextId);
     } catch (e) { setError(e.message); }
   }
 
@@ -220,6 +252,65 @@ export default function LeagueTablePage() {
     setShareCopied(true);
     setTimeout(() => setShareCopied(false), 2000);
     setShareOpen(false);
+  }
+
+  function generateStatsLeadersBBCode() {
+    const seasonName = currentSeason?.name || (isInternational ? 'Global Rankings' : 'League');
+    const battingRows = (seasonStats?.batting || []).slice(0, 12);
+    const bowlingRows = (seasonStats?.bowling || []).slice(0, 12);
+    const ln = [];
+
+    ln.push(`[size=5][b]${seasonName} Stats Leaders[/b][/size]`);
+    ln.push('');
+
+    ln.push('[size=4][b]Top Batters[/b][/size]');
+    if (!battingRows.length) {
+      ln.push('No batting stats yet.');
+    } else {
+      ln.push('[table]');
+      ln.push('[tr][th]#[/th][th]Player[/th][th]Team[/th][th]Runs[/th][th]Inns[/th][th]SR[/th][th]4s[/th][th]6s[/th][/tr]');
+      battingRows.forEach((p, i) => {
+        ln.push(
+          `[tr][td]${i + 1}[/td][td]${p.first_name} ${p.last_name}[/td][td]${p.franchise_name}[/td][td]${p.runs}[/td][td]${p.innings}[/td][td]${Number(p.strike_rate || 0).toFixed(1)}[/td][td]${p.fours}[/td][td]${p.sixes}[/td][/tr]`
+        );
+      });
+      ln.push('[/table]');
+    }
+    ln.push('');
+
+    ln.push('[size=4][b]Top Bowlers[/b][/size]');
+    if (!bowlingRows.length) {
+      ln.push('No bowling stats yet.');
+    } else {
+      ln.push('[table]');
+      ln.push('[tr][th]#[/th][th]Player[/th][th]Team[/th][th]Wkts[/th][th]Overs[/th][th]Econ[/th][th]Maidens[/th][th]Runs[/th][/tr]');
+      bowlingRows.forEach((p, i) => {
+        ln.push(
+          `[tr][td]${i + 1}[/td][td]${p.first_name} ${p.last_name}[/td][td]${p.franchise_name}[/td][td]${p.wickets}[/td][td]${oversFromBalls(p.balls)}[/td][td]${Number(p.economy || 0).toFixed(1)}[/td][td]${p.maidens}[/td][td]${p.runs_conceded}[/td][/tr]`
+        );
+      });
+      ln.push('[/table]');
+    }
+
+    ln.push('');
+    ln.push('[i]Generated by Cricket Architect[/i]');
+    return ln.join('\n');
+  }
+
+  async function copyStatsLeadersBBCode() {
+    const text = generateStatsLeadersBBCode();
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setShareCopied(true);
+    setTimeout(() => setShareCopied(false), 2000);
   }
 
   function downloadLeaguePNG() {
@@ -604,13 +695,24 @@ export default function LeagueTablePage() {
       {/* ═══ STATS TAB ═══ */}
       {tab === 'stats' && (
         <div className="sq-tab-content">
+          <div className="lg-leaderboard-toolbar">
+            <div className="lg-leaderboard-toolbar-copy">
+              <strong>Stats Leaders</strong>
+              <span>Top batting and bowling leaders for the selected season.</span>
+            </div>
+            <button type="button" className="lg-share-btn" onClick={copyStatsLeadersBBCode} disabled={statsLoading}>
+              📋 Copy Leaders BB Code
+            </button>
+          </div>
           <div className="lg-stats-split">
             {/* Batting Leaderboard */}
             <section className="lg-leaderboard">
               <div className="lg-leaderboard-header">
                 <h3>🏏 Top Batters</h3>
               </div>
-              {(seasonStats?.batting || []).length === 0 ? (
+              {statsLoading ? (
+                <div className="sq-empty">Loading batting leaders...</div>
+              ) : (seasonStats?.batting || []).length === 0 ? (
                 <div className="sq-empty">No batting stats yet.</div>
               ) : (
                 <div className="lg-leaderboard-list">
@@ -644,7 +746,9 @@ export default function LeagueTablePage() {
               <div className="lg-leaderboard-header">
                 <h3>🎯 Top Bowlers</h3>
               </div>
-              {(seasonStats?.bowling || []).length === 0 ? (
+              {statsLoading ? (
+                <div className="sq-empty">Loading bowling leaders...</div>
+              ) : (seasonStats?.bowling || []).length === 0 ? (
                 <div className="sq-empty">No bowling stats yet.</div>
               ) : (
                 <div className="lg-leaderboard-list">

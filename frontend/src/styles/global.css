@@ -7103,6 +7103,34 @@ table.stats-table tr:hover td {
 .lg-legend--releg::before { background: var(--danger); }
 
 /* ── Stats leaders (split layout) ──────────────────────── */
+.lg-leaderboard-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  padding: 0.85rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+.lg-leaderboard-toolbar-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.lg-leaderboard-toolbar-copy strong {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.lg-leaderboard-toolbar-copy span {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
 .lg-stats-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -12200,6 +12228,16 @@ table.stats-table tr:hover td {
     flex-wrap: wrap;
     gap: 0.3rem;
     padding: 0.4rem 0.6rem;
+  }
+
+  .lg-leaderboard-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .lg-leaderboard-toolbar .lg-share-btn {
+    width: 100%;
+    justify-content: center;
   }
 
   .lg-leader-info strong {

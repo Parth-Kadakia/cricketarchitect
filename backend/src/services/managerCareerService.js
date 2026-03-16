@@ -130,27 +130,52 @@ async function getManagedFranchise(userId, dbClient = pool, worldId = null) {
   return result.rows[0] || null;
 }
 
-async function getManagerEntityByUserId(userId, dbClient = pool) {
-  const result = await dbClient.query(
-    `SELECT id,
-            user_id,
-            display_name,
-            nationality,
-            competition_mode,
-            is_cpu,
-            level,
-            xp,
-            reputation,
-            seasons_managed,
-            matches_managed,
-            wins_managed,
-            losses_managed,
-            titles_won
-     FROM managers
-     WHERE user_id = $1
-     LIMIT 1`,
-    [userId]
-  );
+async function getManagerEntityByUserId(userId, dbClient = pool, worldId = null) {
+  const result = worldId
+    ? await dbClient.query(
+      `SELECT id,
+              user_id,
+              display_name,
+              nationality,
+              competition_mode,
+              is_cpu,
+              level,
+              xp,
+              reputation,
+              seasons_managed,
+              matches_managed,
+              wins_managed,
+              losses_managed,
+              titles_won,
+              world_id
+       FROM managers
+       WHERE user_id = $1
+         AND world_id = $2
+       LIMIT 1`,
+      [userId, worldId]
+    )
+    : await dbClient.query(
+      `SELECT id,
+              user_id,
+              display_name,
+              nationality,
+              competition_mode,
+              is_cpu,
+              level,
+              xp,
+              reputation,
+              seasons_managed,
+              matches_managed,
+              wins_managed,
+              losses_managed,
+              titles_won,
+              world_id
+       FROM managers
+       WHERE user_id = $1
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      [userId]
+    );
 
   return result.rows[0] || null;
 }
@@ -169,12 +194,39 @@ async function ensureHumanManagerEntity(userId, dbClient = pool, worldId = null)
   const user = userResult.rows[0];
   const resolvedWorldId = worldId || user.active_world_id || null;
   const normalizedMode = normalizeCareerMode(user.career_mode || CAREER_MODES.CLUB);
-  const existing = await getManagerEntityByUserId(userId, dbClient);
+  let existing = await getManagerEntityByUserId(userId, dbClient, resolvedWorldId);
+  if (!existing && resolvedWorldId) {
+    const legacy = await dbClient.query(
+      `SELECT id,
+              user_id,
+              display_name,
+              nationality,
+              competition_mode,
+              is_cpu,
+              level,
+              xp,
+              reputation,
+              seasons_managed,
+              matches_managed,
+              wins_managed,
+              losses_managed,
+              titles_won,
+              world_id
+       FROM managers
+       WHERE user_id = $1
+         AND world_id IS NULL
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      [userId]
+    );
+    existing = legacy.rows[0] || null;
+  }
   if (existing) {
     const needsSync =
       String(existing.display_name || '') !== String(user.display_name || '') ||
       normalizeCareerMode(existing.competition_mode || CAREER_MODES.CLUB) !== normalizedMode ||
-      Boolean(existing.is_cpu);
+      Boolean(existing.is_cpu) ||
+      Number(existing.world_id || 0) !== Number(resolvedWorldId || 0);
 
     if (!needsSync) {
       return existing;
@@ -185,6 +237,7 @@ async function ensureHumanManagerEntity(userId, dbClient = pool, worldId = null)
        SET display_name = $2,
            competition_mode = $3,
            is_cpu = FALSE,
+           world_id = $4,
            updated_at = NOW()
        WHERE id = $1
        RETURNING id,
@@ -200,8 +253,9 @@ async function ensureHumanManagerEntity(userId, dbClient = pool, worldId = null)
                  matches_managed,
                  wins_managed,
                  losses_managed,
-                 titles_won`,
-      [existing.id, user.display_name, normalizedMode]
+                 titles_won,
+                 world_id`,
+      [existing.id, user.display_name, normalizedMode, resolvedWorldId]
     );
 
     return synced.rows[0] || existing;
@@ -644,7 +698,7 @@ export async function ensureFranchiseManagers(dbClient = pool, worldId = null) {
     const franchiseId = Number(franchise.id);
     const mode = normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB);
     if (franchise.owner_user_id) {
-      const humanManager = await ensureHumanManagerEntity(Number(franchise.owner_user_id), dbClient);
+      const humanManager = await ensureHumanManagerEntity(Number(franchise.owner_user_id), dbClient, worldId);
       if (humanManager) {
         await assignManagerToFranchise({
           managerId: Number(humanManager.id),
@@ -698,6 +752,7 @@ async function ensureManagerForFranchiseId(franchiseId, seasonId = null, dbClien
   const franchiseResult = await dbClient.query(
     `SELECT f.id,
             f.owner_user_id,
+            f.world_id,
             f.competition_mode,
             c.country
      FROM franchises f
@@ -713,7 +768,7 @@ async function ensureManagerForFranchiseId(franchiseId, seasonId = null, dbClien
   const franchise = franchiseResult.rows[0];
   const mode = normalizeCareerMode(franchise.competition_mode || CAREER_MODES.CLUB);
   if (franchise.owner_user_id) {
-    const manager = await ensureHumanManagerEntity(Number(franchise.owner_user_id), dbClient);
+    const manager = await ensureHumanManagerEntity(Number(franchise.owner_user_id), dbClient, franchise.world_id || null);
     if (!manager) {
       return null;
     }
@@ -2646,6 +2701,20 @@ export async function getManagerProfile(managerId, dbClient = pool, worldId = nu
     return null;
   }
 
+  const managerRow = manager.rows[0];
+  let resetCutoff = null;
+  if (managerRow.user_id) {
+    const resetResult = await dbClient.query(
+      `SELECT MAX(ended_at) AS reset_at
+       FROM manager_team_stints
+       WHERE manager_id = $1
+         AND end_reason = 'RESET'
+         AND ended_at IS NOT NULL`,
+      [managerId]
+    );
+    resetCutoff = resetResult.rows[0]?.reset_at || null;
+  }
+
   const stints = await dbClient.query(
     `SELECT mts.id,
             mts.franchise_id,
@@ -2665,9 +2734,16 @@ export async function getManagerProfile(managerId, dbClient = pool, worldId = nu
      JOIN cities c ON c.id = f.city_id
      WHERE mts.manager_id = $1
        AND f.world_id = $2
+       AND ($3::timestamptz IS NULL OR mts.started_at >= $3)
+       AND NOT (
+         COALESCE(mts.matches_managed, 0) = 0
+         AND COALESCE(mts.wins, 0) = 0
+         AND COALESCE(mts.losses, 0) = 0
+         AND COALESCE(mts.end_reason, '') IN ('REPLACED', 'TRANSFERRED')
+       )
      ORDER BY mts.started_at DESC
      LIMIT 40`,
-    [managerId, worldId]
+    [managerId, worldId, resetCutoff]
   );
 
   const recentMatches = await dbClient.query(
@@ -2685,6 +2761,8 @@ export async function getManagerProfile(managerId, dbClient = pool, worldId = nu
      JOIN franchises hf ON hf.id = m.home_franchise_id
      JOIN franchises af ON af.id = m.away_franchise_id
      WHERE m.season_id IN (SELECT id FROM seasons WHERE world_id = $2)
+       AND m.status = 'COMPLETED'
+       AND ($3::timestamptz IS NULL OR m.updated_at >= $3)
        AND EXISTS (
        SELECT 1
        FROM manager_team_stints mts
@@ -2695,11 +2773,11 @@ export async function getManagerProfile(managerId, dbClient = pool, worldId = nu
      )
      ORDER BY m.updated_at DESC
      LIMIT 20`,
-    [managerId, worldId]
+    [managerId, worldId, resetCutoff]
   );
 
   return {
-    manager: manager.rows[0],
+    manager: managerRow,
     stints: stints.rows,
     recentMatches: recentMatches.rows
   };
