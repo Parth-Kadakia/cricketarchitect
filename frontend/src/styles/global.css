@@ -10651,14 +10651,14 @@ table.stats-table tr:hover td {
 
 .mc-line--one,
 .mc-point--one {
-  stroke: var(--leaf);
-  fill: var(--leaf);
+  stroke: #5f8f64;
+  fill: #5f8f64;
 }
 
 .mc-line--two,
 .mc-point--two {
-  stroke: var(--accent);
-  fill: var(--accent);
+  stroke: #c97b47;
+  fill: #c97b47;
 }
 
 .mc-chart-legend {
@@ -10682,11 +10682,11 @@ table.stats-table tr:hover td {
 }
 
 .mc-chart-swatch--one {
-  background: var(--leaf);
+  background: #5f8f64;
 }
 
 .mc-chart-swatch--two {
-  background: var(--accent);
+  background: #c97b47;
 }
 
 .mc-manhattan {
@@ -10716,11 +10716,11 @@ table.stats-table tr:hover td {
 }
 
 .mc-manhattan-bar--one {
-  background: linear-gradient(180deg, rgba(111, 138, 87, 0.45), var(--leaf));
+  background: linear-gradient(180deg, rgba(95, 143, 100, 0.35), #5f8f64);
 }
 
 .mc-manhattan-bar--two {
-  background: linear-gradient(180deg, rgba(187, 125, 79, 0.4), var(--accent));
+  background: linear-gradient(180deg, rgba(201, 123, 71, 0.32), #c97b47);
 }
 
 .mc-manhattan-label {
@@ -10840,6 +10840,16 @@ table.stats-table tr:hover td {
   font-size: 0.84rem;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+.mc-partnership-copy {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.mc-partnership-copyline {
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }
 
 .mc-partnership-meta {

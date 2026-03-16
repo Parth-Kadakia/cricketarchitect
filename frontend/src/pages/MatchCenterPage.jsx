@@ -1037,10 +1037,16 @@ function PartnershipsGraph({ rows = [] }) {
     <div className="mc-partnership-list">
       {rows.map((row) => {
         const label = [row.batter_one_name, row.batter_two_name].filter(Boolean).join(' + ') || `Partnership ${row.partnership_no}`;
+        const contribution = [row.batter_one_name ? `${row.batter_one_name} ${row.batter_one_runs || 0}` : null, row.batter_two_name ? `${row.batter_two_name} ${row.batter_two_runs || 0}` : null]
+          .filter(Boolean)
+          .join(' • ');
         return (
           <div key={`part-${row.partnership_no}`} className="mc-partnership-row">
             <div className="mc-partnership-head">
-              <span className="mc-partnership-name">{label}</span>
+              <div className="mc-partnership-copy">
+                <span className="mc-partnership-name">{label}</span>
+                {contribution ? <span className="mc-partnership-copyline">{contribution}</span> : null}
+              </div>
               <span className="mc-partnership-meta">{row.runs} runs • {row.balls} balls</span>
             </div>
             <div className="mc-partnership-bar">
@@ -1507,11 +1513,6 @@ export default function MatchCenterPage() {
 
   const activeShotMap = useMemo(
     () => buildShotMap(eventRows, activeInnings, playerStatsLookup),
-    [eventRows, activeInnings, playerStatsLookup]
-  );
-
-  const activePitchMap = useMemo(
-    () => buildPitchMap(eventRows, activeInnings, playerStatsLookup),
     [eventRows, activeInnings, playerStatsLookup]
   );
 
@@ -2089,14 +2090,27 @@ export default function MatchCenterPage() {
   const activeOverAnalytics = activeInnings === 1 ? overAnalytics.innings1 : overAnalytics.innings2;
   const activeTotalRuns = Number(activeOverAnalytics[activeOverAnalytics.length - 1]?.cumulative || 0);
   const activePartnershipRows = (() => {
+    const fallbackRows = fallbackPartnershipsByInnings[activeInnings] || [];
     const rows = (scorecard?.partnerships || []).filter((row) => Number(row.innings) === Number(activeInnings));
-    return rows.length ? rows : fallbackPartnershipsByInnings[activeInnings] || [];
+    if (!rows.length) {
+      return fallbackRows;
+    }
+    return rows.map((row, index) => {
+      const fallback = fallbackRows.find((candidate) => Number(candidate.partnership_no) === Number(row.partnership_no)) || fallbackRows[index] || {};
+      return {
+        ...fallback,
+        ...row,
+        batter_one_name: row.batter_one_name || fallback.batter_one_name || null,
+        batter_two_name: row.batter_two_name || fallback.batter_two_name || null,
+        batter_one_runs: row.batter_one_runs || fallback.batter_one_runs || 0,
+        batter_two_runs: row.batter_two_runs || fallback.batter_two_runs || 0
+      };
+    });
   })();
   const activeFallOfWickets = (() => {
     const rows = (scorecard?.fall_of_wickets || []).filter((row) => Number(row.innings) === Number(activeInnings));
     return rows.length ? rows : fallbackFallOfWicketsByInnings[activeInnings] || [];
   })();
-  const activeBowlingSpells = buildBowlingSpells(eventRows, activeInnings, activeMeta?.bowlingId, playerLookup, playerStatsLookup);
 
   const matchStatus = String(scorecard?.match?.status || '').toUpperCase();
   const matchCompleted = matchStatus === 'COMPLETED';
@@ -2413,53 +2427,11 @@ export default function MatchCenterPage() {
         <div className="mc-card mc-card--premium">
           <div className="mc-card-head">
             <div>
-              <h3 className="mc-section-title">Pitch Map</h3>
-              <p className="mc-section-subtitle">{activeMeta?.bowlingName?.replace(/\s*\(.*\)/, '') || 'Bowling side'} delivery zones</p>
-            </div>
-          </div>
-          <PitchMapGraphic deliveries={activePitchMap} />
-        </div>
-
-        <div className="mc-card mc-card--premium">
-          <div className="mc-card-head">
-            <div>
               <h3 className="mc-section-title">Partnerships</h3>
               <p className="mc-section-subtitle">Built innings phases and stand values for innings {activeInnings}.</p>
             </div>
           </div>
           <PartnershipsGraph rows={activePartnershipRows} />
-        </div>
-
-        <div className="mc-card mc-card--premium">
-          <div className="mc-card-head">
-            <div>
-              <h3 className="mc-section-title">Bowling Spells</h3>
-              <p className="mc-section-subtitle">Contiguous spells by the fielding side in innings {activeInnings}.</p>
-            </div>
-          </div>
-          {activeBowlingSpells.length ? (
-            <div className="mc-spell-list">
-              {activeBowlingSpells.map((spell) => {
-                const overs = `${Math.floor(Number(spell.balls || 0) / 6)}.${Number(spell.balls || 0) % 6}`;
-                const econ = Number(spell.balls || 0) ? ((Number(spell.runs || 0) / Number(spell.balls || 0)) * 6).toFixed(2) : '0.00';
-                return (
-                  <div key={`${spell.bowlerId}-${spell.startOver}-${spell.endOver}`} className="mc-spell-card">
-                    <div className="mc-spell-top">
-                      <strong>{spell.bowlerName}</strong>
-                      <span>{spell.style}</span>
-                    </div>
-                    <div className="mc-spell-metrics">
-                      <span>Overs {spell.startOver}{spell.endOver !== spell.startOver ? `-${spell.endOver}` : ''}</span>
-                      <span>{overs} • {spell.runs}/{spell.wickets}</span>
-                      <span>Econ {econ}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="sq-empty">No bowling spells logged yet.</div>
-          )}
         </div>
       </div>
 
