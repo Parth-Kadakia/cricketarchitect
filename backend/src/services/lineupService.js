@@ -378,7 +378,11 @@ export async function ensureFranchiseLineup(franchiseId, dbClient = pool, option
     }
   }
 
-  selectedPlayers = orderLineupPlayers(selectedPlayers.slice(0, 11)).map((row) => eligibleById.get(Number(row.id)) || row);
+  // Only auto-sort when the engine is generating or upgrading the lineup.
+  // In 'preserve' mode with a full XI the user's batting order must be kept.
+  const skipReorder = mode === 'preserve' && currentLineup.length >= 11;
+  selectedPlayers = (skipReorder ? selectedPlayers.slice(0, 11) : orderLineupPlayers(selectedPlayers.slice(0, 11)))
+    .map((row) => eligibleById.get(Number(row.id)) || row);
   const nextIds = selectedPlayers.map((row) => Number(row.id)).slice(0, 11);
   const currentIds = currentLineup.map((row) => Number(row.id)).slice(0, 11);
 
