@@ -252,7 +252,7 @@ router.get(
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
            AND ${seasonScopeSql('m.season_id', '$2', competitionMode)}
-           AND p.role = 'BOWLER'
+           AND p.role IN ('BOWLER', 'ALL_ROUNDER')
          ORDER BY pms.bowling_wickets DESC, pms.bowling_runs ASC, pms.bowling_balls ASC
          LIMIT 1`,
         [seasonId, worldId]
@@ -390,7 +390,7 @@ router.get(
          WHERE m.status = 'COMPLETED'
            AND ($1::bigint IS NULL OR m.season_id = $1::bigint)
            AND ${seasonScopeSql('m.season_id', '$3', competitionMode)}
-           AND p.role = 'BOWLER'
+           AND p.role IN ('BOWLER', 'ALL_ROUNDER')
            AND pms.bowling_balls > 0
          ORDER BY pms.bowling_wickets DESC, pms.bowling_runs ASC, pms.bowling_balls ASC
          LIMIT $2`,
@@ -471,10 +471,10 @@ router.get(
       seasonId,
       competitionMode,
       most_runs: topBy(rows, (a, b) => b.runs - a.runs || b.strike_rate - a.strike_rate),
-      most_wickets: topBy(rows.filter((row) => row.role === 'BOWLER' && row.bowling_balls > 0), (a, b) => b.wickets - a.wickets || a.economy - b.economy),
+      most_wickets: topBy(rows.filter((row) => (row.role === 'BOWLER' || row.role === 'ALL_ROUNDER') && row.bowling_balls > 0), (a, b) => b.wickets - a.wickets || a.economy - b.economy),
       best_batting_average: topBy(rows.filter((row) => row.runs >= 200), (a, b) => b.batting_average - a.batting_average || b.runs - a.runs),
       best_strike_rate: topBy(rows.filter((row) => row.runs >= 200), (a, b) => b.strike_rate - a.strike_rate || b.runs - a.runs),
-      best_economy: topBy(rows.filter((row) => row.role === 'BOWLER' && row.bowling_balls >= 120), (a, b) => a.economy - b.economy || b.wickets - a.wickets),
+      best_economy: topBy(rows.filter((row) => (row.role === 'BOWLER' || row.role === 'ALL_ROUNDER') && row.bowling_balls >= 120), (a, b) => a.economy - b.economy || b.wickets - a.wickets),
       most_fifties: topBy(rows.filter((row) => Number(row.fifties || 0) > 0), (a, b) => Number(b.fifties || 0) - Number(a.fifties || 0) || b.runs - a.runs),
       most_hundreds: topBy(rows.filter((row) => Number(row.hundreds || 0) > 0), (a, b) => Number(b.hundreds || 0) - Number(a.hundreds || 0) || b.runs - a.runs),
       most_sixes: topBy(rows.filter((row) => Number(row.sixes || 0) > 0), (a, b) => Number(b.sixes || 0) - Number(a.sixes || 0) || b.runs - a.runs),

@@ -2215,6 +2215,12 @@ async function simulateInnings({
     let fielder = null;
     let eventType = 'RUN';
 
+    // Safety: cap wickets at 10 per innings (all out). If the ball source
+    // somehow returns a wicket after 10 are already down, ignore it.
+    if (ball.wicket && wickets >= 10) {
+      ball = { ...ball, wicket: false, runs: 0 };
+    }
+
     if (ball.wicket) {
       wickets += 1;
       dismissalType = ball.dismissalType || pickDismissalType();

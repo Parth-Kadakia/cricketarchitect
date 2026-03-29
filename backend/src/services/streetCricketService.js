@@ -270,12 +270,20 @@ function toApiPayload({ striker, bowler, context, strikerBalls }) {
 }
 
 function normalizeResponse({ response }) {
-  const runs = Math.max(0, Number(response?.runs || 0));
+  const rawRuns = Math.max(0, Number(response?.runs || 0));
   const isExtra = Boolean(response?.is_extra);
-  const wicket = Boolean(response?.wicket);
-  const batsmanRuns = Math.max(0, Number(response?.batsman_runs ?? runs));
+  let wicket = Boolean(response?.wicket);
+  const rawBatsmanRuns = Math.max(0, Number(response?.batsman_runs ?? rawRuns));
+  // A wicket delivery cannot also score runs for the batsman (except run-outs
+  // where the batters completed a run, but the API doesn't model that reliably).
+  // When the API returns both wicket=true and runs>0 it is a data conflict —
+  // force runs to 0 on a genuine wicket so the scorecard stays consistent.
+  const runs = wicket ? 0 : rawRuns;
+  const batsmanRuns = wicket ? 0 : rawBatsmanRuns;
   const dismissalType = wicket ? mapDismissal(response?.wicket_type || response?.outcome || '') : null;
-  const commentary = String(response?.commentary || '').trim() || null;
+  // Discard API commentary when it conflicts with the resolved outcome — the
+  // engine will regenerate accurate commentary via buildCommentary().
+  const commentary = wicket && rawRuns > 0 ? null : (String(response?.commentary || '').trim() || null);
 
   return {
     runs,
